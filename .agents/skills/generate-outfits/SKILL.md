@@ -1,28 +1,25 @@
 ---
 name: generate-outfits
-description: Curate complete outfits from the local Wardrobe database and generate identity-preserving square modeled photos for every selected look end to end. Use when a user asks Codex for outfit ideas, combinations, looks, styling suggestions, a lookbook, or modeled outfit images based on clothes already imported into this Wardrobe.
+description: Curate outfits and create modeled photos from clothes already imported into this local Wardrobe. Use for wardrobe-based outfit ideas, styling, or lookbooks.
 ---
 
 # Generate Outfits
 
 Create a complete local outfit collection from `data/library.json`: select strong combinations, generate a square modeled image for each, verify every result, and save the finished manifest and images under `data/`.
 
-## Begin with the count
+## Scope and inputs
 
-Ask `How many outfits would you like me to generate?` unless the user already provided a positive count. Do not choose a default silently.
+Ask for the outfit count unless the user already supplied a positive number; do not silently choose one. Honor the requested season, occasions, dress codes, and styling direction; otherwise create a balanced everyday mix.
 
-Also obtain the intended season, occasions, dress codes, or styling direction when the user named them. Otherwise create a balanced everyday mix without blocking on more questions.
-
-Do the workflow end to end after receiving the count. Do not stop after returning suggestions, a manifest, or prompts.
+For a modeled collection, completion means the requested number of reviewed images and the saved manifest, not just suggestions or prompts. If the user explicitly requests suggestions only, stop at that scope.
 
 ## Requirements
 
 - Read and follow the built-in `imagegen` skill before generating images.
-- Require `data/library.json`, enough tops and bottoms for the requested count, and a local identity reference at `data/model-reference.png` or `WARDROBE_MODEL_REFERENCE`.
+- Require `data/library.json` and enough distinct top-and-bottom combinations for the requested count. Modeled photos also require a local identity reference: use `WARDROBE_MODEL_REFERENCE` when set, otherwise `data/model-reference.png`. Resolve relative paths from the repository root.
 - Keep every source garment and identity image local and unchanged.
 - Never add `data/`, the identity reference, garment images, or generated photos to Git.
 - Use only wardrobe items that exist in the current database and whose local assets resolve successfully.
-- Generate exactly the requested number of unique outfits and exactly one accepted modeled photo for each.
 
 ## Parallel work
 
@@ -46,7 +43,7 @@ If the wardrobe cannot support the requested number of genuinely distinct outfit
 
 ## 2. Curate the combinations
 
-Each outfit must contain exactly one top and one bottom, with an optional jacket, shoes, and restrained accessory. Use these principles recovered from the established Wardrobe outfit workflow:
+Each outfit contains exactly one top and one bottom, with an optional jacket, shoes, and restrained accessory. Use these styling principles:
 
 - Favor tonal or analogous color harmony for cohesion.
 - Use complementary contrast selectively and keep one color or garment dominant.
@@ -58,7 +55,7 @@ Each outfit must contain exactly one top and one bottom, with an optional jacket
 
 Cover a useful mix of the user’s requested contexts. Without specific direction, balance casual, smart-casual, warm-weather, layered, dark-tonal, and statement looks as the wardrobe permits.
 
-Build `$WORK/outfits.json` with the final target count:
+Keep working files in a temporary directory outside `data/` (referred to here as `$WORK`). Build `$WORK/outfits.json` with the final target count:
 
 ```json
 {
@@ -82,13 +79,7 @@ Use stable lowercase hyphenated IDs. Reject duplicate garment combinations even 
 
 ## 3. Prepare references and prompts
 
-Create one generation package per outfit:
-
-1. Identity reference
-2. Exact top cutout
-3. Exact bottom cutout
-4. Optional exact outer layer
-5. Optional exact shoes or accessory only when deliberately selected
+For each outfit, order references as identity, exact top, exact bottom, then any selected outer layer, shoes, or accessory. Include every selected garment and no unrelated references.
 
 Read [references/outfit-image-prompt.md](references/outfit-image-prompt.md) and fill its template from the exact outfit record. Inspect every outer-layer reference before choosing the layered clause; never infer a zipper, buttons, placket, opening, or closure.
 
@@ -96,7 +87,7 @@ Rotate restrained warm, natural settings across the collection while keeping one
 
 ## 4. Generate every outfit
 
-Create one square 1:1 modeled PNG per outfit with Imagegen. Save working outputs outside `data/` until they pass review. Use the smallest valid set of references for each call and never omit a selected garment.
+Create one square 1:1 modeled PNG per outfit with Imagegen. Keep working outputs outside `data/` until they pass review.
 
 Generate in bounded batches when the collection is large. Track every outfit as `planned`, `generated`, `accepted`, or `failed`; resume only missing or failed IDs.
 
@@ -118,7 +109,7 @@ Regenerate identity drift, missing or redesigned garments, fake closures or text
 
 ## 6. Deliver locally
 
-After all requested outfits pass:
+After all requested outfits pass, save exactly one accepted image per unique outfit:
 
 1. Create `data/outfit-images/` if needed.
 2. Copy each accepted PNG to `data/outfit-images/OUTFIT-ID.png`.
