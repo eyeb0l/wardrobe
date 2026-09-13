@@ -912,3 +912,6 @@ button { font: inherit; }
     box-shadow: inset 3px 0 0 var(--accent), -18px 0 50px rgba(25, 24, 22, .08);
   }
 }
+
+.modeled-regenerate-button { display: inline-flex; align-items: center; gap: 7px; margin-top: 20px; }
+.modeled-regenerate-button:disabled { opacity: .5; cursor: not-allowed; }

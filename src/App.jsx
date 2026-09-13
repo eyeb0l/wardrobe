@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 
@@ -336,7 +336,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   );
 }
 
-function ItemViewer({ item, onClose, onSave, onDelete }) {
+function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
   const closeButtonRef = useRef(null);
   const imageRef = useRef(null);
   const samplingCanvasRef = useRef(null);
@@ -514,6 +514,9 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
           sampleStatus={sampleStatus}
         />
 
+        <button className="secondary-button modeled-regenerate-button" type="button" disabled={isDirty} title={isDirty ? "Save or cancel your changes first" : undefined} onClick={() => onRegenerate(item)}>
+          <ArrowCounterClockwise size={15} aria-hidden="true" /> {hasModeledImage ? "Regenerate modelled shot" : "Create modelled shot"}
+        </button>
         {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}
 
         <div className="viewer-actions">
@@ -535,6 +538,7 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
 
 export function App() {
   const [items, setItems] = useState([]);
+  const [regenerationRequest, setRegenerationRequest] = useState(null);
   const [activeType, setActiveType] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -644,8 +648,8 @@ export function App() {
         )}
       </main>
 
-      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} />}
-      <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} />
+      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} />}
+      <WardrobeImportFlow regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} />
     </div>
   );
 }

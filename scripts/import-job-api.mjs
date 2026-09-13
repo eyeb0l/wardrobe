@@ -397,6 +397,7 @@ export function wardrobeImportApi(options = {}) {
   let importedFile;
   let libraryAssetDir;
   const running = new Map();
+  const preparingModeled = new Map();
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
   const apiBaseUrl = () => setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, "");
 
@@ -458,6 +459,18 @@ export function wardrobeImportApi(options = {}) {
 
   async function persistImported(job, includeModeled = false) {
     const id = `import-${job.id}`;
+    if (job.modeledReplacement) {
+      const records = await loadImported();
+      const existing = records.find((record) => record.id === id);
+      if (!existing) throw Object.assign(new Error("Wardrobe item no longer exists"), { status: 404 });
+      if (!includeModeled) throw Object.assign(new Error("Only the modeled shot can be updated here"), { status: 409 });
+      const modeledName = `${id}-modeled-${job.generationId}-${job.stages.modeled.attempts}.png`;
+      const source = path.basename(new URL(job.stages.modeled.assetUrl, "http://localhost").pathname);
+      await copyFile(path.join(jobsDir, job.id, source), path.join(libraryAssetDir, modeledName));
+      const record = { ...existing, modeledImage: `${LIBRARY_ASSET_ROOT}/${modeledName}`, modelReferenceId: job.modelReferenceId || "default" };
+      await atomicJson(importedFile, records.map((item) => item.id === id ? record : item));
+      return record;
+    }
     await mkdir(libraryAssetDir, { recursive: true });
     const garmentName = `${id}-garment.png`;
     const garmentSource = job.stages.garment.assetUrl
@@ -580,6 +593,44 @@ export function wardrobeImportApi(options = {}) {
         res.setHeader("Cache-Control", "no-store");
         return res.end(preview);
       }
+      const modeledMatch = url.pathname.match(/^\/api\/import\/wardrobe\/(import-[a-f0-9-]{36})\/modeled$/i);
+      if (modeledMatch && req.method === "POST") {
+        const id = modeledMatch[1];
+        if (!preparingModeled.has(id)) {
+          const task = (async () => {
+            const item = (await loadImported()).find((record) => record.id === id);
+            if (!item) throw Object.assign(new Error("Wardrobe item not found"), { status: 404 });
+            const jobId = id.slice(7);
+            const existing = await loadJob(jobId);
+            if (existing) return publicJob(existing);
+            const dir = path.join(jobsDir, jobId);
+            await mkdir(dir, { recursive: true });
+            try {
+              await copyFile(path.join(libraryAssetDir, `${id}-garment.png`), path.join(dir, "garment.png"));
+              const now = new Date().toISOString();
+              const garmentUrl = `${ASSET_ROOT}/${jobId}/garment.png`;
+              const job = {
+                id: jobId, status: "active", modeledReplacement: true, generationId: randomUUID(),
+                metadata: normalizeMetadata(item), modelReferenceId: item.modelReferenceId || "default",
+                originalAssetUrl: garmentUrl, createdAt: now, updatedAt: now,
+                internal: { originalFile: "garment.png", originalMime: "image/png" },
+                stages: {
+                  crop: { ...stageState(), status: "approved" },
+                  garment: { ...stageState(), status: "approved", assetUrl: garmentUrl },
+                  modeled: { ...stageState(), status: "ready", assetUrl: item.modeledImage || null },
+                },
+              };
+              await saveJob(job);
+              return publicJob(job);
+            } catch (error) {
+              await rm(dir, { recursive: true, force: true });
+              throw error;
+            }
+          })().finally(() => preparingModeled.delete(id));
+          preparingModeled.set(id, task);
+        }
+        return json(res, 200, await preparingModeled.get(id));
+      }
       const wardrobeDeleteMatch = url.pathname.match(/^\/api\/import\/wardrobe\/(import-[a-f0-9-]{36})$/i);
       if (wardrobeDeleteMatch && req.method === "DELETE") {
         const id = wardrobeDeleteMatch[1];
@@ -587,10 +638,9 @@ export function wardrobeImportApi(options = {}) {
         const next = records.filter((record) => record.id !== id);
         if (next.length === records.length) return json(res, 404, { error: "Imported wardrobe item not found" });
         await atomicJson(importedFile, next);
-        await Promise.all([
-          rm(path.join(libraryAssetDir, `${id}-garment.png`), { force: true }),
-          rm(path.join(libraryAssetDir, `${id}-modeled.png`), { force: true }),
-        ]);
+        const assets = await readdir(libraryAssetDir);
+        await Promise.all(assets.filter((name) => name === `${id}-garment.png` || name === `${id}-modeled.png` || (name.startsWith(`${id}-modeled-`) && name.endsWith(".png")))
+          .map((name) => rm(path.join(libraryAssetDir, name), { force: true })));
         return json(res, 200, { deleted: true, id });
       }
       const libraryAssetMatch = url.pathname.match(/^\/api\/import\/library\/([\w.-]+)$/i);
@@ -657,6 +707,7 @@ export function wardrobeImportApi(options = {}) {
       const action = match[2] || "";
       if (!action && req.method === "GET") return json(res, 200, publicJob(job));
       if (!action && req.method === "DELETE") {
+        if (running.has(`${job.id}:modeled`) || running.has(`${job.id}:garment`)) return json(res, 409, { error: "Wait for generation to finish before removing this job." });
         await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
         return json(res, 200, { deleted: true, id: job.id });
       }
@@ -712,6 +763,7 @@ export function wardrobeImportApi(options = {}) {
       if (stageMatch && req.method === "POST") {
         const [, stageName, decision] = stageMatch;
         if (!STAGES.has(stageName)) throw Object.assign(new Error("Invalid stage"), { status: 400 });
+        if (job.modeledReplacement && stageName !== "modeled") return json(res, 409, { error: "Only the modeled shot can be updated here" });
         if (decision === "regenerate") {
           if (stageName === "crop") throw Object.assign(new Error("Upload the image again to create new crops"), { status: 400 });
           const input = await body(req);
@@ -733,6 +785,7 @@ export function wardrobeImportApi(options = {}) {
           const reference = await resolveModelReference(input.modelReferenceId ?? job.modelReferenceId ?? "default");
           job.modelReferenceId = reference.id;
         }
+        let libraryItem;
         const previousStatus = job.stages[stageName].status;
         const previousDecision = job.stages[stageName].decision;
         const previousJobStatus = job.status;
@@ -746,7 +799,7 @@ export function wardrobeImportApi(options = {}) {
         await saveJob(job);
         if (decision === "approve" && stageName !== "crop") {
           try {
-            await persistImported(job, stageName === "modeled");
+            libraryItem = await persistImported(job, stageName === "modeled");
           } catch (error) {
             job.stages[stageName].status = previousStatus;
             job.stages[stageName].decision = previousDecision;
@@ -758,7 +811,7 @@ export function wardrobeImportApi(options = {}) {
         if (decision === "reject") await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
         if (startGarment) void generate(job, "garment");
         if (startModeled) void generate(job, "modeled");
-        const response = publicJob(job);
+        const response = { ...publicJob(job), ...(libraryItem ? { libraryItem } : {}) };
         if (job.status === "complete") await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
         return json(res, 200, response);
       }

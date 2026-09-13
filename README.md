@@ -77,3 +77,5 @@ See [model migration and prompt checks](docs/model-migration.md) for compatibili
 ## License
 
 [MIT](LICENSE)
+
+Open a saved wardrobe item and choose **Regenerate modelled shot** to choose a model reference and optional direction. The existing shot stays in place while a replacement is generated and reviewed; **Approve** replaces it and **Reject** keeps the original. Items without a shot offer **Create modelled shot**.
