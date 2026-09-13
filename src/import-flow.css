@@ -197,6 +197,13 @@
 .import-progress__track { height: 3px; overflow: hidden; background: rgba(36, 35, 31, 0.1); border-radius: 99px; }
 .import-progress__bar { width: var(--import-progress, 0%); height: 100%; background: var(--import-ink); border-radius: inherit; transition: width 500ms var(--import-ease); }
 .import-progress.is-indeterminate .import-progress__bar { width: 36%; animation: import-progress 1.2s var(--import-ease) infinite; }
+.import-upload-list { display: grid; gap: 16px; margin-bottom: 24px; }
+.import-upload { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.import-upload__preview { width: 64px; height: 80px; flex: 0 0 64px; object-fit: contain; border-radius: 10px; background: var(--import-ivory); }
+.import-upload__body { flex: 1; min-width: 0; }
+.import-upload__name { margin: 0 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.import-upload .import-progress { margin: 12px 0 0; }
+.import-upload > .import-spinner { flex-shrink: 0; }
 .import-status { display: flex; align-items: center; gap: 9px; color: var(--import-muted); font-size: 13px; }
 .import-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; }
 .import-status.is-processing::before { animation: import-pulse 1.2s ease-in-out infinite; }
