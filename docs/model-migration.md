@@ -6,7 +6,7 @@ The importer defaults to `gpt-image-2.5-sunburst` for both image stages and `gpt
 
 The existing multipart `/images/edits` requests, PNG output, `high` quality, and 1024×1024 cutout / 1536×1024 modeled dimensions are supported by Sunburst. The app continues generating a solid chroma background and removing it locally. Changing to native transparent generation would also require changing the cleanup stage; it is a separate change. No `input_fidelity` or SDK change is needed for the current request shape.
 
-Luna supports image input and structured output through `/responses`. The strict clothing JSON schema remains unchanged. OpenAI describes Luna as roughly the earlier nano tier, so a newer name alone does not establish better recognition than 5.4 mini. Image quality remains `high`; higher settings are not automatically enabled.
+Luna supports image input and structured output through `/responses`. The importer uses a strict clothing JSON schema, including the Dresses category and a clean-product-photo classification used to offer original-image import. OpenAI describes Luna as roughly the earlier nano tier, so a newer name alone does not establish better recognition than 5.4 mini. Image quality remains `high`; higher settings are not automatically enabled.
 
 Sources checked September 13, 2026: [Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst), [Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna), [image generation](https://developers.openai.com/api/docs/guides/image-generation), [image prompting](https://developers.openai.com/api/docs/guides/image-prompting).
 

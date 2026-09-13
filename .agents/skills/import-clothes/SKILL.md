@@ -79,6 +79,7 @@ Write `$WORK/manifest.json` using this final shape:
 Use only these `part` values:
 
 - `upperbody` — tops
+- `dresses` — dresses, kept as one complete garment
 - `wholebody_up` — jackets and outerwear
 - `lowerbody` — bottoms
 - `accessories_up` — accessories

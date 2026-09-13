@@ -8,7 +8,7 @@ const ASSET_ROOT = "/api/import/assets";
 const LIBRARY_ASSET_ROOT = "/api/import/library";
 const STAGES = new Set(["crop", "garment", "modeled"]);
 const DECISIONS = new Set(["approve", "reject"]);
-const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
+const PARTS = new Set(["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const DEFAULT_IMAGE_MODEL = "gpt-image-2.5-sunburst";
 const DEFAULT_VISION_MODEL = "gpt-5.6-luna";
@@ -17,7 +17,9 @@ const ANALYSIS_PROMPT = `Identify up to eight distinct visible wearable items fo
 
 Return one record per item. Treat a matching pair of shoes or gloves as one item with a box containing both visible pieces. Do not split sleeves, collars, pockets, patterns, or graphics into separate items. For layered clothing, report each independently identifiable garment once, even when their boxes overlap. If more than eight items are visible, choose the eight largest by visible area. Order records from top to bottom, then left to right.
 
-Category ids: upperbody = tops, shirts, knitwear, and dresses; wholebody_up = jackets, coats, and outerwear; lowerbody = trousers, shorts, and skirts; accessories_up = wearable accessories including bags, belts, hats, and jewelry; shoes = footwear. A dress is one item, not a separate top and bottom.
+Category ids: upperbody = tops, shirts, and knitwear; dresses = dresses; wholebody_up = jackets, coats, and outerwear; lowerbody = trousers, shorts, and skirts; accessories_up = wearable accessories including bags, belts, hats, and jewelry; shoes = footwear. A dress is one item, not a separate top and bottom.
+
+Set isCleanProductShot to true only when the entire image is a clean product photograph of exactly one complete isolated item (or one matching pair) against a plain white or genuinely transparent background. It must contain no wearer, visible body parts, mannequin, hanger, other products, props, added text, collage, or scene. Preserve text that is part of the garment itself. The whole item must be in frame. A photo of someone wearing one item is not a clean product shot. If uncertain, return false.
 
 For each item, supply a concise descriptive name, an estimated primary six-digit hex color, secondaryColor as a genuinely distinct color or null (not a shadow or highlight), and 1-4 short lowercase tags for visible details. Do not guess fabric composition, brands, illegible text, or hidden closures.
 
@@ -101,6 +103,29 @@ function normalizeBoundingBox(value = {}) {
 
 async function normalizeImage(bytes) {
   return sharp(bytes).rotate().toColorspace("srgb").png().toBuffer();
+}
+
+// Back up the semantic classification with a conservative border check. This
+// is only a suggestion; selecting the original still requires user review.
+export async function hasCleanProductBackground(bytes) {
+  const { data, info } = await sharp(bytes).resize({ width: 160, height: 160, fit: "inside", withoutEnlargement: false }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let borderPixels = 0;
+  let backgroundPixels = 0;
+  let foregroundPixels = 0;
+  const border = Math.max(1, Math.round(Math.min(info.width, info.height) * 0.03));
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const offset = (y * info.width + x) * 4;
+      const [r, g, b, a] = data.subarray(offset, offset + 4);
+      const background = a <= 8 || (r >= 242 && g >= 242 && b >= 242 && Math.max(r, g, b) - Math.min(r, g, b) <= 10);
+      if (!background && a > 8) foregroundPixels += 1;
+      if (x < border || y < border || x >= info.width - border || y >= info.height - border) {
+        borderPixels += 1;
+        if (background) backgroundPixels += 1;
+      }
+    }
+  }
+  return backgroundPixels / borderPixels >= 0.98 && foregroundPixels / (info.width * info.height) >= 0.005;
 }
 
 async function cropDetectedItem(bytes, boundingBox) {
@@ -353,7 +378,7 @@ async function openAIAnalyze({ key, baseUrl, model, image, mime }) {
         { type: "input_text", text: ANALYSIS_PROMPT },
         { type: "input_image", image_url: `data:${mime};base64,${image.toString("base64")}` },
       ] }],
-      text: { format: { type: "json_schema", name: "wardrobe_items", strict: true, schema: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 0, maxItems: 8, items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, part: { type: "string", enum: ["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"] }, color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, secondaryColor: { anyOf: [{ type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, { type: "null" }] }, tags: { type: "array", items: { type: "string" }, maxItems: 4 }, boundingBox: { type: "object", additionalProperties: false, properties: { x: { type: "integer", minimum: 0, maximum: 999 }, y: { type: "integer", minimum: 0, maximum: 999 }, width: { type: "integer", minimum: 1, maximum: 1000 }, height: { type: "integer", minimum: 1, maximum: 1000 } }, required: ["x", "y", "width", "height"] } }, required: ["name", "part", "color", "secondaryColor", "tags", "boundingBox"] } } }, required: ["items"] } } },
+      text: { format: { type: "json_schema", name: "wardrobe_items", strict: true, schema: { type: "object", additionalProperties: false, properties: { isCleanProductShot: { type: "boolean" }, items: { type: "array", minItems: 0, maxItems: 8, items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, part: { type: "string", enum: [...PARTS] }, color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, secondaryColor: { anyOf: [{ type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, { type: "null" }] }, tags: { type: "array", items: { type: "string" }, maxItems: 4 }, boundingBox: { type: "object", additionalProperties: false, properties: { x: { type: "integer", minimum: 0, maximum: 999 }, y: { type: "integer", minimum: 0, maximum: 999 }, width: { type: "integer", minimum: 1, maximum: 1000 }, height: { type: "integer", minimum: 1, maximum: 1000 } }, required: ["x", "y", "width", "height"] } }, required: ["name", "part", "color", "secondaryColor", "tags", "boundingBox"] } } }, required: ["items", "isCleanProductShot"] } } },
     }),
   });
   const result = await response.json().catch(() => ({}));
@@ -362,7 +387,7 @@ async function openAIAnalyze({ key, baseUrl, model, image, mime }) {
   if (!outputText) throw new Error("OpenAI analysis returned no structured result");
   const parsed = JSON.parse(outputText);
   if (!Array.isArray(parsed.items)) throw new Error("OpenAI analysis returned an invalid clothing list");
-  return parsed.items;
+  return { items: parsed.items, isCleanProductShot: parsed.isCleanProductShot === true };
 }
 
 export function wardrobeImportApi(options = {}) {
@@ -493,6 +518,7 @@ export function wardrobeImportApi(options = {}) {
         await writeFile(output, bytes);
         const fresh = await loadJob(current.id);
         fresh.stages[stageName].status = "review";
+        fresh.stages[stageName].source = "generated";
         fresh.stages[stageName].assetUrl = `${ASSET_ROOT}/${fresh.id}/${path.basename(output)}`;
         fresh.stages[stageName].failedAssetUrl = null;
         fresh.stages[stageName].cleanupPreviewUrl = null;
@@ -564,7 +590,9 @@ export function wardrobeImportApi(options = {}) {
         const image = decodeImage(input);
         const normalizedImage = await normalizeImage(image.data);
         const key = setting("OPENAI_API_KEY");
-        const detected = (await openAIAnalyze({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: normalizedImage, mime: "image/png" })).map(normalizeMetadata);
+        const analysis = await openAIAnalyze({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: normalizedImage, mime: "image/png" });
+        const detected = analysis.items.map(normalizeMetadata);
+        const canUseOriginal = detected.length === 1 && analysis.isCleanProductShot && await hasCleanProductBackground(normalizedImage);
         const jobs = [];
         for (const metadata of detected) {
           const id = randomUUID();
@@ -576,7 +604,7 @@ export function wardrobeImportApi(options = {}) {
           await writeFile(path.join(dir, cropFile), croppedImage);
           const now = new Date().toISOString();
           const cropStage = { ...stageState(), status: "review", assetUrl: `${ASSET_ROOT}/${id}/${cropFile}`, updatedAt: now };
-          const job = { id, status: "active", metadata, stages: { crop: cropStage, garment: stageState(), modeled: stageState() }, createdAt: now, updatedAt: now, internal: { originalFile, cropFile, originalMime: "image/png" } };
+          const job = { id, status: "active", metadata, canUseOriginal, stages: { crop: cropStage, garment: stageState(), modeled: stageState() }, createdAt: now, updatedAt: now, internal: { originalFile, cropFile, originalMime: "image/png" } };
           job.originalAssetUrl = `${ASSET_ROOT}/${id}/${originalFile}`;
           await saveJob(job); jobs.push(publicJob(job));
         }
@@ -604,6 +632,19 @@ export function wardrobeImportApi(options = {}) {
         const input = await body(req);
         if (!input.metadata || typeof input.metadata !== "object" || Array.isArray(input.metadata)) throw Object.assign(new Error("metadata must be an object"), { status: 400 });
         job.metadata = normalizeMetadata({ ...job.metadata, ...input.metadata }); await saveJob(job);
+        return json(res, 200, publicJob(job));
+      }
+      if (action === "stages/crop/use-original" && req.method === "POST") {
+        if (!job.canUseOriginal || job.stages.crop?.status !== "review" || job.stages.garment.status !== "pending") {
+          throw Object.assign(new Error("The original image is not available for this review stage"), { status: 409 });
+        }
+        const dir = path.join(jobsDir, job.id);
+        const filename = "garment-original.png";
+        await copyFile(path.join(dir, job.internal.originalFile), path.join(dir, filename));
+        const now = new Date().toISOString();
+        Object.assign(job.stages.crop, { status: "approved", decision: "approved", updatedAt: now });
+        Object.assign(job.stages.garment, { status: "review", source: "original", assetUrl: `${ASSET_ROOT}/${job.id}/${filename}`, updatedAt: now });
+        await saveJob(job);
         return json(res, 200, publicJob(job));
       }
       const cleanupAction = action.match(/^stages\/garment\/(cleanup-preview|cleanup-accept)$/);

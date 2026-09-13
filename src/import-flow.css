@@ -8,6 +8,14 @@
   --import-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.import-image-choice { min-width: 0; margin: 0; padding: 0; border: 0; }
+.import-image-choice legend { margin-bottom: 14px; font-size: 14px; font-weight: 500; }
+.import-image-choice label { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; cursor: pointer; }
+.import-image-choice label + label { border-top: 1px solid var(--import-line); }
+.import-image-choice input[type="radio"] { flex: 0 0 16px; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--import-ink); }
+.import-image-choice strong { display: block; font-size: 13px; font-weight: 500; }
+.import-image-choice small { display: block; margin-top: 4px; color: var(--import-muted); font-size: 12px; line-height: 1.5; }
+
 /* Full-page drag and paste target. */
 .import-drop-overlay {
   position: fixed;

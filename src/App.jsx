@@ -9,6 +9,7 @@ const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
 const TYPES = [
   { id: "all", label: "All" },
   { id: "upperbody", label: "Tops", singular: "Top" },
+  { id: "dresses", label: "Dresses", singular: "Dress" },
   { id: "wholebody_up", label: "Jackets", singular: "Jacket" },
   { id: "lowerbody", label: "Bottoms", singular: "Bottom" },
   { id: "accessories_up", label: "Accessories", singular: "Accessory" },

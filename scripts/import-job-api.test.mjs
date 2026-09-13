@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import sharp from "sharp";
-import { chooseChromaKey, wardrobeImportApi } from "./import-job-api.mjs";
+import { chooseChromaKey, hasCleanProductBackground, wardrobeImportApi } from "./import-job-api.mjs";
 
 test("chroma selection protects either recorded garment color", () => {
   for (const [primary, secondary, expected] of [
@@ -34,13 +34,14 @@ async function harness(t, env = {}) {
   await writeFile(path.join(root, "identity.png"), identity);
   const requests = [];
   let analysisResult = [{ name: "Grey top", part: "upperbody", color: "#777777", secondaryColor: null, tags: ["short sleeve"], boundingBox: { x: 100, y: 100, width: 800, height: 800 } }];
+  let isCleanProductShot = false;
   t.mock.method(globalThis, "fetch", async (url, options) => {
     assert.ok(url.startsWith("https://wardrobe-test.invalid/"));
     assert.equal(options.headers.Authorization, "Bearer test-key");
     if (url.endsWith("/responses")) {
       const request = JSON.parse(options.body);
       requests.push({ type: "analysis", request });
-      return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ items: analysisResult }) }] }] });
+      return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ items: analysisResult, isCleanProductShot }) }] }] });
     }
     assert.ok(url.endsWith("/images/edits"));
     const form = options.body;
@@ -61,13 +62,14 @@ async function harness(t, env = {}) {
   await plugin.configResolved({ root });
   let handler;
   plugin.configureServer({ middlewares: { use(value) { handler = value; } } });
-  async function request(method, url, payload) {
+  async function request(method, url, payload, expectedStatus) {
     const req = Readable.from(payload ? [Buffer.from(JSON.stringify(payload))] : []);
     Object.assign(req, { method, url });
     let result;
     const res = { statusCode: 200, setHeader() {}, end(value) { result = JSON.parse(value); } };
     await handler(req, res, () => assert.fail("Unexpected middleware fallthrough"));
-    assert.ok(res.statusCode < 300, JSON.stringify(result));
+    if (expectedStatus) assert.equal(res.statusCode, expectedStatus, JSON.stringify(result));
+    else assert.ok(res.statusCode < 300, JSON.stringify(result));
     return result;
   }
   async function waitForStage(id, stage) {
@@ -79,8 +81,87 @@ async function harness(t, env = {}) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, request, waitForStage, setAnalysis(value) { analysisResult = value; } };
+  return { root, source, identity, requests, request, waitForStage, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
+
+const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
+
+async function productImage(transparent = false) {
+  const item = await sharp({ create: { width: 48, height: 72, channels: 4, background: "#123456" } }).png().toBuffer();
+  return sharp({ create: { width: 96, height: 128, channels: 4, background: { r: 255, g: 255, b: 255, alpha: transparent ? 0 : 1 } } }).composite([{ input: item, left: 24, top: 28 }]).png().toBuffer();
+}
+
+test("background checks accept white/alpha product borders but reject blank or ordinary images", async () => {
+  for (const transparent of [false, true]) assert.equal(await hasCleanProductBackground(await productImage(transparent)), true);
+  for (const background of ["#ffffff", "#777777", { r: 0, g: 0, b: 0, alpha: 0 }]) {
+    const blank = await sharp({ create: { width: 64, height: 64, channels: 4, background } }).png().toBuffer();
+    assert.equal(await hasCleanProductBackground(blank), false);
+  }
+});
+
+for (const transparent of [false, true]) {
+  test(`original ${transparent ? "transparent" : "white"} dress skips extraction and survives review/restart unchanged`, async (t) => {
+    const h = await harness(t);
+    const source = await productImage(transparent);
+    h.setAnalysis([dress], true);
+    const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: source.toString("base64") });
+    assert.equal(job.canUseOriginal, true);
+    assert.equal(job.metadata.part, "dresses");
+    const schema = h.requests[0].request.text.format.schema;
+    assert.ok(schema.required.includes("isCleanProductShot"));
+    assert.ok(schema.properties.items.items.properties.part.enum.includes("dresses"));
+    const selected = await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`);
+    assert.equal(h.requests.length, 1, "no image model called when selecting original");
+    assert.equal(selected.stages.garment.status, "review");
+    assert.equal(selected.stages.garment.source, "original");
+    assert.equal(selected.stages.garment.attempts, 0);
+    await h.restart();
+    const restored = await h.request("GET", `/api/import/jobs/${job.id}`);
+    assert.equal(restored.stages.garment.source, "original");
+    assert.equal(h.requests.length, 1, "restart must not trigger extraction or modeled generation before approval");
+    await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`, undefined, 409);
+    await h.request("PATCH", `/api/import/jobs/${job.id}/metadata`, { metadata: { name: "Edited dress", part: "dresses" } });
+    await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`);
+    await h.waitForStage(job.id, "modeled");
+    const edits = h.requests.filter((entry) => entry.type === "edit");
+    assert.equal(edits.length, 1);
+    assert.equal(edits[0].images.length, 2, "only modeled generation is called");
+    const originalRaw = await sharp(source).ensureAlpha().raw().toBuffer();
+    assert.deepEqual(await sharp(edits[0].images[1].data).ensureAlpha().raw().toBuffer(), originalRaw);
+    const records = await h.request("GET", "/api/import/wardrobe");
+    assert.equal(records[0].part, "dresses");
+    assert.equal(records[0].name, "Edited dress");
+    const saved = await readFile(path.join(h.root, "data", "imported", `import-${job.id}-garment.png`));
+    assert.deepEqual(await sharp(saved).ensureAlpha().raw().toBuffer(), originalRaw, "original dimensions, colors, white background and alpha remain unchanged");
+  });
+}
+
+test("clean product shots can still choose extraction", async (t) => {
+  const h = await harness(t);
+  h.setAnalysis([dress], true);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage()).toString("base64") });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  const extracted = await h.waitForStage(job.id, "garment");
+  assert.equal(extracted.stages.garment.source, "generated");
+  assert.equal(h.requests.filter((entry) => entry.type === "edit").length, 1);
+});
+
+test("ordinary photos, multiple items and uncertain classification cannot bypass extraction", async (t) => {
+  const h = await harness(t);
+  for (const scenario of [
+    { items: [dress], clean: false, source: await productImage() },
+    { items: [dress, { ...dress, name: "Second dress" }], clean: true, source: await productImage() },
+    { items: [dress], clean: true, source: h.source },
+  ]) {
+    h.setAnalysis(scenario.items, scenario.clean);
+    const { jobs } = await h.request("POST", "/api/import/jobs", { imageBase64: scenario.source.toString("base64"), canUseOriginal: true });
+    for (const job of jobs) {
+      assert.equal(job.canUseOriginal, false);
+      await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`, undefined, 409);
+    }
+  }
+  assert.ok(h.requests.every((entry) => entry.type === "analysis"));
+});
 
 test("default models complete the import and review flow with ordered PNG references", async (t) => {
   const h = await harness(t);
