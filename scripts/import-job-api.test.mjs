@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -66,7 +66,7 @@ async function harness(t, env = {}) {
     const req = Readable.from(payload ? [Buffer.from(JSON.stringify(payload))] : []);
     Object.assign(req, { method, url });
     let result;
-    const res = { statusCode: 200, setHeader() {}, end(value) { result = JSON.parse(value); } };
+    const res = { statusCode: 200, setHeader() {}, end(value) { result = Buffer.isBuffer(value) ? value : JSON.parse(value); } };
     await handler(req, res, () => assert.fail("Unexpected middleware fallthrough"));
     if (expectedStatus) assert.equal(res.statusCode, expectedStatus, JSON.stringify(result));
     else assert.ok(res.statusCode < 300, JSON.stringify(result));
@@ -219,4 +219,60 @@ test("empty vision results create no jobs or image requests", async (t) => {
   const created = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
   assert.deepEqual(created, { jobs: [], noClothingDetected: true });
   assert.equal(h.requests.length, 1);
+});
+
+test("reference discovery keeps the configured default and finds numbered PNGs in numeric order", async (t) => {
+  const h = await harness(t);
+  for (const name of ["model-reference-10.png", "model-reference-3.png", "model-reference-2.png", "model-reference-1.png", "unrelated.png"]) {
+    await writeFile(path.join(h.root, "data", name), h.identity);
+  }
+  await mkdir(path.join(h.root, "data", "model-reference-4.png"));
+  await symlink(path.join(h.root, "identity.png"), path.join(h.root, "data", "model-reference-5.png"));
+  const config = await h.request("GET", "/api/import/config");
+  assert.equal(config.ready, true);
+  assert.deepEqual(config.modelReferences.map((reference) => reference.id), ["default", "model-reference-2", "model-reference-3", "model-reference-10"]);
+  assert.ok(config.modelReferences.every((reference) => !Object.hasOwn(reference, "path")));
+  const preview = await h.request("GET", "/api/import/model-references/model-reference-2");
+  assert.equal((await sharp(preview).metadata()).format, "png");
+  await h.request("GET", "/api/import/model-references/model-reference-99", undefined, 400);
+  await writeFile(path.join(h.root, "data", "model-reference-6.png"), h.identity);
+  const refreshed = await h.request("GET", "/api/import/config");
+  assert.ok(refreshed.modelReferences.some((reference) => reference.id === "model-reference-6"), "new photos appear without a server restart");
+});
+
+test("selected reference persists and is used for modeling and regeneration", async (t) => {
+  const h = await harness(t);
+  const alternate = await sharp({ create: { width: 80, height: 100, channels: 3, background: "#224466" } }).png().toBuffer();
+  const alternatePath = path.join(h.root, "data", "model-reference-2.png");
+  await writeFile(alternatePath, alternate);
+  h.setAnalysis([dress], true);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage()).toString("base64") });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`);
+  const approve = `/api/import/jobs/${job.id}/stages/garment/approve`;
+  for (const modelReferenceId of ["../../identity.png", "model-reference-99", 2]) {
+    await h.request("POST", approve, { modelReferenceId }, 400);
+  }
+  assert.equal(h.requests.length, 1, "invalid references cannot start image generation");
+  await h.request("POST", approve, { modelReferenceId: "model-reference-2" });
+  await h.waitForStage(job.id, "modeled");
+  let edits = h.requests.filter((entry) => entry.type === "edit");
+  assert.deepEqual(await sharp(edits[0].images[0].data).raw().toBuffer(), await sharp(alternate).raw().toBuffer());
+  await h.restart();
+  const restored = await h.request("GET", `/api/import/jobs/${job.id}`);
+  assert.equal(restored.modelReferenceId, "model-reference-2");
+  assert.equal((await h.request("GET", "/api/import/wardrobe"))[0].modelReferenceId, "model-reference-2");
+  // Retry without a new selection retains the chosen photo.
+  const regenerate = `/api/import/jobs/${job.id}/stages/modeled/regenerate`;
+  await h.request("POST", regenerate, { prompt: "Use neutral daylight" });
+  await h.waitForStage(job.id, "modeled");
+  edits = h.requests.filter((entry) => entry.type === "edit");
+  assert.deepEqual(await sharp(edits[1].images[0].data).raw().toBuffer(), await sharp(alternate).raw().toBuffer());
+  // Removing it never silently switches the person/reference back to default.
+  await rm(alternatePath);
+  await h.request("POST", regenerate, {}, 400);
+  await h.request("POST", regenerate, { modelReferenceId: "default" });
+  await h.waitForStage(job.id, "modeled");
+  edits = h.requests.filter((entry) => entry.type === "edit");
+  assert.deepEqual(await sharp(edits[2].images[0].data).raw().toBuffer(), await sharp(h.identity).raw().toBuffer());
+  assert.equal((await h.request("GET", `/api/import/jobs/${job.id}`)).modelReferenceId, "default");
 });

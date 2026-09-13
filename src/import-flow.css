@@ -16,6 +16,16 @@
 .import-image-choice strong { display: block; font-size: 13px; font-weight: 500; }
 .import-image-choice small { display: block; margin-top: 4px; color: var(--import-muted); font-size: 12px; line-height: 1.5; }
 
+.import-reference-picker { min-width: 0; margin: 8px 0; padding: 0; border: 0; }
+.import-reference-picker legend { margin-bottom: 10px; font-size: 13px; }
+.import-reference-options { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px; }
+.import-reference-options label { flex: 0 0 96px; padding: 5px; border: 1px solid var(--import-line); border-radius: 8px; cursor: pointer; }
+.import-reference-options label.is-selected { border-color: var(--import-ink); background: rgba(36, 35, 31, 0.04); }
+.import-reference-options img { display: block; width: 84px; height: 88px; object-fit: contain; background: var(--import-ivory); border-radius: 4px; }
+.import-reference-options span { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 11px; white-space: nowrap; }
+.import-reference-options input[type="radio"] { width: 12px; height: 12px; margin: 0; accent-color: var(--import-ink); }
+.import-reference-refresh { margin-top: 4px; padding: 2px 0; border: 0; background: none; color: var(--import-muted); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+
 /* Full-page drag and paste target. */
 .import-drop-overlay {
   position: fixed;

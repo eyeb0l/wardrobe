@@ -392,6 +392,7 @@ async function openAIAnalyze({ key, baseUrl, model, image, mime }) {
 
 export function wardrobeImportApi(options = {}) {
   let root;
+  let dataDir;
   let jobsDir;
   let importedFile;
   let libraryAssetDir;
@@ -399,21 +400,43 @@ export function wardrobeImportApi(options = {}) {
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
   const apiBaseUrl = () => setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, "");
 
+  async function modelReferences() {
+    const references = [];
+    const defaultPath = path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"));
+    try {
+      if ((await stat(defaultPath)).isFile()) references.push({ id: "default", label: "Default", path: defaultPath });
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+    const entries = await readdir(dataDir, { withFileTypes: true }).catch((error) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+    const extras = entries.flatMap((entry) => {
+      const match = entry.name.match(/^model-reference-([1-9]\d*)\.png$/);
+      const number = Number(match?.[1]);
+      const file = path.join(dataDir, entry.name);
+      if (!entry.isFile() || !Number.isSafeInteger(number) || number < 2 || file === defaultPath) return [];
+      return [{ id: `model-reference-${number}`, label: `Reference ${number}`, path: file, number }];
+    }).sort((a, b) => a.number - b.number);
+    return [...references, ...extras];
+  }
+
+  async function resolveModelReference(id = "default") {
+    const reference = (await modelReferences()).find((item) => item.id === id);
+    if (!reference) throw Object.assign(new Error("Selected model reference is unavailable. Refresh the reference photos and choose another."), { status: 400 });
+    return reference;
+  }
+
   async function setupStatus() {
     const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
     const referenceSetting = setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png");
-    const referencePath = path.resolve(root, referenceSetting);
-    let hasModelReference = false;
-    try {
-      hasModelReference = (await stat(referencePath)).isFile();
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
+    const references = await modelReferences();
+    const hasModelReference = references.some((item) => item.id === "default");
     return {
       ready: hasApiKey && hasModelReference,
       hasApiKey,
       hasModelReference,
       modelReference: referenceSetting,
+      modelReferences: references.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })),
     };
   }
 
@@ -464,6 +487,7 @@ export function wardrobeImportApi(options = {}) {
       image: `${LIBRARY_ASSET_ROOT}/${garmentName}`,
       thumbnail: `${LIBRARY_ASSET_ROOT}/${garmentName}`,
       modeledImage: modeledImage || existing?.modeledImage || null,
+      modelReferenceId: job.modelReferenceId || "default",
       importJobId: job.id,
     };
     const next = [...records.filter((item) => item.id !== id), record];
@@ -503,12 +527,12 @@ export function wardrobeImportApi(options = {}) {
             : `garment-${current.stages.garment.attempts}.png`;
           const garmentFile = path.join(dir, garmentName);
           const garment = { data: await readFile(garmentFile), mime: "image/png", name: "garment.png" };
-          const modelPath = path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"));
+          const { path: modelPath } = await resolveModelReference(current.modelReferenceId || "default");
           let modelData;
           try {
             modelData = await readFile(modelPath);
           } catch (error) {
-            if (error.code === "ENOENT") throw new Error(`Model reference not found at ${modelPath}. Set WARDROBE_MODEL_REFERENCE or add data/model-reference.png.`);
+            if (error.code === "ENOENT") throw new Error("Selected model reference was removed. Choose another reference and retry.");
             throw error;
           }
           const model = { data: modelData, mime: "image/png", name: "model.png" };
@@ -547,6 +571,14 @@ export function wardrobeImportApi(options = {}) {
       }
       if (url.pathname === "/api/import/config" && req.method === "GET") {
         return json(res, 200, await setupStatus());
+      }
+      const referenceMatch = url.pathname.match(/^\/api\/import\/model-references\/(default|model-reference-[1-9]\d*)$/);
+      if (referenceMatch && req.method === "GET") {
+        const reference = await resolveModelReference(referenceMatch[1]);
+        const preview = await sharp(await readFile(reference.path)).rotate().resize({ width: 240, height: 300, fit: "inside", withoutEnlargement: true }).png().toBuffer();
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "no-store");
+        return res.end(preview);
       }
       const wardrobeDeleteMatch = url.pathname.match(/^\/api\/import\/wardrobe\/(import-[a-f0-9-]{36})$/i);
       if (wardrobeDeleteMatch && req.method === "DELETE") {
@@ -683,6 +715,11 @@ export function wardrobeImportApi(options = {}) {
         if (decision === "regenerate") {
           if (stageName === "crop") throw Object.assign(new Error("Upload the image again to create new crops"), { status: 400 });
           const input = await body(req);
+          if (stageName === "modeled") {
+            if (running.has(`${job.id}:modeled`) || ["queued", "processing"].includes(job.stages.modeled.status)) throw Object.assign(new Error("Modeled generation is already running"), { status: 409 });
+            const reference = await resolveModelReference(input.modelReferenceId ?? job.modelReferenceId ?? "default");
+            job.modelReferenceId = reference.id;
+          }
           job.stages[stageName].prompt = typeof input.prompt === "string" ? input.prompt.trim().slice(0, 1200) || null : null;
           job.stages[stageName].status = "queued";
           job.stages[stageName].decision = null;
@@ -691,6 +728,11 @@ export function wardrobeImportApi(options = {}) {
           return json(res, 202, publicJob(job));
         }
         if (!DECISIONS.has(decision) || job.stages[stageName].status !== "review") throw Object.assign(new Error("Stage is not ready for review"), { status: 409 });
+        if (stageName === "garment" && decision === "approve" && job.stages.modeled.status === "pending") {
+          const input = await body(req);
+          const reference = await resolveModelReference(input.modelReferenceId ?? job.modelReferenceId ?? "default");
+          job.modelReferenceId = reference.id;
+        }
         const previousStatus = job.stages[stageName].status;
         const previousDecision = job.stages[stageName].decision;
         const previousJobStatus = job.status;
@@ -732,7 +774,7 @@ export function wardrobeImportApi(options = {}) {
     apply: "serve",
     async configResolved(config) {
       root = config.root;
-      const dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
+      dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
       jobsDir = path.join(dataDir, "jobs");
       importedFile = path.join(dataDir, "library.json");
       libraryAssetDir = path.join(dataDir, "imported");
