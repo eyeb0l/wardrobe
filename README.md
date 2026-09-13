@@ -60,11 +60,15 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 | Variable | Default |
 | --- | --- |
 | `OPENAI_API_KEY` | Required |
-| `OPENAI_VISION_MODEL` | `gpt-5.4-mini` |
-| `OPENAI_IMAGE_MODEL` | `gpt-image-2` |
+| `OPENAI_VISION_MODEL` | `gpt-5.6-luna` |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst` |
 | `OPENAI_IMAGE_QUALITY` | `high` |
 | `WARDROBE_MODEL_REFERENCE` | `data/model-reference.png` |
 | `WARDROBE_DATA_DIR` | `data` |
+
+The web importer uses these values from `.env` when Vite starts; restart after changing them. `OPENAI_GARMENT_MODEL` and `OPENAI_MODELED_MODEL` can override the image model for each stage. The bundled Codex skills use Codex's Imagegen tool, whose model is selected by Codex rather than this app's `.env`.
+
+See [model migration and prompt checks](docs/model-migration.md) for compatibility notes and a repeatable visual comparison. Run `npm test` for local API contract tests and `npm run check` for the production build.
 
 ## License
 
