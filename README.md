@@ -53,6 +53,8 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 - Extracts clean product cutouts with the OpenAI Images API
 - Offers **Use original image** for a likely single-item product shot on white or transparent background; this skips generative extraction and preserves the uploaded image for review. **Extract garment** remains available and is the default for ordinary photos.
 - Generates an optional modeled editorial preview
+- Shows saved outfit collections with their styling notes and exact wardrobe pieces
+- Curates and generates new outfits through the configured API, with progress, retries, and review before saving
 - Keeps originals, jobs, generated images, and the JSON database local in `data/`
 - Supports drag, drop, paste, editing, review, regeneration, and approval
 - Filters Tops, Dresses, Jackets, Bottoms, Accessories, and Shoes. Existing dresses filed under Tops can be moved to Dresses in the item editor.
@@ -68,11 +70,21 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 | `WARDROBE_MODEL_REFERENCE` | `data/model-reference.png` |
 | `WARDROBE_DATA_DIR` | `data` |
 
-The web importer uses these values from `.env` when Vite starts; restart after changing them. `OPENAI_GARMENT_MODEL` and `OPENAI_MODELED_MODEL` can override the image model for each stage. The bundled Codex skills use Codex's Imagegen tool, whose model is selected by Codex rather than this app's `.env`.
+The web importer and outfit generator use these values from `.env` when Vite starts; restart after changing them. `OPENAI_GARMENT_MODEL` and `OPENAI_MODELED_MODEL` can override the image model for each stage. Outfit planning uses `OPENAI_VISION_MODEL`; outfit photographs use `OPENAI_MODELED_MODEL`, falling back to `OPENAI_IMAGE_MODEL`. `OPENAI_API_BASE_URL` optionally overrides the API base URL (default `https://api.openai.com/v1`). Keys remain on the server. The bundled Codex skills use Codex's Imagegen tool, whose model is selected by Codex rather than this app's `.env`.
 
 To offer additional model reference photos, add `data/model-reference-2.png`, `data/model-reference-3.png`, and so on (or place them in `WARDROBE_DATA_DIR` if configured). The photo set by `WARDROBE_MODEL_REFERENCE` stays the default. Choose a thumbnail in the importer's **Model reference** picker before approving a garment or regenerating its modeled image. One reference is used per generation; the choice is saved with the import and reused on retries. Use **Refresh photos** to discover newly added files without restarting. Photos stay local and must not be committed to Git.
 
 See [model migration and prompt checks](docs/model-migration.md) for compatibility notes and a repeatable visual comparison. Run `npm test` for local API contract tests and `npm run check` for the production build.
+
+## Outfit collections
+
+Open **Outfits** or visit `/outfits` to browse the saved collection. Open a look to see its full photograph, styling notes, and the wardrobe pieces it uses. Collections written by the Codex outfit skill are loaded from `data/outfits.json`; their images are served from `data/outfit-images/`.
+
+Choose **Generate outfits**, enter a count from 1 to 12, add optional styling direction, and choose a model reference. Planning uses the actual garment images and metadata, then creates one square modeled photograph per combination. Each outfit contains one top and one bottom, with optional outerwear, shoes, and an accessory. New combinations avoid the existing collection and active candidates.
+
+Generation progress and review candidates persist in `data/outfit-jobs/`. Review each image against its wardrobe references, then accept it into the collection, reject it, or retry with a specific correction. Accepting adds the new look while preserving existing outfits. An interrupted request becomes a retryable failure on server restart; restarting never automatically repeats paid API calls. Use the retry control to continue failed work.
+
+All collection data, source images, references, and generated photographs stay in the ignored local `data/` directory. Generating sends the selected reference and garment images to the configured API. The gallery works without an API key; generation needs a configured key, a model reference, and enough unused top-and-bottom combinations.
 
 ## License
 
