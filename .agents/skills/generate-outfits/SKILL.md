@@ -19,7 +19,7 @@ For a modeled collection, completion means the requested number of reviewed imag
 - Require `data/library.json` and enough distinct top-and-bottom combinations for the requested count. Modeled photos also require a local identity reference: use `WARDROBE_MODEL_REFERENCE` when set, otherwise `data/model-reference.png`. Resolve relative paths from the repository root.
 - Keep every source garment and identity image local and unchanged.
 - Never add `data/`, the identity reference, garment images, or generated photos to Git.
-- Use only wardrobe items that exist in the current database and whose local assets resolve successfully.
+- Select wardrobe garments only from the current database with successfully resolved local assets. The styling basics below do not require wardrobe records.
 
 ## Parallel work
 
@@ -43,7 +43,11 @@ If the wardrobe cannot support the requested number of genuinely distinct outfit
 
 ## 2. Curate the combinations
 
-Each outfit contains exactly one top and one bottom, with an optional jacket, shoes, and restrained accessory. Use these styling principles:
+Each outfit contains exactly one top and one bottom, with an optional jacket, shoes, and restrained accessory.
+
+You may add simple unpatterned black or brown tights, sheer or opaque, when seasonally or stylistically appropriate, even without a wardrobe item. Treat them as optional styling basics alongside invisible basics such as socks; plain neutral shoes remain allowed when no shoes were selected. Do not invent other visible garments or accessories. Note any added tights and their color/opacity in the outfit reason and generation prompt, without fabricating garment IDs or counting tights variants as distinct wardrobe combinations.
+
+Use these styling principles:
 
 - Favor tonal or analogous color harmony for cohesion.
 - Use complementary contrast selectively and keep one color or garment dominant.
@@ -79,7 +83,7 @@ Use stable lowercase hyphenated IDs. Reject duplicate garment combinations even 
 
 ## 3. Prepare references and prompts
 
-For each outfit, order references as identity, exact top, exact bottom, then any selected outer layer, shoes, or accessory. Include every selected garment and no unrelated references.
+For each outfit, order references as identity, exact top, exact bottom, then any selected outer layer, shoes, or accessory. Include every selected wardrobe garment and no unrelated references; added styling basics need no reference.
 
 Read [references/outfit-image-prompt.md](references/outfit-image-prompt.md) and fill its template from the exact outfit record. Inspect every outer-layer reference before choosing the layered clause; never infer a zipper, buttons, placket, opening, or closure.
 
@@ -102,7 +106,7 @@ Require:
 - exact garment color, material, fit, construction, graphics, logos, text, proportions, and closures
 - complete head-to-shoes framing with readable outfit and realistic anatomy
 - natural layering without invented openings or hidden inner pieces
-- no unselected visible garments except plain neutral shoes or invisible basics when no shoes were selected
+- no unselected visible garments or accessories except simple unpatterned black or brown sheer/opaque tights when appropriate, and plain neutral shoes when no shoes were selected; invisible basics such as socks are also allowed
 - no extra person, text overlay, watermark, product mockup, or synthetic AI polish
 
 Regenerate identity drift, missing or redesigned garments, fake closures or text, anatomy failures, or cropped feet. Do not mark an outfit accepted based on plausibility alone.

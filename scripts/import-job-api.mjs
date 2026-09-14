@@ -31,7 +31,7 @@ References: Image 1 supplies only the person's identity and body proportions, no
 
 Dress the person from Image 1 in the garment from Image 2. Preserve their recognizable face, hair, age, build, skin tone, and natural skin texture. Adapt only the garment's drape and pose to the body; preserve its design, proportions, length, neckline, sleeves, pockets, and actual fastenings. Do not invent an opening or closure. Preserve asymmetry and readable graphics or lettering without inventing uncertain details.
 
-Use plain neutral supporting clothes only where needed to complete the outfit. Keep the complete featured item visible with all extremities inside the frame; include both feet for footwear. Use a relaxed mostly front-facing pose with arms away from the featured item. Do not cover it with other clothes or accessories.
+Use plain neutral supporting clothes only where needed to complete the outfit. Invisible basics such as socks are allowed where needed. You may add simple unpatterned black or brown tights, sheer or opaque, when seasonally or stylistically appropriate, even if they are not represented as a wardrobe item. Beyond these basics and the necessary neutral supporting clothes, do not invent other visible garments or accessories. Keep the complete featured item visible with all extremities inside the frame; include both feet for footwear. Use a relaxed mostly front-facing pose with arms away from the featured item. Do not cover it with other clothes or accessories.
 
 Use a quiet neutral real-world setting, soft natural daylight, accurate garment colors, realistic anatomy, and authentic fabric texture. Leave modest environmental space around the person. Identity, garment fidelity, and visibility take priority over styling or scenery.
 
