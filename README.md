@@ -80,6 +80,8 @@ See [model migration and prompt checks](docs/model-migration.md) for compatibili
 
 Open **Outfits** or visit `/outfits` to browse the saved collection. Open a look to see its full photograph, styling notes, and the wardrobe pieces it uses. Collections written by the Codex outfit skill are loaded from `data/outfits.json`; their images are served from `data/outfit-images/`.
 
+Below the pieces in a saved look, choose **Suggest accessories** for a short list of optional finishing touches. This sends the existing outfit photo to `OPENAI_VISION_MODEL` (default `gpt-5.6-luna`) through the configured API and returns text only. Suggestions are stored locally in `data/outfit-accessories.json` and reused when you reopen the look; changing the photo or configured vision model makes fresh suggestions available. Outfit photographs and wardrobe records are not modified.
+
 Choose **Generate outfits**, enter a count from 1 to 12, add optional styling direction, and choose a model reference. Planning uses the actual garment images and metadata, then creates one square modeled photograph per combination. Each outfit contains one top and one bottom, with optional outerwear, shoes, and an accessory. New combinations avoid the existing collection and active candidates.
 
 Generation progress and review candidates persist in `data/outfit-jobs/`. Review each image against its wardrobe references, then accept it into the collection, reject it, or retry with a specific correction. Accepting adds the new look while preserving existing outfits. An interrupted request becomes a retryable failure on server restart; restarting never automatically repeats paid API calls. Use the retry control to continue failed work.

@@ -105,6 +105,47 @@ function GarmentReferences({ outfit, itemsById }) {
   </section>;
 }
 
+function AccessorySuggestions({ outfit }) {
+  const [state, setState] = useState({ suggestions: null, loading: true, generating: false, error: "", hasApiKey: true });
+  const active = useRef(null);
+  const submitting = useRef(false);
+  const endpoint = `${API}/${encodeURIComponent(outfit.id)}/accessories`;
+  useEffect(() => {
+    const controller = new AbortController();
+    active.current = controller;
+    let timer;
+    const load = async () => {
+      try {
+        const value = await request(endpoint, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setState({ ...value, loading: false, error: "" });
+        if (value.generating) timer = window.setTimeout(load, 1500);
+      } catch (error) { if (!controller.signal.aborted) setState((current) => ({ ...current, loading: false, generating: false, error: error.message })); }
+    };
+    void load();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [endpoint]);
+  const generate = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
+    const signal = active.current.signal;
+    setState((current) => ({ ...current, generating: true, error: "" }));
+    try {
+      const value = await request(endpoint, { method: "POST", body: "{}", signal });
+      if (!signal.aborted) setState({ ...value, loading: false, error: "" });
+    } catch (error) { if (!signal.aborted) setState((current) => ({ ...current, generating: false, error: error.message })); }
+    finally { submitting.current = false; }
+  };
+  return <section className="outfit-accessories" aria-label="Suggested accessories">
+    <h3>Suggested accessories</h3>
+    {state.suggestions ? <ul>{state.suggestions.map((suggestion) => <li key={suggestion}>{suggestion.replace(/^\s*(?:[-*•]\s+|\d+[.)]\s+)/, "")}</li>)}</ul> : <>
+      <p className="outfit-small" role="status">{state.loading ? "Loading suggestions…" : state.generating ? "Choosing accessories for this look…" : !state.hasApiKey ? "Configure your API key and restart the server to get accessory ideas." : "A few optional finishing touches for this look."}</p>
+      {state.error ? <p className="outfit-error" role="alert">{state.error}</p> : null}
+      <button type="button" className="outfit-text-button" onClick={generate} disabled={state.loading || state.generating || !state.hasApiKey}>{state.generating ? "Suggesting…" : state.error ? "Try again" : "Suggest accessories"}</button>
+    </>}
+  </section>;
+}
+
 function OutfitDetails({ outfit, itemsById, children }) {
   return <div className="outfit-detail-layout">
     <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className="outfit-photo-fallback" role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <Photo key={outfit.image || outfit.id} src={outfit.image} alt={`${outfit.name}, modeled head to toe`} priority />}</div>
@@ -112,6 +153,7 @@ function OutfitDetails({ outfit, itemsById, children }) {
       <p className="outfit-occasion">{occasionText(outfit)}</p>
       <p className="outfit-reason">{outfit.reason}</p>
       <GarmentReferences outfit={outfit} itemsById={itemsById} />
+      {outfit.status === "accepted" ? <AccessorySuggestions key={`${outfit.id}:${outfit.image}`} outfit={outfit} /> : null}
       {children}
     </div>
   </div>;

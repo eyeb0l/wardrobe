@@ -11,6 +11,7 @@ import sharp from "sharp";
 import { buildOutfitPrompt, wardrobeOutfitApi } from "./outfit-api.mjs";
 
 const API = "/api/outfits";
+const accessoryIdeas = ["Small gold hoops to echo the warm tones.", "A compact brown leather bag for a polished finish.", "A slim watch with a simple cream dial."];
 const plan = (number = 1, garmentIds = ["top-3", `bottom-${number}`]) => ({
   id: `look-${number}`, name: `Look ${number}`, occasion: ["casual"], garmentIds,
   reason: "A clean top balances the fuller trousers.", setting: "a warm stone courtyard",
@@ -513,4 +514,101 @@ test("plan commitment rechecks combinations reserved by a retry during vision wo
   assert.equal(conflicted.outfits.length, 0);
   assert.equal((await h.settled(first.id)).outfits[0].status, "review");
   assert.equal(h.requests.filter((item) => item.kind === "edit").length, 2, "only the original and its explicit retry were generated");
+});
+
+test("accessory suggestions use the configured vision model and outfit photo, persist, and never edit originals", async (t) => {
+  const h = await harness(t, { env: { OPENAI_VISION_MODEL: 'custom-vision' }, analysis: () => Response.json({ output_text: JSON.stringify({ suggestions: accessoryIdeas }) }) });
+  const endpoint = `${API}/original-1/accessories`;
+  const manifestBefore = await readFile(path.join(h.dataDir, 'outfits.json'));
+  const initial = await h.request('GET', endpoint);
+  assert.equal(initial.suggestions, null);
+  assert.equal(h.requests.length, 0, 'opening a look must not trigger a paid request');
+  const result = await h.request('POST', endpoint, {});
+  assert.deepEqual(result.suggestions, accessoryIdeas);
+  assert.equal(result.generating, false);
+  assert.equal(h.requests.length, 1);
+  const request = h.requests[0].request;
+  assert.equal(request.model, 'custom-vision');
+  assert.equal(request.text.format.name, 'outfit_accessories');
+  const inputs = request.input[0].content.filter(item => item.type === 'input_image');
+  assert.equal(inputs.length, 1, 'only the existing modeled outfit photo is sent');
+  const photo = Buffer.from(inputs[0].image_url.split(',')[1], 'base64');
+  assert.deepEqual(await sharp(photo).raw().toBuffer(), await sharp(h.output).raw().toBuffer());
+  assert.match(request.input[0].content[0].text, /not claims that the person owns/);
+  assert.deepEqual(await readFile(path.join(h.dataDir, 'outfits.json')), manifestBefore);
+  assert.deepEqual(await readFile(path.join(h.dataDir, 'outfit-images/original-1.png')), h.output);
+  assert.ok(h.requests.every(item => item.kind === 'analysis'));
+  await h.restart({ viteOrder: true });
+  assert.deepEqual((await h.request('GET', endpoint)).suggestions, accessoryIdeas);
+  assert.deepEqual((await h.request('POST', endpoint, {})).suggestions, accessoryIdeas);
+  assert.equal(h.requests.length, 1, 'reopening/reposting reuses saved text');
+});
+
+test("simultaneous accessory requests share a paid call and separate outfits retain their lists", async (t) => {
+  const h = await harness(t, { analysis: async () => { await delay(30); return Response.json({ output_text: JSON.stringify({ suggestions: accessoryIdeas }) }); } });
+  const a = `${API}/original-1/accessories`, b = `${API}/original-2/accessories`;
+  const results = await Promise.all([h.request('POST', a, {}), h.request('POST', a, {}), h.request('POST', b, {})]);
+  assert.ok(results.every(r => r.suggestions.length === 3));
+  assert.equal(h.requests.length, 2);
+  const cache = JSON.parse(await readFile(path.join(h.dataDir, 'outfit-accessories.json'), 'utf8'));
+  assert.deepEqual(Object.keys(cache.outfits).sort(), ['original-1', 'original-2']);
+});
+
+test("accessory suggestions invalidate on photo or model change", async (t) => {
+  const h = await harness(t, { analysis: () => Response.json({ output_text: JSON.stringify({ suggestions: accessoryIdeas }) }) });
+  const endpoint = `${API}/original-1/accessories`;
+  await h.request('POST', endpoint, {});
+  const changedPhoto = await h.image('#123456');
+  await writeFile(path.join(h.dataDir, 'outfit-images/original-1.png'), changedPhoto);
+  assert.equal((await h.request('GET', endpoint)).suggestions, null);
+  await h.request('POST', endpoint, {});
+  const cacheFile = path.join(h.dataDir, 'outfit-accessories.json');
+  const cache = JSON.parse(await readFile(cacheFile, 'utf8'));cache.outfits['original-1'].model = 'old-vision';await writeFile(cacheFile, JSON.stringify(cache));
+  assert.equal((await h.request('GET', endpoint)).suggestions, null);
+  await h.request('POST', endpoint, {});
+  assert.equal(h.requests.length, 3);
+  assert.deepEqual(await readFile(path.join(h.dataDir, 'outfit-images/original-1.png')), changedPhoto);
+});
+
+test("invalid, missing and cross-site accessory requests cannot call the provider", async (t) => {
+  const h = await harness(t, { env: { OPENAI_API_KEY: '' } });
+  await h.request('POST', `${API}/unknown/accessories`, {}, 404);
+  await h.request('POST', `${API}/original-1/accessories`, {}, 403, { origin: 'https://other.invalid' });
+  await h.request('POST', `${API}/original-1/accessories`, {}, 503);
+  assert.equal(h.requests.length, 0);
+});
+
+test("accessory provider failures and malformed output are retryable without changing photos", async (t) => {
+  const h = await harness(t, { analysis: () => Response.json({ error: { message: 'private provider message' } }, { status: 503 }) });
+  const endpoint = `${API}/original-1/accessories`;
+  const failed = await h.request('POST', endpoint, {}, 502);
+  assert.ok(!failed.error.includes('private provider message'));
+  for (const suggestions of [[], ['one'], ['same', 'same'], ['one', 2], ['one\ntwo', 'three']]) {
+    h.setAnalysis(() => Response.json({ output_text: JSON.stringify({ suggestions }) }));
+    await h.request('POST', endpoint, {}, 502);
+    const state = await h.request('GET', endpoint);
+    assert.equal(state.suggestions, null);assert.equal(state.generating, false);
+  }
+  h.setAnalysis(() => Response.json({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({ suggestions: accessoryIdeas }) }] }] }));
+  assert.deepEqual((await h.request('POST', endpoint, {})).suggestions, accessoryIdeas);
+  assert.deepEqual(await readFile(path.join(h.dataDir, 'outfit-images/original-1.png')), h.output);
+});
+
+test("accessory response cannot be saved across an outfit photo change or restart", async (t) => {
+  let release;
+  const h = await harness(t, { analysis: () => new Promise(resolve => { release = () => resolve(Response.json({ output_text: JSON.stringify({ suggestions: accessoryIdeas }) })); }) });
+  const endpoint = `${API}/original-1/accessories`;
+  const changed = h.request('POST', endpoint, {}, 409);
+  while (!release) await delay(2);
+  assert.equal((await h.request('GET', endpoint)).generating, true);
+  await writeFile(path.join(h.dataDir, 'outfit-images/original-1.png'), await h.image('#445566'));
+  release();await changed;
+  release = null;
+  const interrupted = h.request('POST', endpoint, {}, null);
+  while (!release) await delay(2);
+  await h.restart({ viteOrder: true, freshModule: true });
+  assert.equal((await interrupted).status, 503);
+  release();await delay(10);
+  const state = await h.request('GET', endpoint);
+  assert.equal(state.suggestions, null);assert.equal(state.generating, false);
 });
