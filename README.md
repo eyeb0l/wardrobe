@@ -29,6 +29,8 @@ npm run dev
 
 Open [localhost:5173](http://localhost:5173).
 
+For personal access from other devices, see the [private Vercel hosting guide](docs/HOSTING.md). It covers account-only authentication, durable cloud storage, the initial data copy, and safe updates.
+
 ## Use with Codex
 
 This repo includes three Codex skills for importing clothes, creating modeled outfits, and assessing potential purchases against your wardrobe.

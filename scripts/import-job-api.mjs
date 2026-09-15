@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
 
@@ -44,7 +44,7 @@ function json(res, status, value) {
   res.end(JSON.stringify(value));
 }
 
-async function body(req, limit = 25 * 1024 * 1024) {
+async function body(req, limit = 25 * 1024 * 1024, requireJson = false) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
@@ -53,8 +53,34 @@ async function body(req, limit = 25 * 1024 * 1024) {
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
+  if (requireJson && !/^application\/json(?:\s*;|$)/i.test(req.headers?.["content-type"] || "")) {
+    throw Object.assign(new Error("Expected an application/json request body"), { status: 415 });
+  }
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
   catch { throw Object.assign(new Error("Expected a JSON request body"), { status: 400 }); }
+}
+
+function validateServerlessMutation(req) {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return;
+  const headers = req.headers || {};
+  const fetchSite = headers["sec-fetch-site"];
+  if (fetchSite && !["same-origin", "none"].includes(fetchSite)) {
+    throw Object.assign(new Error("Cross-site requests are not allowed"), { status: 403 });
+  }
+  if (headers.origin) {
+    let origin;
+    try { origin = new URL(headers.origin); } catch { /* Invalid origins are rejected below. */ }
+    const protocol = headers["x-forwarded-proto"] || (req.socket?.encrypted ? "https" : "http");
+    if (!origin || origin.origin !== `${protocol}://${headers.host}`) {
+      throw Object.assign(new Error("Cross-origin requests are not allowed"), { status: 403 });
+    }
+  }
+  if (headers["content-type"] && !/^application\/json(?:\s*;|$)/i.test(headers["content-type"])) {
+    throw Object.assign(new Error("Expected an application/json request body"), { status: 415 });
+  }
+  if (!headers["content-type"] && (Number(headers["content-length"]) > 0 || headers["transfer-encoding"])) {
+    throw Object.assign(new Error("Expected an application/json request body"), { status: 415 });
+  }
 }
 
 function publicJob(job) {
@@ -346,7 +372,7 @@ function stageState() {
   return { status: "pending", decision: null, attempts: 0, assetUrl: null, failedAssetUrl: null, cleanupPreviewUrl: null, cleanupTolerance: 46, cleanupDiagnostics: null, error: null, prompt: null, updatedAt: null };
 }
 
-async function openAIEdit({ key, baseUrl, model, prompt, images, size, background, quality }) {
+async function openAIEdit({ key, baseUrl, model, prompt, images, size, background, quality, timeoutMs }) {
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", prompt);
@@ -360,6 +386,7 @@ async function openAIEdit({ key, baseUrl, model, prompt, images, size, backgroun
   }
   const response = await fetch(`${baseUrl}/images/edits`, {
     method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form,
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error?.message || `OpenAI image request failed (${response.status})`);
@@ -368,10 +395,11 @@ async function openAIEdit({ key, baseUrl, model, prompt, images, size, backgroun
   return Buffer.from(encoded, "base64");
 }
 
-async function openAIAnalyze({ key, baseUrl, model, image, mime }) {
+async function openAIAnalyze({ key, baseUrl, model, image, mime, timeoutMs }) {
   const response = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     body: JSON.stringify({
       model,
       input: [{ role: "user", content: [
@@ -400,6 +428,8 @@ export function wardrobeImportApi(options = {}) {
   const preparingModeled = new Map();
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
   const apiBaseUrl = () => setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, "");
+  const timeoutMs = options.requestTimeoutMs ?? (options.serverless ? 210_000 : undefined);
+  const requestBody = (req) => body(req, 25 * 1024 * 1024, options.serverless);
 
   async function modelReferences() {
     const references = [];
@@ -529,7 +559,7 @@ export function wardrobeImportApi(options = {}) {
         if (stageName === "garment") {
           chromaKeyUsed = chooseChromaKey(current.metadata.color, current.metadata.secondaryColor);
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, chromaKeyUsed);
-          bytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt });
+          bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
           failedAssetUrl = `${ASSET_ROOT}/${current.id}/${rawName}`;
@@ -550,7 +580,7 @@ export function wardrobeImportApi(options = {}) {
           }
           const model = { data: modelData, mime: "image/png", name: "model.png" };
           const basePrompt = options.modeledPrompt || MODELED_PROMPT;
-          bytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt });
+          bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt });
         }
         await writeFile(output, bytes);
         const fresh = await loadJob(current.id);
@@ -575,10 +605,119 @@ export function wardrobeImportApi(options = {}) {
     return task;
   }
 
+  function prepareGeneration(job, stageName) {
+    const stage = job.stages[stageName];
+    stage.status = "queued";
+    stage.decision = null;
+    stage.error = null;
+    stage.updatedAt = new Date().toISOString();
+    if (options.serverless) stage.taskId = randomUUID();
+  }
+
+  async function scheduleGeneration(job, stageName) {
+    if (!options.serverless) {
+      void generate(job, stageName);
+      return;
+    }
+    const stage = job.stages[stageName];
+    // The authorizing approval/regeneration already committed this identity
+    // together with its queued state. A crash before dispatch is recoverable.
+    if (stage.status !== "queued" || typeof stage.taskId !== "string") {
+      throw new Error("Generation must be durably queued before scheduling");
+    }
+    const task = {
+      kind: "import", jobId: job.id, stageName, taskId: stage.taskId,
+      attempt: stage.attempts + 1, generationId: job.generationId || null,
+    };
+    try {
+      if (typeof options.scheduleTask !== "function") throw new Error("Durable generation scheduling is not configured");
+      await options.scheduleTask(task);
+    } catch (error) {
+      // Invalidate the queued task even if delivery succeeded before the
+      // scheduler lost its response. A manual retry gets a new task identity.
+      stage.status = "failed";
+      stage.error = "Could not queue generation. Please retry this stage.";
+      await saveJob(job);
+      throw Object.assign(new Error(stage.error, { cause: error }), { status: 503 });
+    }
+  }
+
+  async function runTask(task) {
+    if (task?.kind !== "import" || !["garment", "modeled"].includes(task.stageName)) {
+      throw new Error("Invalid import generation task");
+    }
+    const job = await loadJob(task.jobId);
+    const stage = job?.stages?.[task.stageName];
+    // The cloud runner holds a distributed mutation lease while this executes.
+    // Persisting processing before contacting OpenAI also makes a later replay
+    // a no-op after a timeout or a process crash instead of a second paid call.
+    if (!stage || !["pending", "queued"].includes(stage.status)
+      || typeof task.taskId !== "string" || stage.taskId !== task.taskId
+      || task.attempt !== stage.attempts + 1
+      || task.generationId !== (job.generationId || null)) {
+      return { skipped: true };
+    }
+    await generate(job, task.stageName);
+    return { skipped: false, job: publicJob(await loadJob(job.id)) };
+  }
+
+  async function failTask(task, message = "Generation was interrupted. Please retry this stage.") {
+    if (task?.kind !== "import" || !["garment", "modeled"].includes(task.stageName)) {
+      throw new Error("Invalid import generation task");
+    }
+    const job = await loadJob(task.jobId);
+    const stage = job?.stages?.[task.stageName];
+    const expectedAttempt = stage?.attempts + (stage?.status === "processing" ? 0 : 1);
+    if (!stage || !["pending", "queued", "processing"].includes(stage.status)
+      || typeof task.taskId !== "string" || stage.taskId !== task.taskId
+      || task.attempt !== expectedAttempt
+      || task.generationId !== (job.generationId || null)) return { skipped: true };
+    stage.status = "failed";
+    stage.error = message;
+    stage.updatedAt = new Date().toISOString();
+    await saveJob(job);
+    return { skipped: false, job: publicJob(job) };
+  }
+
+  async function pendingTasks() {
+    if (!options.serverless) return [];
+    const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+    const entries = await readdir(jobsDir, { withFileTypes: true }).catch((error) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+    const tasks = [];
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isDirectory() || !uuid.test(entry.name)) continue;
+      let job;
+      try { job = await loadJob(entry.name); }
+      catch (error) { if (error instanceof SyntaxError) continue; throw error; }
+      if (!job || job.id !== entry.name || job.status !== "active" || !job.stages
+        || (job.generationId != null && !uuid.test(job.generationId))
+        || ["crop", "garment", "modeled"].some((name) => job.stages[name]?.status === "rejected")) continue;
+      if (job.stages.crop && job.stages.crop.status !== "approved") continue;
+      for (const stageName of ["garment", "modeled"]) {
+        if ((stageName === "garment" && job.modeledReplacement)
+          || (stageName === "modeled" && job.stages.garment?.status !== "approved")) continue;
+        const stage = job.stages[stageName];
+        if (!stage || !["pending", "queued", "processing"].includes(stage.status)
+          || typeof stage.taskId !== "string" || !uuid.test(stage.taskId)
+          || !Number.isSafeInteger(stage.attempts) || stage.attempts < 0
+          || (stage.status === "processing" && stage.attempts === 0)) continue;
+        const attempt = stage.attempts + (stage.status === "processing" ? 0 : 1);
+        if (!Number.isSafeInteger(attempt)) continue;
+        tasks.push({ kind: "import", jobId: job.id, stageName, taskId: stage.taskId,
+          attempt, generationId: job.generationId || null });
+      }
+    }
+    return tasks;
+  }
+
   async function handler(req, res, next) {
     const url = new URL(req.url, "http://localhost");
     if (!url.pathname.startsWith("/api/import/")) return next();
     try {
+      if (options.serverless) validateServerlessMutation(req);
       if (url.pathname === "/api/import/wardrobe" && req.method === "GET") {
         return json(res, 200, await loadImported());
       }
@@ -648,7 +787,7 @@ export function wardrobeImportApi(options = {}) {
         const file = path.join(libraryAssetDir, path.basename(libraryAssetMatch[1]));
         await stat(file);
         res.setHeader("Content-Type", "image/png");
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.setHeader("Cache-Control", options.serverless ? "private, no-store" : "public, max-age=31536000, immutable");
         return res.end(await readFile(file));
       }
       const assetMatch = url.pathname.match(/^\/api\/import\/assets\/([a-f0-9-]{36})\/([\w.-]+)$/i);
@@ -668,11 +807,11 @@ export function wardrobeImportApi(options = {}) {
           ].filter(Boolean).join(" and ");
           return json(res, 503, { error: `Setup required: add ${missing}, then restart the app.` });
         }
-        const input = await body(req);
+        const input = await requestBody(req);
         const image = decodeImage(input);
         const normalizedImage = await normalizeImage(image.data);
         const key = setting("OPENAI_API_KEY");
-        const analysis = await openAIAnalyze({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: normalizedImage, mime: "image/png" });
+        const analysis = await openAIAnalyze({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: normalizedImage, mime: "image/png" });
         const detected = analysis.items.map(normalizeMetadata);
         const canUseOriginal = detected.length === 1 && analysis.isCleanProductShot && await hasCleanProductBackground(normalizedImage);
         const jobs = [];
@@ -696,7 +835,7 @@ export function wardrobeImportApi(options = {}) {
         const ids = await readdir(jobsDir).catch(() => []);
         const loadedJobs = (await Promise.all(ids.map((id) => loadJob(id)))).filter(Boolean);
         const hiddenJobs = loadedJobs.filter((job) => job.status === "complete" || job.stages.crop?.status === "rejected" || job.stages.garment.status === "rejected" || job.stages.modeled.status === "rejected");
-        await Promise.all(hiddenJobs.map((job) => rm(path.join(jobsDir, job.id), { recursive: true, force: true })));
+        if (!options.serverless) await Promise.all(hiddenJobs.map((job) => rm(path.join(jobsDir, job.id), { recursive: true, force: true })));
         const jobs = loadedJobs.filter((job) => !hiddenJobs.includes(job)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
         return json(res, 200, jobs.map(publicJob));
       }
@@ -712,7 +851,7 @@ export function wardrobeImportApi(options = {}) {
         return json(res, 200, { deleted: true, id: job.id });
       }
       if (action === "metadata" && (req.method === "PATCH" || req.method === "PUT")) {
-        const input = await body(req);
+        const input = await requestBody(req);
         if (!input.metadata || typeof input.metadata !== "object" || Array.isArray(input.metadata)) throw Object.assign(new Error("metadata must be an object"), { status: 400 });
         job.metadata = normalizeMetadata({ ...job.metadata, ...input.metadata }); await saveJob(job);
         return json(res, 200, publicJob(job));
@@ -736,7 +875,7 @@ export function wardrobeImportApi(options = {}) {
         if (stage.status !== "failed" || !stage.failedAssetUrl) {
           throw Object.assign(new Error("No failed garment source is available for cleanup"), { status: 409 });
         }
-        const input = await body(req);
+        const input = await requestBody(req);
         const tolerance = cleanupTolerance(input.tolerance);
         const sourceName = path.basename(new URL(stage.failedAssetUrl, "http://localhost").pathname);
         const source = await readFile(path.join(jobsDir, job.id, sourceName));
@@ -766,28 +905,29 @@ export function wardrobeImportApi(options = {}) {
         if (job.modeledReplacement && stageName !== "modeled") return json(res, 409, { error: "Only the modeled shot can be updated here" });
         if (decision === "regenerate") {
           if (stageName === "crop") throw Object.assign(new Error("Upload the image again to create new crops"), { status: 400 });
-          const input = await body(req);
+          if (options.serverless && ["queued", "processing"].includes(job.stages[stageName].status)) {
+            throw Object.assign(new Error("Generation is already running"), { status: 409 });
+          }
+          const input = await requestBody(req);
           if (stageName === "modeled") {
             if (running.has(`${job.id}:modeled`) || ["queued", "processing"].includes(job.stages.modeled.status)) throw Object.assign(new Error("Modeled generation is already running"), { status: 409 });
             const reference = await resolveModelReference(input.modelReferenceId ?? job.modelReferenceId ?? "default");
             job.modelReferenceId = reference.id;
           }
           job.stages[stageName].prompt = typeof input.prompt === "string" ? input.prompt.trim().slice(0, 1200) || null : null;
-          job.stages[stageName].status = "queued";
-          job.stages[stageName].decision = null;
+          prepareGeneration(job, stageName);
           await saveJob(job);
-          void generate(job, stageName);
+          await scheduleGeneration(job, stageName);
           return json(res, 202, publicJob(job));
         }
         if (!DECISIONS.has(decision) || job.stages[stageName].status !== "review") throw Object.assign(new Error("Stage is not ready for review"), { status: 409 });
         if (stageName === "garment" && decision === "approve" && job.stages.modeled.status === "pending") {
-          const input = await body(req);
+          const input = await requestBody(req);
           const reference = await resolveModelReference(input.modelReferenceId ?? job.modelReferenceId ?? "default");
           job.modelReferenceId = reference.id;
         }
         let libraryItem;
-        const previousStatus = job.stages[stageName].status;
-        const previousDecision = job.stages[stageName].decision;
+        const previousStages = structuredClone(job.stages);
         const previousJobStatus = job.status;
         job.stages[stageName].decision = decision === "approve" ? "approved" : "rejected";
         job.stages[stageName].status = job.stages[stageName].decision;
@@ -795,22 +935,23 @@ export function wardrobeImportApi(options = {}) {
         job.stages[stageName].updatedAt = new Date().toISOString();
         const startGarment = stageName === "crop" && decision === "approve" && job.stages.garment.status === "pending";
         const startModeled = stageName === "garment" && decision === "approve" && job.stages.modeled.status === "pending";
+        if (options.serverless && startGarment) prepareGeneration(job, "garment");
+        if (options.serverless && startModeled) prepareGeneration(job, "modeled");
         if (stageName === "modeled" && decision === "approve") job.status = "complete";
         await saveJob(job);
         if (decision === "approve" && stageName !== "crop") {
           try {
             libraryItem = await persistImported(job, stageName === "modeled");
           } catch (error) {
-            job.stages[stageName].status = previousStatus;
-            job.stages[stageName].decision = previousDecision;
+            job.stages = previousStages;
             job.status = previousJobStatus;
             await saveJob(job);
             throw error;
           }
         }
         if (decision === "reject") await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
-        if (startGarment) void generate(job, "garment");
-        if (startModeled) void generate(job, "modeled");
+        if (startGarment) await scheduleGeneration(job, "garment");
+        if (startModeled) await scheduleGeneration(job, "modeled");
         const response = { ...publicJob(job), ...(libraryItem ? { libraryItem } : {}) };
         if (job.status === "complete") await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
         return json(res, 200, response);
@@ -825,14 +966,21 @@ export function wardrobeImportApi(options = {}) {
   return {
     name: "wardrobe-import-job-api",
     apply: "serve",
+    runTask,
+    failTask,
+    pendingTasks,
     async configResolved(config) {
       root = config.root;
       dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
       jobsDir = path.join(dataDir, "jobs");
       importedFile = path.join(dataDir, "library.json");
       libraryAssetDir = path.join(dataDir, "imported");
+      if (options.serverless && options.readOnly) return;
       await mkdir(jobsDir, { recursive: true });
       await mkdir(libraryAssetDir, { recursive: true });
+      // Each cloud invocation gets a fresh plugin. Startup must never restart
+      // paid work; only explicitly delivered durable tasks can do that.
+      if (options.serverless) return;
       const ids = await readdir(jobsDir).catch(() => []);
       for (const id of ids) {
         const job = await loadJob(id);

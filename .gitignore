@@ -6,3 +6,8 @@ dist/
 !.env.example
 *.log
 data/
+.vercel
+
+.nitro/
+.output/
+/.swc

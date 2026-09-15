@@ -1,4 +1,4 @@
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
 import { outfitContactSheets } from "./outfit-api.mjs";
@@ -146,7 +146,7 @@ export function wardrobeShoppingApi(options = {}) {
     const available = [];
     for (const reference of result) {
       try {
-        const metadata = await sharp(reference.file, { limitInputPixels: 64e6 }).metadata();
+        const metadata = await sharp(await readFile(reference.file), { limitInputPixels: 64e6 }).metadata();
         if (metadata.width && metadata.height && metadata.width * metadata.height <= 64e6) available.push(reference);
       } catch { /* An unreadable reference is not usable for analysis. */ }
     }
@@ -165,7 +165,7 @@ export function wardrobeShoppingApi(options = {}) {
       if (!match) continue;
       try {
         const file = await containedFile(importedDir, match[1]);
-        const metadata = await sharp(file, { limitInputPixels: 64e6 }).metadata();
+        const metadata = await sharp(await readFile(file), { limitInputPixels: 64e6 }).metadata();
         if (metadata.width && metadata.height && metadata.width * metadata.height <= 64e6) result.set(record.id, { id: record.id, file });
       } catch { /* Missing or escaped cutouts are not part of the usable wardrobe. */ }
     }
@@ -330,8 +330,10 @@ Owned inventory: ${JSON.stringify(items.map(({ file, ...item }, index) => ({ ...
     dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
     dataDir = await realpath(dataDir).catch((error) => { if (error.code === "ENOENT") return dataDir; throw error; });
     importedDir = path.join(dataDir, "imported");
-    owners.get(dataDir)?.dispose();
-    ownership = { dispose };
-    owners.set(dataDir, ownership);
+    if (!options.serverless) {
+      owners.get(dataDir)?.dispose();
+      ownership = { dispose };
+      owners.set(dataDir, ownership);
+    }
   }, configureServer: configure, configurePreviewServer: configure, closeBundle: dispose };
 }
