@@ -17,6 +17,7 @@
     "@phosphor-icons/react": "^2.1.10",
     "@unpic/react": "^1.0.2",
     "@vitejs/plugin-react": "5.0.4",
+    "heic-to": "1.5.2",
     "ipx": "^3.1.1",
     "react": "19.2.0",
     "react-dom": "19.2.0",

@@ -56,10 +56,13 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 - Shows saved outfit collections with their styling notes and exact wardrobe pieces
 - Curates and generates new outfits through the configured API, with progress, retries, and review before saving
 - Keeps originals, jobs, generated images, and the JSON database local in `data/`
+- Checks potential purchases against your model reference and wardrobe in **Shopping**
 - Supports drag, drop, paste, editing, review, regeneration, and approval
 - Filters Tops, Dresses, Jackets, Bottoms, Accessories, and Shoes. Existing dresses filed under Tops can be moved to Dresses in the item editor.
 
 ## Configuration
+
+Wardrobe uploads support JPEG, PNG, WebP and HEIC/HEIF through the file picker, drag-and-drop and paste. JPEG, PNG and WebP files up to 2 MB are uploaded byte-for-byte unchanged, including their resolution, transparency and metadata. Larger files are compressed locally to at most 2 MB, with a maximum 2,400-pixel edge; PNG/WebP compression preserves transparency. HEIC is converted locally to JPEG for compatibility, keeping its resolution when the converted file fits the limit. Inputs are limited to 50 MB and 64 megapixels. The importer then uses its existing lossless PNG normalization and review workflow.
 
 | Variable | Default |
 | --- | --- |
@@ -87,6 +90,14 @@ Choose **Generate outfits**, enter a count from 1 to 12, add optional styling di
 Generation progress and review candidates persist in `data/outfit-jobs/`. Review each image against its wardrobe references, then accept it into the collection, reject it, or retry with a specific correction. Accepting adds the new look while preserving existing outfits. An interrupted request becomes a retryable failure on server restart; restarting never automatically repeats paid API calls. Use the retry control to continue failed work.
 
 All collection data, source images, references, and generated photographs stay in the ignored local `data/` directory. Generating sends the selected reference and garment images to the configured API. The gallery works without an API key; generation needs a configured key, a model reference, and enough unused top-and-bottom combinations.
+
+## Shopping assistant
+
+Open **Shopping** or visit `/shopping`. Choose, drop or paste a listing screenshot or an in-store garment photo, select a model reference, and optionally describe the occasion, price or fit you have in mind. Choose **Check this piece** for a recommendation, visual styling considerations, possible wardrobe overlap, and combinations using your existing pieces. Unclear images can produce **A closer look is needed** rather than a purchase recommendation. Advice cannot establish exact sizing, fabric quality or value from a photograph alone.
+
+Photos are prepared on your device before upload. JPEG, PNG, WebP and HEIC/HEIF inputs up to 50 MB are accepted; decoded images are limited to 64 megapixels. The browser resizes to a maximum 1,600-pixel edge, re-encodes to JPEG under 2 MB, and drops embedded metadata such as EXIF location. HEIC conversion uses native browser decoding when available, with the lazily loaded [heic-to decoder](https://github.com/hoppergee/heic-to) as a local fallback. The server validates and normalizes the image again before analysis.
+
+Analysis uses `OPENAI_VISION_MODEL` and the same API key and reference settings as Outfits. Pressing the check button sends the prepared image, chosen model reference, notes, and labeled wardrobe image sheets to the configured API. Browser edits and deletions are reflected in the comparison; item images are resolved from the local library. Shopping does not add purchases to the wardrobe. Drafts and results remain in memory while switching tabs, and are cleared on page reload; shopping uploads and results are not saved to `data/`. An API key, a model reference and readable wardrobe images are required. Requests are never automatically retried.
 
 ## License
 

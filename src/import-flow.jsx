@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, Check, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
+import { IMAGE_ACCEPT, formatImageBytes, isImageUpload, prepareUploadImage } from "./image-upload.mjs";
 import "./import-flow.css";
 
 const API = "/api/import/jobs";
@@ -13,13 +14,6 @@ const PARTS = [
   ["shoes", "Shoes"],
 ];
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-
-const fileToDataUrl = (file) => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onload = () => resolve(reader.result);
-  reader.onerror = () => reject(reader.error || new Error("Could not read that image."));
-  reader.readAsDataURL(file);
-});
 
 async function api(path, options) {
   const response = await fetch(path, {
@@ -206,7 +200,9 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   }, []);
   useEffect(() => { if (open) void refreshReferences(); }, [open, refreshReferences]);
 
+  const uploadLifecycle = useRef(0);
   useEffect(() => () => {
+    uploadLifecycle.current += 1;
     uploadPreviews.current.forEach((url) => URL.revokeObjectURL(url));
     uploadPreviews.current.clear();
   }, []);
@@ -238,22 +234,33 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
 
   const submitFiles = useCallback(async (files) => {
     if (!setup?.ready) { setOpen(true); return; }
-    const images = [...files].filter((file) => file.type.startsWith("image/"));
+    const images = [...files].filter(isImageUpload);
     if (!images.length) return;
     const batch = images.map((file) => {
-      const previewUrl = URL.createObjectURL(file);
-      uploadPreviews.current.add(previewUrl);
+      const isHeic = /image\/hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+      const previewUrl = isHeic ? null : URL.createObjectURL(file);
+      if (previewUrl) uploadPreviews.current.add(previewUrl);
       return { id: crypto.randomUUID(), file, name: file.name, previewUrl, status: "Waiting to upload" };
     });
     setUploads((current) => [...current, ...batch]);
     setDragging(false); setError(""); setNotice(null); setOpen(true);
+    const lifecycle = uploadLifecycle.current;
     for (const upload of batch) {
-      const { file, id, previewUrl } = upload;
+      if (lifecycle !== uploadLifecycle.current) break;
+      const { file, id } = upload;
+      let { previewUrl } = upload;
       try {
         setUploads((current) => current.map((item) => item.id === id ? { ...item, status: "Preparing image" } : item));
-        const imageDataUrl = await fileToDataUrl(file);
-        setUploads((current) => current.map((item) => item.id === id ? { ...item, status: "Uploading and checking image" } : item));
+        const prepared = await prepareUploadImage(file);
+        if (lifecycle !== uploadLifecycle.current) break;
+        if (previewUrl) { URL.revokeObjectURL(previewUrl); uploadPreviews.current.delete(previewUrl); }
+        previewUrl = URL.createObjectURL(prepared.blob);
+        uploadPreviews.current.add(previewUrl);
+        const detail = prepared.compressed ? ` · ${formatImageBytes(prepared.originalBytes)} → ${formatImageBytes(prepared.bytes)}` : prepared.converted ? " · HEIC converted" : "";
+        const imageDataUrl = prepared.dataUrl;
+        setUploads((current) => current.map((item) => item.id === id ? { ...item, previewUrl, status: `Uploading and checking image${detail}` } : item));
         const result = await api(API, { method: "POST", body: JSON.stringify({ imageDataUrl, metadata: { name: file.name.replace(/\.[^.]+$/, "") } }) });
+        if (lifecycle !== uploadLifecycle.current) break;
         const createdJobs = result.jobs || [result];
         if (!createdJobs.length && result.noClothingDetected) {
           setNotice({ tone: "complete", text: "No clothing detected", detail: `We couldn’t find a distinct wearable item in ${file.name}. Try a clearer or more tightly framed image.` });
@@ -262,11 +269,10 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
         }
         setJobs((current) => [...current, ...createdJobs]);
         setDrafts((current) => ({ ...current, ...Object.fromEntries(createdJobs.map((job) => [job.id, defaultDraft(job)])) }));
-      } catch (requestError) { setError(`${file.name}: ${requestError.message}`); setOpen(true); }
+      } catch (requestError) { if (lifecycle === uploadLifecycle.current) { setError(`${file.name}: ${requestError.message}`); setOpen(true); } }
       finally {
-        setUploads((current) => current.filter((item) => item.id !== id));
-        URL.revokeObjectURL(previewUrl);
-        uploadPreviews.current.delete(previewUrl);
+        if (lifecycle === uploadLifecycle.current) setUploads((current) => current.filter((item) => item.id !== id));
+        if (previewUrl) { URL.revokeObjectURL(previewUrl); uploadPreviews.current.delete(previewUrl); }
       }
     }
   }, [setup]);
@@ -277,7 +283,11 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
     const onDragOver = (event) => { if ([...event.dataTransfer.types].includes("Files")) event.preventDefault(); };
     const onDragLeave = (event) => { event.preventDefault(); depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
     const onDrop = (event) => { event.preventDefault(); depth = 0; setDragging(false); submitFiles(event.dataTransfer.files); };
-    const onPaste = (event) => { const files = [...event.clipboardData.files]; if (files.some((file) => file.type.startsWith("image/"))) { event.preventDefault(); submitFiles(files); } };
+    const onPaste = (event) => {
+      if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+      const files = [...(event.clipboardData?.files || [])];
+      if (files.some(isImageUpload)) { event.preventDefault(); submitFiles(files); }
+    };
     window.addEventListener("dragenter", onDragEnter); window.addEventListener("dragover", onDragOver); window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop); window.addEventListener("paste", onPaste);
     return () => { window.removeEventListener("dragenter", onDragEnter); window.removeEventListener("dragover", onDragOver); window.removeEventListener("dragleave", onDragLeave); window.removeEventListener("drop", onDrop); window.removeEventListener("paste", onPaste); };
   }, [submitFiles]);
@@ -349,18 +359,18 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
 
   return (
     <>
-      <input ref={inputRef} type="file" accept="image/*" multiple hidden disabled={!setup?.ready} onChange={(event) => { submitFiles(event.target.files); event.target.value = ""; }} />
+      <input ref={inputRef} type="file" accept={IMAGE_ACCEPT} aria-label="Choose wardrobe images" multiple hidden disabled={!setup?.ready} onChange={(event) => { submitFiles(event.target.files); event.target.value = ""; }} />
       <div className="import-drop-overlay" data-active={dragging && !setupRequired} aria-hidden={!dragging || setupRequired}><div className="import-drop-target is-over"><UploadSimple size={34} weight="light" /><h2>Drop clothing images</h2><p>A single garment or a photo of a full outfit works. Your wardrobe stays exactly where you left it.</p></div></div>
       <aside className={`import-tray${hasImportActivity ? " is-expanded" : ""}`} aria-label="Wardrobe imports">
         <button className="import-tray__button" type="button" onClick={() => setupRequired || hasImportActivity ? setOpen(true) : inputRef.current?.click()} aria-label={setupRequired ? "Open setup instructions" : hasImportActivity ? "Open import progress" : "Add clothes"}>{activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
-        <div className="import-tray__actions">{(uploads.length > 0 || active) && <img className="import-tray__preview" src={uploads[0]?.previewUrl || active?.stages?.garment?.assetUrl || active?.stages?.garment?.failedAssetUrl || active?.stages?.crop?.assetUrl || active?.originalAssetUrl} alt="" />}<span className="import-tray__label" role="status">{activeStatus?.text || "Add clothes"}</span>{!setupRequired && <button className="import-icon-button" type="button" onClick={() => inputRef.current?.click()} aria-label="Choose images"><UploadSimple size={17} /></button>}</div>
+        <div className="import-tray__actions">{(uploads[0]?.previewUrl || (!uploads.length && active)) && <img className="import-tray__preview" src={uploads[0]?.previewUrl || active?.stages?.garment?.assetUrl || active?.stages?.garment?.failedAssetUrl || active?.stages?.crop?.assetUrl || active?.originalAssetUrl} alt="" />}<span className="import-tray__label" role="status">{activeStatus?.text || "Add clothes"}</span>{!setupRequired && <button className="import-icon-button" type="button" onClick={() => inputRef.current?.click()} aria-label="Choose images"><UploadSimple size={17} /></button>}</div>
       </aside>
       <div className="import-popover-backdrop" data-open={open} onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
         <section className="import-popover" role="dialog" aria-modal="true" aria-labelledby="import-title">
           <header className="import-popover__header"><div><p className="import-popover__eyebrow">{reviewJob?.modeledReplacement ? "Modelled shot" : "Wardrobe import"}</p><h2 className="import-popover__title" id="import-title">{uploads.length ? activeStatus.text : readyCount ? `${readyCount} ready for review` : activeStatus?.tone === "error" ? "Import needs attention" : jobs.length ? "Preparing new pieces" : notice?.text || "Add to your wardrobe"}</h2></div><button className="import-icon-button" type="button" onClick={() => setOpen(false)} aria-label="Close import progress"><X size={20} /></button></header>
           {uploads.length > 0 && <div className="import-upload-list" aria-label="Images being added" aria-busy="true">
             {uploads.map((upload) => <div className="import-upload" key={upload.id}>
-              <img className="import-upload__preview" src={upload.previewUrl} alt="" />
+              {upload.previewUrl ? <img className="import-upload__preview" src={upload.previewUrl} alt="" /> : <div className="import-upload__preview" aria-hidden="true" />}
               <div className="import-upload__body"><p className="import-upload__name" title={upload.name}>{upload.name}</p><p className="import-card__detail" role="status">{upload.status}</p><div className="import-progress is-indeterminate" aria-hidden="true"><div className="import-progress__track"><div className="import-progress__bar" /></div></div></div>
               <SpinnerGap size={20} className="import-spinner" aria-hidden="true" />
             </div>)}

@@ -3,6 +3,7 @@ import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/re
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { OutfitView } from "./outfit-view.jsx";
+import { ShoppingView } from "./shopping-view.jsx";
 
 const STORAGE_KEY = "open-wardrobe-edits-v1";
 const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
@@ -539,12 +540,15 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
 
 export function App() {
   const [route, setRoute] = useState(() => window.location.pathname.replace(/\/$/, "") || "/");
+  const [shoppingOpened, setShoppingOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/shopping");
   const [items, setItems] = useState([]);
   const [regenerationRequest, setRegenerationRequest] = useState(null);
   const [activeType, setActiveType] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useEffect(() => { if (route === "/shopping") setShoppingOpened(true); }, [route]);
 
   useEffect(() => {
     const onPopState = () => { setRoute(window.location.pathname.replace(/\/$/, "") || "/"); setSelectedId(null); };
@@ -628,10 +632,12 @@ export function App() {
   return (
     <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
       <nav className="wardrobe-site-nav" aria-label="Main navigation">
-        <a href="/" onClick={(event) => navigate(event, "/")} aria-current={route !== "/outfits" ? "page" : undefined}>Wardrobe</a>
+        <a href="/" onClick={(event) => navigate(event, "/")} aria-current={!["/outfits", "/shopping"].includes(route) ? "page" : undefined}>Wardrobe</a>
         <a href="/outfits" onClick={(event) => navigate(event, "/outfits")} aria-current={route === "/outfits" ? "page" : undefined}>Outfits</a>
+        <a href="/shopping" onClick={(event) => navigate(event, "/shopping")} aria-current={route === "/shopping" ? "page" : undefined}>Shopping</a>
       </nav>
-      {route === "/outfits" ? <OutfitView items={items} /> : <>
+      {(shoppingOpened || route === "/shopping") ? <div hidden={route !== "/shopping"}><ShoppingView items={items} loading={loading} wardrobeError={error} active={route === "/shopping"} /></div> : null}
+      {route === "/shopping" ? null : route === "/outfits" ? <OutfitView items={items} /> : <>
       <main className="gallery-pane">
         <header className="gallery-header">
           <div className="gallery-meta-row">
