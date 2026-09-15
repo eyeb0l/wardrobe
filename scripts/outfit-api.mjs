@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
+import { sendDisplayImage } from "./display-image.mjs";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishImage } from "./outfit-storage.mjs";
 import { acquireOutfitStoreLock } from "./outfit-store-lock.mjs";
 
@@ -734,9 +735,11 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if (asset && req.method === "GET") {
         const filename = asset[1];
         if (!FILE.test(filename) || !(await manifest()).outfits.some((item) => item.status === "accepted" && acceptedFilename(item.image) === filename)) throw fail("Image not found", 404);
+        const file = await containedFile(imageDir, filename);
+        if (await sendDisplayImage(req, res, file, url)) return;
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "no-store");
-        return res.end(await readFile(await containedFile(imageDir, filename)));
+        return res.end(await readFile(file));
       }
       const match = url.pathname.match(/^\/api\/outfits\/jobs\/([^/]+)(?:\/(.*))?$/);
       if (!match || !UUID.test(match[1]) || !jobs.has(match[1])) throw fail("Outfit job not found", 404);
@@ -747,9 +750,11 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if (candidate && req.method === "GET") {
         const filename = candidate[1];
         if (!FILE.test(filename) || !job.outfits.some((item) => item.internal?.candidateFile === filename || item.internal?.previousImage === filename)) throw fail("Candidate image not found", 404);
+        const file = await containedFile(path.join(jobsDir, job.id), filename);
+        if (await sendDisplayImage(req, res, file, url)) return;
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "no-store");
-        return res.end(await readFile(await containedFile(path.join(jobsDir, job.id), filename)));
+        return res.end(await readFile(file));
       }
       if (req.method === "POST" && action === "retry") {
         await readBody(req);

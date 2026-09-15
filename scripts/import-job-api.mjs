@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
+import { sendDisplayImage } from "./display-image.mjs";
 
 const API_ROOT = "/api/import/jobs";
 const ASSET_ROOT = "/api/import/assets";
@@ -727,6 +728,7 @@ export function wardrobeImportApi(options = {}) {
       const referenceMatch = url.pathname.match(/^\/api\/import\/model-references\/(default|model-reference-[1-9]\d*)$/);
       if (referenceMatch && req.method === "GET") {
         const reference = await resolveModelReference(referenceMatch[1]);
+        if (await sendDisplayImage(req, res, reference.path, url)) return;
         const preview = await sharp(await readFile(reference.path)).rotate().resize({ width: 240, height: 300, fit: "inside", withoutEnlargement: true }).png().toBuffer();
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "no-store");
@@ -786,6 +788,7 @@ export function wardrobeImportApi(options = {}) {
       if (libraryAssetMatch && req.method === "GET") {
         const file = path.join(libraryAssetDir, path.basename(libraryAssetMatch[1]));
         await stat(file);
+        if (await sendDisplayImage(req, res, file, url)) return;
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", options.serverless ? "private, no-store" : "public, max-age=31536000, immutable");
         return res.end(await readFile(file));
@@ -794,6 +797,7 @@ export function wardrobeImportApi(options = {}) {
       if (assetMatch && req.method === "GET") {
         const file = path.join(jobsDir, assetMatch[1], path.basename(assetMatch[2]));
         await stat(file);
+        if (!file.endsWith(".svg") && await sendDisplayImage(req, res, file, url)) return;
         res.setHeader("Content-Type", file.endsWith(".svg") ? "image/svg+xml" : "image/png");
         res.setHeader("Cache-Control", "no-store");
         return res.end(await readFile(file));

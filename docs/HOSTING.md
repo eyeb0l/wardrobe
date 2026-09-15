@@ -47,6 +47,24 @@ If generation was interrupted after a paid request started, the app marks it for
 
 ## Updates and retained data
 
+### Display images
+
+The app retains original PNGs for generation, downloads, and precise colour sampling. Galleries, outfit photos, references, and import previews request responsive WebP copies at 320, 640, or 1280 pixels wide. Quality is set to 85 with lossless alpha, preserving transparent edges. Browser requests use private caching with ETag revalidation; replacing an original changes its cache identity.
+
+Copies are stored in the private Blob store, indexed by the separate `wardrobe_image_variants` table. New images create and retain the requested size on first display. They use the same authenticated API routes as originals. No paid image API is called for compression.
+
+Before upgrading an existing cloud installation, initialize the additive cache table and prepare existing images:
+
+```sh
+# Read-only inventory; omit --apply to inspect first.
+node --env-file=.env.cloud scripts/warm-display-images.mjs
+node --env-file=.env.cloud scripts/warm-display-images.mjs --apply
+```
+
+The command is resumable and leaves originals unchanged. Fresh cloud migrations create the table automatically. Old display copies remain stored after an original is replaced or removed, alongside retained original objects; neither has automatic garbage collection.
+
+### Releasing code
+
 For a connected repository, push reviewed code to the configured production branch. Alternatively, use a Vercel CLI source deployment from the project checkout. Vercel runs `npm run build:vercel`, which builds the frontend and hosted API/workflows together. Run `npm test` and `npm run build:vercel` before releasing changes.
 
 Deploying new source preserves the existing Neon and Blob data. Keep the same storage connections and production environment variables. Local `npm run dev` continues to use the local filesystem independently; hosted edits and newly generated photos do not appear in local `data/` automatically.

@@ -1,6 +1,8 @@
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { DISPLAY_WIDTHS, DISPLAY_RECIPE } from "../shared/image-variants.mjs";
+import { displayKey, displayETag, encodeDisplayImage, matchesETag } from "./display-image.mjs";
 
 export const CLOUD_ROOT = "/wardrobe-data";
 const LEASE_SECONDS = 270;
@@ -13,10 +15,20 @@ const canonical = (value) => {
   return normalized;
 };
 
+export const DISPLAY_CACHE_SCHEMA = `CREATE TABLE IF NOT EXISTS wardrobe_image_variants (
+  cache_key text PRIMARY KEY,
+  source_blob_url text NOT NULL,
+  recipe text NOT NULL,
+  width integer NOT NULL CHECK (width IN (320, 640, 1280)),
+  blob_url text NOT NULL,
+  size bigint NOT NULL CHECK (size > 0)
+)`;
+
 // This schema is applied by the explicit migration command, never by a request.
 // Every mutation locks and checks the lease row inside the same database
 // transaction as the metadata change. An expired worker cannot publish writes.
 export const CLOUD_SCHEMA_SQL = [
+  DISPLAY_CACHE_SCHEMA,
   `CREATE TABLE IF NOT EXISTS wardrobe_files (
     path text PRIMARY KEY,
     kind text NOT NULL CHECK (kind IN ('file', 'dir')),
@@ -175,8 +187,64 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     if (!rows[0]) throw error("ENOENT", target);
     return rows[0];
   };
+  const readBlob = async (url, file, useCache = true) => {
+    const result = await (await getBlob()).get(url, { access: "private", useCache });
+    if (!result || result.statusCode !== 200 || !result.stream) throw error("ENOENT", file, "Stored image is unavailable");
+    return Buffer.from(await new Response(result.stream).arrayBuffer());
+  };
+  const imageRow = async (file, width) => {
+    if (width !== undefined && !DISPLAY_WIDTHS.includes(width)) throw Object.assign(new Error("Unsupported display image size"), { status: 400 });
+    const row = await rowFor(file);
+    if (row.kind !== "file" || !row.blob_url) throw Object.assign(new Error("Image not found"), { status: 404 });
+    return row;
+  };
+  const pendingVariants = new Map();
+  const variantFor = async (source, width, readSource = () => readBlob(source.blob_url, source.path)) => {
+    const key = displayKey(source.blob_url, width);
+    if (pendingVariants.has(key)) return pendingVariants.get(key);
+    const work = (async () => {
+      const [cached] = await db.query("SELECT * FROM wardrobe_image_variants WHERE cache_key = $1", [key]);
+      if (cached) return cached;
+      // The source URL is immutable. Never re-resolve its path after the lookup:
+      // a simultaneous replacement must not cache new bytes under the old key.
+      const bytes = await encodeDisplayImage(await readSource(), width);
+      const uploaded = await (await getBlob()).put(`wardrobe/display/${key}.webp`, bytes,
+        { access: "private", contentType: "image/webp", addRandomSuffix: true, allowOverwrite: false });
+      await db.query(`INSERT INTO wardrobe_image_variants (cache_key, source_blob_url, recipe, width, blob_url, size)
+        VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (cache_key) DO NOTHING`,
+        [key, source.blob_url, DISPLAY_RECIPE, width, uploaded.url, bytes.length]);
+      const [saved] = await db.query("SELECT * FROM wardrobe_image_variants WHERE cache_key = $1", [key]);
+      return saved;
+    })();
+    pendingVariants.set(key, work);
+    try { return await work; } finally { pendingVariants.delete(key); }
+  };
   store = {
     root: CLOUD_ROOT,
+    // Derivatives are immutable, independently reproducible cache entries. Their
+    // insert-only writes do not take the wardrobe writer lease or change originals.
+    async initializeDisplayImages() { await db.query(DISPLAY_CACHE_SCHEMA); },
+    async displayImage(file, width, condition) {
+      const source = await imageRow(file, width);
+      const etag = displayETag(displayKey(source.blob_url, width));
+      if (matchesETag(condition, etag)) return { etag, notModified: true };
+      const variant = await variantFor(source, width);
+      return { etag, bytes: await readBlob(variant.blob_url, file) };
+    },
+    async listDisplayImageSources() {
+      return db.query("SELECT path, size FROM wardrobe_files WHERE kind = 'file' AND blob_url IS NOT NULL AND path ~* $1 ORDER BY path", ["\\.(png|jpe?g|webp)$"]);
+    },
+    async warmDisplayImages(file) {
+      const source = await imageRow(file);
+      let original;
+      const readSource = () => original ??= readBlob(source.blob_url, file);
+      const variants = [];
+      for (const width of DISPLAY_WIDTHS) {
+        const variant = await variantFor(source, width, readSource);
+        variants.push({ width, bytes: Number(variant.size) });
+      }
+      return { path: file, originalBytes: Number(source.size), variants };
+    },
     async initialize() { await db.transaction(CLOUD_SCHEMA_SQL.map((text) => ({ text }))); },
     async assertLease() { await mutate("assert", {}); },
     async withLease(callback) {

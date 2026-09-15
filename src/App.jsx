@@ -438,6 +438,10 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
 
   const handleImageClick = (event) => {
     if (!sampling || !samplingCanvasRef.current) return;
+    if (!event.currentTarget.complete || event.currentTarget.currentSrc !== event.currentTarget.src) {
+      setSampleStatus("Loading the original image for colour sampling.");
+      return;
+    }
     const color = sampleImageColor(event.currentTarget, samplingCanvasRef.current, event);
     if (!color) {
       setSampleStatus("That spot is transparent—try directly on the garment.");
@@ -457,6 +461,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
     >
       <OptimizedImage
         ref={imageRef}
+        unoptimized={Boolean(sampling)}
         src={item.image}
         alt={`Selected ${type.toLowerCase()}`}
         sizes={hasModeledImage ? "112px" : "(max-width: 520px) 100vw, 300px"}
