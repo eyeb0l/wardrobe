@@ -29,16 +29,21 @@ npm run dev
 
 Open [localhost:5173](http://localhost:5173).
 
-## Import with Codex
+## Use with Codex
 
-This repo includes two Codex skills: one imports clothes and generates modeled item photos; the other styles complete outfits and generates a modeled lookbook.
+This repo includes three Codex skills for importing clothes, creating modeled outfits, and assessing potential purchases against your wardrobe.
 
 ```text
 $import-clothes Import the clothes from ~/Pictures/outfits, create modeled photos, and add them to this wardrobe.
 $generate-outfits Create modeled outfit ideas from my wardrobe.
+$shopping-assistant Would the piece in this screenshot be a good addition to my wardrobe?
+$shopping-assistant Review my wishlist in the browser and shortlist the pieces that add the most to my wardrobe.
+$shopping-assistant Find a navy wool cardigan under £100 on my preferred sites and compare it with what I own.
 ```
 
-Open the cloned repo in Codex and run either prompt. The import skill asks for a local model-reference PNG when needed, reviews every cutout and modeled photo, then writes to `data/library.json` and `data/imported/`. The outfit skill asks how many looks to create, then curates, generates, verifies, and saves the complete collection under `data/`.
+Open the cloned repo in Codex and use the relevant prompt. The import skill asks for a local model-reference PNG when needed, reviews every cutout and modeled photo, then writes to `data/library.json` and `data/imported/`. The outfit skill asks how many looks to create, then curates, generates, verifies, and saves the complete collection under `data/`.
+
+The [Shopping Assistant skill](.agents/skills/shopping-assistant/SKILL.md) compares supplied photos or screenshots with your selected model reference and owned pieces, then gives advice directly in Codex. When requested, it uses available browser or computer tools to review a live wishlist or search retailer sites, checking product details and comparing candidates with each other. It reuses the app's local wardrobe and reference conventions; advice does not automatically import purchases or save a result to the Shopping tab.
 
 ### For agents
 
@@ -73,7 +78,7 @@ Wardrobe uploads support JPEG, PNG, WebP and HEIC/HEIF through the file picker, 
 | `WARDROBE_MODEL_REFERENCE` | `data/model-reference.png` |
 | `WARDROBE_DATA_DIR` | `data` |
 
-The web importer and outfit generator use these values from `.env` when Vite starts; restart after changing them. `OPENAI_GARMENT_MODEL` and `OPENAI_MODELED_MODEL` can override the image model for each stage. Outfit planning uses `OPENAI_VISION_MODEL`; outfit photographs use `OPENAI_MODELED_MODEL`, falling back to `OPENAI_IMAGE_MODEL`. `OPENAI_API_BASE_URL` optionally overrides the API base URL (default `https://api.openai.com/v1`). Keys remain on the server. The bundled Codex skills use Codex's Imagegen tool, whose model is selected by Codex rather than this app's `.env`.
+The web importer and outfit generator use these values from `.env` when Vite starts; restart after changing them. `OPENAI_GARMENT_MODEL` and `OPENAI_MODELED_MODEL` can override the image model for each stage. Outfit planning uses `OPENAI_VISION_MODEL`; outfit photographs use `OPENAI_MODELED_MODEL`, falling back to `OPENAI_IMAGE_MODEL`. `OPENAI_API_BASE_URL` optionally overrides the API base URL (default `https://api.openai.com/v1`). Keys remain on the server. The import and outfit Codex skills use Codex's Imagegen tool, whose model is selected by Codex rather than this app's `.env`. The Shopping Assistant skill normally gives advice directly in Codex without a separate app API call.
 
 To offer additional model reference photos, add `data/model-reference-2.png`, `data/model-reference-3.png`, and so on (or place them in `WARDROBE_DATA_DIR` if configured). The photo set by `WARDROBE_MODEL_REFERENCE` stays the default. Choose a thumbnail in the importer's **Model reference** picker before approving a garment or regenerating its modeled image. One reference is used per generation; the choice is saved with the import and reused on retries. Use **Refresh photos** to discover newly added files without restarting. Photos stay local and must not be committed to Git.
 
