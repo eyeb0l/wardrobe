@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, stat, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishImage } from "./outfit-storage.mjs";
@@ -161,10 +161,11 @@ export function wardrobeOutfitApi(options = {}) {
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
   const models = () => ({ vision: setting("OPENAI_VISION_MODEL", "gpt-5.6-luna"), image: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst")) });
   const ensureActive = () => { if (disposed) throw fail("The server is restarting. Refresh after it is ready.", 503); };
+  const ensureWritable = () => { ensureActive(); if (options.readOnly) throw fail("This outfit request is read-only.", 409); };
   const exclusive = (task) => { const result = serial.then(() => { ensureActive(); return task(); }); serial = result.catch(() => {}); return result; };
 
   async function save(job) {
-    ensureActive();
+    ensureWritable();
     job.updatedAt = now();
     await atomicJson(path.join(jobsDir, job.id, "job.json"), job);
   }
@@ -196,6 +197,7 @@ export function wardrobeOutfitApi(options = {}) {
 
   function transition(job, mutate) {
     return exclusive(async () => {
+      ensureWritable();
       // The manifest is authoritative if approval committed before job saving
       // failed. Reconcile before allowing a later reject or paid retry.
       const current = structuredClone(job);
@@ -242,7 +244,7 @@ export function wardrobeOutfitApi(options = {}) {
       if (!match) continue;
       try {
         const file = await containedFile(importedDir, match[1]);
-        const meta = await sharp(file, { limitInputPixels: 64e6 }).metadata();
+        const meta = await sharp(await readFile(file), { limitInputPixels: 64e6 }).metadata();
         if (!meta.width || !meta.height) continue;
         found.set(record.id, { id: record.id, part: record.part, name: String(record.name || "Wardrobe piece").slice(0, 120), color: String(record.color || "").slice(0, 20), tags: Array.isArray(record.tags) ? record.tags.filter((item) => typeof item === "string").slice(0, 12).map((item) => item.slice(0, 40)) : [], file });
       } catch { /* Missing, escaped, or unreadable cutouts cannot be curated. */ }
@@ -360,7 +362,7 @@ export function wardrobeOutfitApi(options = {}) {
     ensureActive();
     const key = setting("OPENAI_API_KEY").trim();
     if (!key) throw fail("OPENAI_API_KEY is missing. Configure it and restart the server.", 503);
-    const timeoutMs = options.timeoutMs ?? 300_000;
+    const timeoutMs = options.timeoutMs ?? (options.serverless ? 210_000 : 300_000);
     const controller = new AbortController();
     controllers.add(controller);
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -498,7 +500,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     return error.status ? error.message : "A local outfit file could not be processed. Check the wardrobe and reference images, then retry.";
   }
 
-  async function runJob(job) {
+  async function runJob(job, singleStep = false) {
     if (!job.outfits.length) {
       try {
         const { plan, prompt } = await curate(job);
@@ -520,6 +522,9 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         await transition(job, async (next) => { next.status = "failed"; next.error = safeError(error); });
         return;
       }
+      // A hosted invocation has time for one provider operation. The durable
+      // runner schedules the next image only after this plan has been saved.
+      if (singleStep) return;
     }
     for (const outfit of job.outfits) {
       if (disposed) return;
@@ -532,7 +537,48 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         if (disposed) return;
         await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "failed"; item.error = safeError(error); recompute(next); });
       }
+      if (singleStep) return;
     }
+  }
+
+  async function runTask(task) {
+    ensureWritable();
+    if (!options.serverless) throw fail("External outfit tasks require serverless mode.", 409);
+    if (task?.kind !== "outfit" || !UUID.test(task.jobId || "")) throw fail("Invalid outfit task.");
+    const job = jobs.get(task.jobId);
+    if (!job) throw fail("Outfit job not found", 404);
+    if (!UUID.test(task.taskId || "") || job.internal.cloudTaskId !== task.taskId) return false;
+    if (!["planning", "generating"].includes(job.status)) return false;
+    await runJob(job, true);
+    return job.outfits.some((outfit) => outfit.status === "planned");
+  }
+
+  function pendingTasks() {
+    ensureActive();
+    return [...jobs.values()].filter((job) => ["planning", "generating"].includes(job.status) && UUID.test(job.internal.cloudTaskId || ""))
+      .map((job) => ({ kind: "outfit", jobId: job.id, taskId: job.internal.cloudTaskId }));
+  }
+
+  async function failTask(task, message = "Generation was interrupted. Its result is unknown; check API usage before Retry, which starts another request.") {
+    ensureWritable();
+    if (!options.serverless) throw fail("External outfit tasks require serverless mode.", 409);
+    if (task?.kind !== "outfit" || !UUID.test(task.jobId || "")) throw fail("Invalid outfit task.");
+    const job = jobs.get(task.jobId);
+    if (!job) throw fail("Outfit job not found", 404);
+    if (!UUID.test(task.taskId || "") || job.internal.cloudTaskId !== task.taskId) return;
+    const detail = shortText(message, "task failure message", 2000);
+    const unfinished = !job.outfits.length ? ["planning", "generating"].includes(job.status) : job.outfits.some((outfit) => ["planned", "generating"].includes(outfit.status));
+    if (!unfinished) return;
+    await transition(job, async (next) => {
+      for (const outfit of next.outfits) if (["planned", "generating"].includes(outfit.status)) {
+        outfit.status = "failed";
+        outfit.error = detail;
+      }
+      if (next.outfits.length) {
+        recompute(next);
+        if (next.outfits.some((outfit) => outfit.status === "failed")) next.error = detail;
+      } else { next.status = "failed"; next.error = detail; }
+    });
   }
 
   async function drain() {
@@ -561,7 +607,17 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     } finally { processing = false; }
   }
 
-  function enqueue(id) {
+  async function enqueue(id) {
+    if (options.serverless) {
+      ensureWritable();
+      if (typeof options.scheduleTask !== "function") throw fail("The outfit task scheduler is unavailable.", 503);
+      const job = jobs.get(id);
+      if (!job) throw fail("Outfit job not found", 404);
+      const taskId = job.internal.cloudTaskId;
+      if (!UUID.test(taskId || "")) throw fail("The outfit task identity is unavailable.", 503);
+      await options.scheduleTask({ kind: "outfit", jobId: id, taskId });
+      return;
+    }
     if (queued.has(id) || disposed) return;
     queue.push(id);
     queued.add(id);
@@ -588,7 +644,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
   async function readyReference(id) {
     if (!setting("OPENAI_API_KEY").trim()) throw fail("Configure OPENAI_API_KEY and restart the server before generating.", 503);
     const reference = await resolveReference(id || "default");
-    try { await sharp(reference.file, { limitInputPixels: 64e6 }).metadata(); }
+    try { await sharp(await readFile(reference.file), { limitInputPixels: 64e6 }).metadata(); }
     catch { throw fail("The selected model reference cannot be decoded. Replace it with a valid image before generating.", 503); }
     return reference;
   }
@@ -598,7 +654,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     if (!filename) return null;
     try {
       const file = await containedFile(path.join(jobsDir, job.id), filename);
-      await sharp(file, { limitInputPixels: 64e6 }).png().toBuffer();
+      await sharp(await readFile(file), { limitInputPixels: 64e6 }).png().toBuffer();
       return filename;
     } catch {
       // The earlier attempt is optional. An explicit retry can still use the
@@ -641,7 +697,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     if (url.pathname !== API && !url.pathname.startsWith(`${API}/`)) return next();
     try {
       ensureActive();
-      if (req.method !== "GET") mutationOrigin(req);
+      if (req.method !== "GET") { ensureWritable(); mutationOrigin(req); }
       if (url.pathname === API && req.method === "GET") return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits() });
       if (url.pathname === `${API}/config` && req.method === "GET") return sendJson(res, 200, await configuration());
       if (url.pathname === `${API}/jobs` && req.method === "GET") return sendJson(res, 200, { jobs: [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob), warnings: jobWarnings });
@@ -662,14 +718,16 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           if (input.count > setup.availableCombinations) throw fail(`Only ${setup.availableCombinations} distinct top-and-bottom combinations remain. Choose a smaller count.`, 409);
           if ([...jobs.values()].filter((item) => ["planning", "generating"].includes(item.status)).length >= 8) throw fail("Several outfit collections are already queued. Wait for one to finish before adding another.", 429);
           const id = randomUUID();
-          const job = { version: 1, id, count: input.count, direction, modelReferenceId: reference.id, status: "planning", createdAt: now(), updatedAt: now(), error: null, outfits: [], internal: {} };
+          // Persist authorization and its task identity together, so recovery can
+          // discover this work even if the process stops before scheduling.
+          const job = { version: 1, id, count: input.count, direction, modelReferenceId: reference.id, status: "planning", createdAt: now(), updatedAt: now(), error: null, outfits: [], internal: options.serverless ? { cloudTaskId: randomUUID() } : {} };
           await mkdir(path.join(jobsDir, id));
           await save(job);
           jobs.set(id, job);
           return job;
         });
+        await enqueue(job.id);
         sendJson(res, 202, publicJob(job));
-        enqueue(job.id);
         return;
       }
       const asset = url.pathname.match(/^\/api\/outfits\/images\/([^/]+)$/);
@@ -706,9 +764,10 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             recompute(next);
           }
           next.error = null;
+          if (options.serverless) next.internal.cloudTaskId = randomUUID();
         });
+        await enqueue(job.id);
         sendJson(res, 202, publicJob(job));
-        enqueue(job.id);
         return;
       }
       const outfitAction = action.match(/^outfits\/([a-z0-9-]+)\/(approve|reject|retry)$/);
@@ -732,11 +791,14 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             outfit.internal.previousImage = await previousCandidate(next, outfit);
             outfit.status = "planned";
             outfit.error = null;
+            // The new identity atomically invalidates older task deliveries and
+            // makes this retry discoverable before its scheduler is contacted.
+            if (options.serverless) next.internal.cloudTaskId = randomUUID();
           }
           recompute(next);
         });
+        if (outfitAction[2] === "retry") await enqueue(job.id);
         sendJson(res, outfitAction[2] === "retry" ? 202 : 200, publicJob(job));
-        if (outfitAction[2] === "retry") enqueue(job.id);
         return;
       }
       throw fail("Not found", 404);
@@ -748,54 +810,66 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
   return {
     name: "wardrobe-outfit-api",
     apply: "serve",
+    runTask,
+    failTask,
+    pendingTasks,
     async configResolved(config) {
       root = config.root;
       dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
-      await mkdir(dataDir, { recursive: true });
+      if (!options.readOnly) await mkdir(dataDir, { recursive: true });
       dataDir = await realpath(dataDir);
-      const previous = owners.get(dataDir);
+      const previous = options.serverless || options.readOnly ? null : owners.get(dataDir);
       let initialized;
       ownership = { ready: new Promise((resolve) => { initialized = resolve; }), dispose };
       // Publish the handoff synchronously before waiting: a third instance must
       // queue behind this one, and an old close must not unregister a new owner.
-      owners.set(dataDir, ownership);
+      if (!options.serverless && !options.readOnly) owners.set(dataDir, ownership);
       try {
         if (previous) {
           await previous.ready;
           await previous.dispose();
         }
         ensureActive();
-        releaseStore = await acquireOutfitStoreLock(dataDir);
+        if (!options.serverless && !options.readOnly) releaseStore = await acquireOutfitStoreLock(dataDir);
         ensureActive();
         jobsDir = path.join(dataDir, "outfit-jobs");
         imageDir = path.join(dataDir, "outfit-images");
         importedDir = path.join(dataDir, "imported");
-        await Promise.all([jobsDir, imageDir, importedDir].map((directory) => mkdir(directory, { recursive: true })));
+        if (!options.readOnly) await Promise.all([jobsDir, imageDir, importedDir].map((directory) => mkdir(directory, { recursive: true })));
         const saved = await manifest();
         // Establish the empty manifest before creating any job/image artifacts,
         // so later ENOENT is recognizable as loss rather than a new collection.
-        try { await stat(path.join(dataDir, "outfits.json")); }
-        catch (error) { if (error.code !== "ENOENT") throw error; await atomicJson(path.join(dataDir, "outfits.json"), saved); }
-        for (const entry of await readdir(jobsDir, { withFileTypes: true })) {
+        if (!options.readOnly) {
+          try { await stat(path.join(dataDir, "outfits.json")); }
+          catch (error) { if (error.code !== "ENOENT") throw error; await atomicJson(path.join(dataDir, "outfits.json"), saved); }
+        }
+        const entries = await readdir(jobsDir, { withFileTypes: true }).catch((error) => { if (options.readOnly && error.code === "ENOENT") return []; throw error; });
+        for (const entry of entries) {
           if (!entry.isDirectory() || !UUID.test(entry.name)) continue;
           const relative = `outfit-jobs/${entry.name}/job.json`;
           try {
             const file = await containedFile(path.join(jobsDir, entry.name), "job.json");
             const job = validateJob(await readJson(file, null), entry.name);
             const before = JSON.stringify(job);
-            reconcileAccepted(job, saved);
-            for (const outfit of job.outfits) {
-              if (["planned", "generating"].includes(outfit.status)) {
-                outfit.status = "failed";
-                outfit.error = "Generation was interrupted by a server restart. Check API usage before Retry; it starts another request.";
+            // Hosted instances are short lived. A new instance is not evidence
+            // of interrupted work; the external runner owns task recovery and
+            // mutation serialization. transition() reconciles approval commits
+            // under that caller's lock immediately before each mutation.
+            if (!options.serverless && !options.readOnly) {
+              reconcileAccepted(job, saved);
+              for (const outfit of job.outfits) {
+                if (["planned", "generating"].includes(outfit.status)) {
+                  outfit.status = "failed";
+                  outfit.error = "Generation was interrupted by a server restart. Check API usage before Retry; it starts another request.";
+                }
               }
+              if (["planning", "generating"].includes(job.status)) {
+                job.status = "failed";
+                job.error = "Generation was interrupted by a server restart. Retry explicitly to continue; no API request was restarted automatically.";
+              }
+              if (job.outfits.length) recompute(job);
+              if (JSON.stringify(job) !== before) await save(job);
             }
-            if (["planning", "generating"].includes(job.status)) {
-              job.status = "failed";
-              job.error = "Generation was interrupted by a server restart. Retry explicitly to continue; no API request was restarted automatically.";
-            }
-            if (job.outfits.length) recompute(job);
-            if (JSON.stringify(job) !== before) await save(job);
             jobs.set(job.id, job);
           } catch (error) {
             const detail = error.status ? error.message : error instanceof SyntaxError ? "Invalid JSON." : "The file could not be read or recovered.";

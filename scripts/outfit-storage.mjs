@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { link, lstat, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { link, lstat, readFile, readdir, rename, rm, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;

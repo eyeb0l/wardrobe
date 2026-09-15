@@ -1,0 +1,11 @@
+.env*
+data/
+.agents/
+.codex/
+.git/
+docs/screenshots/
+node_modules/
+.nitro/
+.output/
+scripts/*.test.mjs
+scripts/test-helpers/
