@@ -452,14 +452,14 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
 
   const garmentArtwork = (
     <div
-      className={`viewer-art${hasModeledImage ? " viewer-art-floating" : ""}${sampling ? " sampling" : ""}`}
+      className={`viewer-art${hasModeledImage ? " viewer-art-caption" : ""}${sampling ? " sampling" : ""}`}
       style={hasModeledImage ? { "--piece-rotation": pieceRotation } : undefined}
     >
       <OptimizedImage
         ref={imageRef}
         src={item.image}
         alt={`Selected ${type.toLowerCase()}`}
-        sizes="(max-width: 520px) 40vw, 300px"
+        sizes={hasModeledImage ? "112px" : "(max-width: 520px) 100vw, 300px"}
         breakpoints={[160, 240, 320, 480, 640]}
         priority
         onLoad={handleImageLoad}
@@ -478,23 +478,23 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
       </button>
 
       {hasModeledImage ? (
-        <div className="modeled-hero">
-          <OptimizedImage
-            className="modeled-hero-photo"
-            src={item.modeledImage}
-            alt={`${draft.name || type} worn by a model`}
-            sizes="(max-width: 860px) 100vw, 520px"
-            breakpoints={[320, 480, 640, 800, 1040, 1280]}
-            quality={82}
-            priority
-          />
-          <div className="viewer-heading modeled-heading">
-            <div>
-              <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
-            </div>
+        <>
+          <div className="modeled-hero">
+            <OptimizedImage
+              className="modeled-hero-photo"
+              src={item.modeledImage}
+              alt={`${draft.name || type} worn by a model`}
+              sizes="(max-width: 860px) 100vw, 520px"
+              breakpoints={[320, 480, 640, 800, 1040, 1280]}
+              quality={82}
+              priority
+            />
           </div>
-          {garmentArtwork}
-        </div>
+          <div className="viewer-heading modeled-heading">
+            <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
+            {garmentArtwork}
+          </div>
+        </>
       ) : (
         <>
           <div className="viewer-heading">
