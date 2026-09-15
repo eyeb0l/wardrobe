@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "node --test scripts/*.test.mjs",
     "check": "npm run build",
-    "build:vercel": "vite build && nitro build && node scripts/package-workflow-native.mjs",
+    "build:vercel": "vite build && nitro build && node scripts/package-workflow-native.mjs && node scripts/verify-vercel-spa.mjs",
     "cloud:import": "node scripts/migrate-to-cloud.mjs"
   },
   "dependencies": {
