@@ -2,7 +2,8 @@ import { start } from "workflow/api";
 import { waitUntil } from "@vercel/functions";
 import { createCloudStore } from "../scripts/cloud-store.mjs";
 import { withStorage } from "../scripts/storage-fs.mjs";
-import { createPlugin } from "./plugins.mjs";
+import { createPlugin, DATA_ROOT } from "./plugins.mjs";
+import { sendDisplayImage } from "../scripts/display-image.mjs";
 import { createTask, saveTask, reservePaidCall } from "./task-store.mjs";
 import { generateWardrobe } from "./generation-workflow.mjs";
 import { recoverOutbox } from "./outbox.mjs";
@@ -36,7 +37,8 @@ export default async function handler(req, res) {
   if (process.env.WARDROBE_HOSTED_ENABLED !== "1" || process.env.VERCEL_ENV !== "production") {
     return json(res, 503, { error: "Hosted wardrobe is not enabled for this deployment." });
   }
-  const pathname = new URL(req.url, "http://localhost").pathname;
+  const requestUrl = new URL(req.url, "http://localhost");
+  const pathname = requestUrl.pathname;
   const kind = pathname.startsWith("/api/import/") ? "import" : pathname.startsWith("/api/outfits") ? "outfit" : pathname.startsWith("/api/shopping/") ? "shopping" : null;
   if (!kind) return json(res, 404, { error: "Not found" });
   if (!["GET", "POST", "DELETE", "PATCH", "PUT"].includes(req.method)) return json(res, 405, { error: "Method not allowed" });
@@ -48,6 +50,14 @@ export default async function handler(req, res) {
   const store = createCloudStore();
   let plugin;
   const serve = () => withStorage(store, async () => {
+    // The library's image route only requires an existing file in imported/.
+    // Avoid loading every import job for each gallery thumbnail. Authentication
+    // and the production gate above still apply to every request.
+    const libraryImage = pathname.match(/^\/api\/import\/library\/([\w.-]+\.(?:png|jpe?g|webp))$/i);
+    if (readOnly && libraryImage && (requestUrl.searchParams.has("format") || requestUrl.searchParams.has("w"))) {
+      await sendDisplayImage(req, res, `${DATA_ROOT}/imported/${libraryImage[1]}`, requestUrl);
+      return;
+    }
     plugin = await createPlugin(kind, {
       readOnly,
       scheduleTask: async (payload) => {
