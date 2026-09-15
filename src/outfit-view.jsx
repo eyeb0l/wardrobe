@@ -260,6 +260,7 @@ export function OutfitView({ items = EMPTY_ITEMS }) {
   const [loadError, setLoadError] = useState("");
   const [configError, setConfigError] = useState("");
   const [jobsError, setJobsError] = useState("");
+  const [jobWarnings, setJobWarnings] = useState([]);
   const [actionError, setActionError] = useState("");
   const [busyKey, setBusyKey] = useState("");
   const [refreshingConfig, setRefreshingConfig] = useState(false);
@@ -289,7 +290,7 @@ export function OutfitView({ items = EMPTY_ITEMS }) {
       if (controller.signal.aborted) return;
       if (collectionResult.status === "rejected") setLoadError(collectionResult.reason.message);
       if (configResult.status === "fulfilled") { setConfig(configResult.value); setConfigError(""); } else setConfigError(configResult.reason.message);
-      if (jobsResult.status === "fulfilled") { setJobs((current) => mergeJobs(current, jobsResult.value.jobs || [])); setJobsError(""); } else setJobsError(jobsResult.reason.message);
+      if (jobsResult.status === "fulfilled") { setJobs((current) => mergeJobs(current, jobsResult.value.jobs || [])); setJobWarnings(jobsResult.value.warnings || []); setJobsError(""); } else setJobsError(jobsResult.reason.message);
       setLoading(false);
     });
     return () => { mounted.current = false; controller.abort(); };
@@ -350,6 +351,7 @@ export function OutfitView({ items = EMPTY_ITEMS }) {
       <button className="outfit-primary" type="button" onClick={() => { setActionError(""); setModal({ type: "generate" }); }} disabled={loading}><Plus size={18} aria-hidden="true" />Generate outfits</button>
     </header>
     {jobsError ? <div className="outfit-page-notice" role="status"><p>{jobsError}</p><button className="outfit-text-button" type="button" onClick={() => setReload((value) => value + 1)}>Refresh</button></div> : null}
+    {jobWarnings.length ? <div className="outfit-page-notice" role="alert"><p>Some saved generations need attention.</p><ul>{jobWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
     {actionError && !modal ? <p className="outfit-page-notice outfit-error" role="alert">{actionError}</p> : null}
     {currentJobs.length ? <section className="outfit-jobs" aria-label="Outfits in progress">{currentJobs.map((job) => <JobRow key={job.id} job={job} onOpen={openJob} />)}</section> : null}
     {loadError ? <div className="outfit-page-notice" role="alert"><p>{loadError}</p><button className="outfit-text-button" type="button" onClick={() => setReload((value) => value + 1)}>Reload collection</button></div> : null}

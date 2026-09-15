@@ -88,13 +88,31 @@ See [model migration and prompt checks](docs/model-migration.md) for compatibili
 
 Open **Outfits** or visit `/outfits` to browse the saved collection. Open a look to see its full photograph, styling notes, and the wardrobe pieces it uses. Collections written by the Codex outfit skill are loaded from `data/outfits.json`; their images are served from `data/outfit-images/`.
 
-Below the pieces in a saved look, choose **Suggest accessories** for a short list of optional finishing touches. This sends the existing outfit photo to `OPENAI_VISION_MODEL` (default `gpt-5.6-luna`) through the configured API and returns text only. Suggestions are stored locally in `data/outfit-accessories.json` and reused when you reopen the look; changing the photo or configured vision model makes fresh suggestions available. Outfit photographs and wardrobe records are not modified.
+Below the pieces in a saved look, choose **Suggest accessories** for a short list of optional finishing touches. This sends the existing outfit photo to `OPENAI_VISION_MODEL` (default `gpt-5.6-luna`) through the configured API and returns text only. Suggestions are stored locally in `data/outfit-accessories.json` and reused when you reopen the look; changing the photo, configured vision model, styling context, or accessory recipe makes fresh suggestions available. Outfit photographs and wardrobe records are not modified.
 
 Choose **Generate outfits**, enter a count from 1 to 12, add optional styling direction, and choose a model reference. Planning uses the actual garment images and metadata, then creates one square modeled photograph per combination. Each outfit contains one top and one bottom, with optional outerwear, shoes, and an accessory. New combinations avoid the existing collection and active candidates.
 
 Generation progress and review candidates persist in `data/outfit-jobs/`. Review each image against its wardrobe references, then accept it into the collection, reject it, or retry with a specific correction. Accepting adds the new look while preserving existing outfits. An interrupted request becomes a retryable failure on server restart; restarting never automatically repeats paid API calls. Use the retry control to continue failed work.
 
 All collection data, source images, references, and generated photographs stay in the ignored local `data/` directory. Generating sends the selected reference and garment images to the configured API. The gallery works without an API key; generation needs a configured key, a model reference, and enough unused top-and-bottom combinations.
+
+### Saving Codex collections and recovering local data
+
+The app permits one outfit writer process per configured data directory. Stop its Wardrobe server before saving a reviewed Codex batch, then run this command from the repository root:
+
+```sh
+node scripts/save-outfit-collection.mjs /path/to/staged/outfits.json
+```
+
+The staged version-1 manifest must contain accepted records whose PNGs are under its sibling `outfit-images/` directory; keep the entire staging directory outside live data. The helper reads `WARDROBE_DATA_DIR` from the environment or `.env` (or accepts `--data-dir PATH`), adds records to the existing collection, and uses immutable image filenames. Identical retries succeed; conflicting IDs or image contents are rejected. Restart the server after saving. Use this helper instead of editing the live manifest or replacing images directly.
+
+Writer ownership is recorded in `.outfit-store.lock`. A provably dead process on the same host can be recovered automatically; unreadable locks, locks from another host, and interrupted `.outfit-store.recovery` guards require inspection with all writers stopped. Never delete a live process's lock or run two app copies against the same directory.
+
+Back up the **whole configured data directory together**, with the server stopped: `outfits.json`, `outfit-jobs/` (including candidates and job state), `outfit-images/`, `outfit-accessories.json`, the wardrobe library, imported images, and local references. Back up separately configured model-reference files too. Atomic file replacement helps interrupted writes, but does not replace backups or guarantee survival after power loss. Restore a consistent backup together and exclude transient `.outfit-store.lock`, `.outfit-store.recovery`, and `.outfit-store-owner-*.tmp` files from restores; acquire fresh ownership when the app starts.
+
+Damaged collection or job files are reported and preserved for repair or restoration. A missing manifest with surviving outfit images or jobs is treated as missing data, not a new empty wardrobe. Unsupported future versions must remain untouched; use a compatible app version. Any future migration should back up the original first, validate records before and after conversion, and preserve unknown fields.
+
+Invalid individual accessory suggestions become cache misses. If the entire `outfit-accessories.json` is corrupt, stop the server, preserve a copy, and inspect it. For malformed JSON or a damaged version-1 cache, move the file aside under a distinct backup name, then restart and request suggestions explicitly; this only rebuilds optional suggestions. Leave a readable unsupported-version cache untouched and use a compatible app version. Do not reset collection or job files as part of accessory-cache recovery.
 
 ## Shopping assistant
 

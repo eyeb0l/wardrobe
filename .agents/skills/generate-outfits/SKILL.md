@@ -5,7 +5,7 @@ description: Curate outfits and create modeled photos from clothes already impor
 
 # Generate Outfits
 
-Create a complete local outfit collection from `data/library.json`: select strong combinations, generate a square modeled image for each, verify every result, and save the finished manifest and images under `data/`.
+Create a complete local outfit collection from `data/library.json`: select strong combinations, generate a square modeled image for each, verify every result, and add the finished outfits and images to the saved collection.
 
 ## Scope and inputs
 
@@ -21,6 +21,8 @@ For a modeled collection, completion means the requested number of reviewed imag
 - Never add `data/`, the identity reference, garment images, or generated photos to Git.
 - Select wardrobe garments only from the current database with successfully resolved local assets. The styling basics below do not require wardrobe records.
 
+Paths below use `data/` as shorthand for the configured `WARDROBE_DATA_DIR` (environment or repository `.env`, default `data`), resolved from the repository root. Use the same data directory as the running app.
+
 ## Parallel work
 
 Use subagents when the user requests more than eight outfits or explicitly asks for parallel generation. Keep one main agent responsible for the complete wardrobe inventory, global combination uniqueness, garment-usage balance, manifest reconciliation, and final QA.
@@ -29,7 +31,7 @@ Assign each worker a disjoint set of outfit IDs plus the exact identity and garm
 
 ## 1. Inspect the wardrobe
 
-Read `data/library.json`. Resolve `/api/import/library/FILENAME` assets to `data/imported/FILENAME`. Group items by:
+Read `data/library.json` and the existing `data/outfits.json` when present. Reserve existing outfit IDs and garment combinations so the new batch adds distinct looks without replacing saved outfits. Preserve all existing records and unknown fields. Resolve `/api/import/library/FILENAME` assets to `data/imported/FILENAME`. Group items by:
 
 - `upperbody` — tops
 - `wholebody_up` — jackets and outer layers
@@ -79,7 +81,7 @@ Keep working files in a temporary directory outside `data/` (referred to here as
 }
 ```
 
-Use stable lowercase hyphenated IDs. Reject duplicate garment combinations even when names or settings differ.
+Use stable lowercase hyphenated IDs that are unused in the saved collection. Reject duplicate garment combinations even when names or settings differ. The working manifest contains only the newly requested batch; its count is separate from the total saved collection.
 
 ## 3. Prepare references and prompts
 
@@ -115,11 +117,12 @@ Regenerate identity drift, missing or redesigned garments, fake closures or text
 
 After all requested outfits pass, save exactly one accepted image per unique outfit:
 
-1. Create `data/outfit-images/` if needed.
-2. Copy each accepted PNG to `data/outfit-images/OUTFIT-ID.png`.
-3. Set every accepted manifest image to `/api/import/outfits/OUTFIT-ID.png` only if the app exposes that endpoint; otherwise keep the repository-relative `outfit-images/OUTFIT-ID.png` path.
-4. Atomically write the exact requested collection to `data/outfits.json`.
-5. Reopen every copied file and verify that the count of images, unique outfit IDs, and accepted manifest records all equal the number the user requested.
+1. Place each reviewed PNG at `$WORK/outfit-images/OUTFIT-ID.png`, outside the configured data directory. Set its working manifest `image` to `outfit-images/OUTFIT-ID.png` and `status` to `accepted`.
+2. Stop this repository's Wardrobe server before saving. The server and save helper share an exclusive writer lock; never bypass or delete a live writer's lock.
+3. From the repository root, run `node scripts/save-outfit-collection.mjs "$WORK/outfits.json"`. The helper resolves `WARDROBE_DATA_DIR` from the environment or `.env`; use `--data-dir PATH` only when intentionally selecting another store. It reads the latest validated manifest, adds the reviewed outfits, and publishes images under immutable content-hash filenames. An identical rerun is safe; a conflicting outfit ID is rejected without replacing that outfit.
+4. Read the helper's returned `outfits` and `manifestPath`, reopen every resulting image, and verify that the new batch has the requested count of unique accepted outfits. Confirm prior records remain present; the gallery total may exceed the requested count. Restart the server when appropriate.
+
+Use this helper for delivery instead of directly copying into the live image directory or rewriting the live manifest. If saving fails, retain the staged batch and retry after correcting the reported problem. Preserve corrupt or unsupported-version files for recovery; do not replace them with an empty collection.
 
 Do not claim the current gallery displays outfits unless the app has an outfit route. The completed local assets and manifest are still the deliverable.
 
