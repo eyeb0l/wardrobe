@@ -69,6 +69,8 @@ For a connected repository, push reviewed code to the configured production bran
 
 Deploying new source preserves the existing Neon and Blob data. Keep the same storage connections and production environment variables. Local `npm run dev` continues to use the local filesystem independently; hosted edits and newly generated photos do not appear in local `data/` automatically.
 
+Project skills use the live cloud wardrobe by default. See [the skill storage workflow](SKILL_STORAGE.md) for private task snapshots and publishing reviewed imports/outfits without rerunning the initial migration. These helpers also support an explicitly selected local store.
+
 Gallery edits to names, categories, colours and tags, plus hiding items added outside the web importer, are stored only in the current browser and do not sync between devices.
 
 Retain the original local backup. There is currently no cloud export/restore command or automatic cloud-to-local backup in this repository. Configure and verify any provider backup arrangements separately, keeping database records and image objects together. Rolling back a deployment rolls back code, not wardrobe data.
