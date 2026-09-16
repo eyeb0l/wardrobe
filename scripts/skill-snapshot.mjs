@@ -20,8 +20,9 @@ export async function snapshotForSkill({ target, dataDir, store, reference, out 
   // Read and validate the authoritative metadata before creating the output.
   const libraryPath = path.join(dataDir, 'library.json');
   const libraryBytes = await store.readFile(libraryPath);
-  const library = JSON.parse(libraryBytes);
-  if (!Array.isArray(library)) throw new Error('The saved library must be an array.');
+  const records = JSON.parse(libraryBytes);
+  if (!Array.isArray(records)) throw new Error('The saved library must be an array.');
+  const library = records.filter(item => !item.hidden);
   const outfits = await withStorage(store, () => readManifest(dataDir));
   const files = new Map();
   for (const item of library) {
@@ -59,7 +60,7 @@ export async function snapshotForSkill({ target, dataDir, store, reference, out 
     const current = await store.stat(file.source);
     if (current.size !== file.size || current.mtimeMs !== file.mtimeMs) throw new Error('Wardrobe image changed during snapshot; retry into a fresh directory.');
   }
-  await local.writeFile(path.join(resolvedOutput, 'library.json'), libraryBytes, { flag: 'wx', mode: 0o600 });
+  await local.writeFile(path.join(resolvedOutput, 'library.json'), JSON.stringify(library, null, 2), { flag: 'wx', mode: 0o600 });
   await local.writeFile(path.join(resolvedOutput, 'outfits.json'), JSON.stringify(outfits, null, 2), { flag: 'wx', mode: 0o600 });
   const result = { target, capturedAt: new Date().toISOString(), directory: resolvedOutput, wardrobeCount: library.length,
     outfitCount: outfits.outfits.length, references: references.map(({ id, file }) => ({ id, file })),

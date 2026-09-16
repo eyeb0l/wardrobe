@@ -27,7 +27,7 @@ The snapshot command reads cloud storage without changing it. It refuses an exis
 
 Honor the user's selected reference or the current app selection. Otherwise use `default` and identify the choice briefly. If it is unavailable, ask for the intended reference instead of silently substituting another person. Read references from the selected store; a laptop's `WARDROBE_MODEL_REFERENCE` does not configure the hosted app.
 
-The app also has browser-only name/category/colour/tag edits and hidden items. Reconcile with the visible wardrobe when relevant, using only the browser tool's permitted interfaces. The storage snapshot does not include those overlays. Do not fabricate ownership from an image path or restore hidden items merely because they remain in storage.
+Name/category/colour/tag edits and hidden items are now shared in the stored library. The app migrates older browser-only edits when that browser next opens the upgraded app, retaining newer shared edits if they conflict. Task snapshots include the current shared metadata and exclude hidden/deleted records and their cutouts. Outfit publication rechecks that selected garments are still visible in the live library. Do not fabricate ownership from an image path or restore hidden items merely because they remain in storage.
 
 ## Images and privacy
 
