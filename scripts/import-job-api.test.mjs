@@ -64,7 +64,7 @@ async function harness(t, env = {}) {
   plugin.configureServer({ middlewares: { use(value) { handler = value; } } });
   async function request(method, url, payload, expectedStatus) {
     const req = Readable.from(payload ? [Buffer.from(JSON.stringify(payload))] : []);
-    Object.assign(req, { method, url });
+    Object.assign(req, { method, url, headers: payload ? { 'content-type': 'application/json' } : {} });
     let result;
     const res = { statusCode: 200, setHeader() {}, end(value) { result = Buffer.isBuffer(value) ? value : JSON.parse(value); } };
     await handler(req, res, () => assert.fail("Unexpected middleware fallthrough"));
@@ -337,7 +337,7 @@ test("saved modeled shots reopen, regenerate and replace only after approval", a
   assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), [updated]);
   assert.deepEqual(await h.request("GET", "/api/import/jobs"), []);
   await h.request("POST", "/api/import/wardrobe/import-00000000-0000-0000-0000-000000000000/modeled", undefined, 404);
-  await h.request("DELETE", `/api/import/wardrobe/${updated.id}`);
+  await h.request("DELETE", `/api/import/wardrobe/${updated.id}`, { revision: updated.revision });
   assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), []);
   await h.request("GET", updated.modeledImage, undefined, 404);
   await h.request("GET", original.modeledImage, undefined, 404);

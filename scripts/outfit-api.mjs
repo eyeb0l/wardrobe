@@ -240,7 +240,7 @@ export function wardrobeOutfitApi(options = {}) {
     if (!Array.isArray(records)) throw fail("The wardrobe library is invalid. Restore library.json before generating.", 503);
     const found = new Map();
     for (const record of records) {
-      if (!record || !validId(record.id) || !PARTS.includes(record.part) || found.has(record.id)) continue;
+      if (!record || record.hidden || !validId(record.id) || !PARTS.includes(record.part) || found.has(record.id)) continue;
       const match = typeof record.image === "string" && record.image.match(/^\/api\/import\/library\/([a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp))$/i);
       if (!match) continue;
       try {

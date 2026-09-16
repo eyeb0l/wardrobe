@@ -61,7 +61,7 @@ node --env-file=.env.cloud scripts/warm-display-images.mjs
 node --env-file=.env.cloud scripts/warm-display-images.mjs --apply
 ```
 
-The command is resumable and leaves originals unchanged. Fresh cloud migrations create the table automatically. Old display copies remain stored after an original is replaced or removed, alongside retained original objects; neither has automatic garbage collection.
+The command is resumable and leaves originals unchanged. Fresh cloud migrations create the table automatically. Unreferenced originals and display copies are collected by the daily storage cleanup described below.
 
 ### Releasing code
 
@@ -71,8 +71,31 @@ Deploying new source preserves the existing Neon and Blob data. Keep the same st
 
 Project skills use the live cloud wardrobe by default. See [the skill storage workflow](SKILL_STORAGE.md) for private task snapshots and publishing reviewed imports/outfits without rerunning the initial migration. These helpers also support an explicitly selected local store.
 
-Gallery edits to names, categories, colours and tags, plus hiding items added outside the web importer, are stored only in the current browser and do not sync between devices.
+Gallery edits to names, categories, colours and tags, plus hidden/deleted items, are stored in the shared wardrobe library. They sync on page load, when returning to the tab, and every 30 seconds while the tab is visible. A stale save is rejected rather than overwriting a change from another device; close and reopen the item to use its latest values. Refreshing the gallery preserves unfinished text in an open editor.
+
+On first opening the upgraded app in each browser, older browser-only edits and hidden items migrate automatically. Existing shared edits take precedence over an older browser's copy. A local backup remains under `open-wardrobe-legacy-backup-v1`; failed migrations retain the original browser keys and retry on the next refresh. Deleted items retain a small metadata tombstone so a delayed import or migration cannot resurrect them. Hidden items are excluded from outfit and shopping inventories. Local development still uses its own data directory; this sync is between devices accessing the same hosted app.
 
 Retain the original local backup. There is currently no cloud export/restore command or automatic cloud-to-local backup in this repository. Configure and verify any provider backup arrangements separately, keeping database records and image objects together. Rolling back a deployment rolls back code, not wardrobe data.
 
-Deleted or replaced image references leave their immutable Blob objects in storage intentionally, so existing links and readers remain safe. There is no automated garbage collection yet; those objects continue to count toward storage usage. Do not manually delete Blob objects still referenced by the database.
+## Automatic storage cleanup
+
+A daily Vercel Cron Job calls `/api/maintenance/storage` at `0 20 * * *` (20:00 UTC; 03:00 Bangkok). Hobby schedules run within that hour. The endpoint requires a separate, random **production-only** `CRON_SECRET` in its Authorization header; Vercel supplies that header for scheduled invocations. The app's deployment protection remains enabled. [Vercel cron documentation](https://vercel.com/docs/cron-jobs/manage-cron-jobs)
+
+Before deploying this feature to an existing store, configure `CRON_SECRET` and apply the additive database schema:
+
+```sh
+# Initialize collection tables and publication guards, then inspect without deleting.
+node --env-file=.env.cloud scripts/collect-cloud-garbage.mjs --initialize
+
+# Read-only inventory (apart from acquiring/releasing the normal writer lease).
+node --env-file=.env.cloud scripts/collect-cloud-garbage.mjs
+
+# Run the same bounded collection as the scheduled job.
+node --env-file=.env.cloud scripts/collect-cloud-garbage.mjs --apply
+```
+
+The collector only considers immutable uploads in the application's `wardrobe/` namespace. Every file reference in the database, including saved items, model references, jobs, and copied/linked images, protects its Blob. Display copies remain protected while their source has any file reference. Objects must remain unreferenced for **seven days after first observation** before deletion; upload age alone never qualifies an object. Restoring a reference resets that grace period.
+
+Immediately before deletion, the collector checks references again under the global writer lease and records a durable deletion marker. Database publication guards prevent delayed writers from reintroducing a retired URL, including after lease loss. Failed deletions retry on a later run. Concurrent generation causes cleanup to skip that run. Listings are paginated with a saved cursor, and each run deletes at most 100 objects within a bounded time budget. Status counts are logged and saved in `.blob-gc-state.json` in the cloud store.
+
+Cleanup permanently deletes eligible Blob objects; it is not a backup or a restore feature. It does not remove saved wardrobe originals, active or historical job files still referenced by the database, or files hidden from the gallery but still retained in storage. Historical job retention and removal of the small deletion records are separate from Blob cleanup. Do not manually delete objects still referenced by the database.

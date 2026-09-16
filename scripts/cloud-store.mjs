@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { DISPLAY_WIDTHS, DISPLAY_RECIPE } from "../shared/image-variants.mjs";
 import { displayKey, displayETag, encodeDisplayImage, matchesETag } from "./display-image.mjs";
+import { GC_SCHEMA_SQL, collectBlobs } from "./blob-gc.mjs";
 
 export const CLOUD_ROOT = "/wardrobe-data";
 const LEASE_SECONDS = 270;
@@ -136,6 +137,7 @@ export const CLOUD_SCHEMA_SQL = [
     UPDATE wardrobe_files SET path = dest || substring(path FROM length(target) + 1), updated_at = clock_timestamp()
       WHERE path = target OR left(path, length(target) + 1) = target || '/';
   END $$`,
+  ...GC_SCHEMA_SQL,
 ];
 
 function neonDatabase(databaseUrl) {
@@ -221,6 +223,11 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
   };
   store = {
     root: CLOUD_ROOT,
+    async initializeGarbageCollection() { await db.transaction(GC_SCHEMA_SQL.map(text => ({ text }))); },
+    async collectGarbage(options = {}) {
+      return store.withLease(async () => collectBlobs({ ...options, store, db, blob: await getBlob(),
+        ownerToken: () => owned().token }));
+    },
     // Derivatives are immutable, independently reproducible cache entries. Their
     // insert-only writes do not take the wardrobe writer lease or change originals.
     async initializeDisplayImages() { await db.query(DISPLAY_CACHE_SCHEMA); },
@@ -343,9 +350,8 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     },
     async rm(file, options = {}) { await mutate("rm", { path: canonical(file), recursive: Boolean(options.recursive), force: Boolean(options.force) }); },
   };
-  // Unlink/overwrite never deletes Blob objects: links and concurrent readers may
-  // still reference them. A later maintenance command can collect unreferenced
-  // objects after a retention period, under the same global lease.
+  // Unlink/overwrite only removes file references. The daily collector checks
+  // every remaining reference and observes a seven-day grace period before deletion.
   return store;
 }
 
