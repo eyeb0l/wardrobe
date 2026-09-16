@@ -27,7 +27,7 @@ Assign each worker a disjoint set of outfit IDs plus the exact identity and garm
 
 ## 1. Inspect the wardrobe
 
-Read `$WORK/snapshot/library.json` and `$WORK/snapshot/outfits.json`. Reconcile visible browser-only edits and hidden items when relevant. Reserve existing outfit IDs and garment combinations so the new batch adds distinct looks without replacing saved outfits. Preserve all existing records and unknown fields. Resolve `/api/import/library/FILENAME` assets to `$WORK/snapshot/imported/FILENAME`, preserving the saved garment IDs. Use originals, not WebP display copies. Group items by:
+Read `$WORK/snapshot/library.json` and `$WORK/snapshot/outfits.json`. Use the shared metadata in that fresh snapshot; hidden and deleted items are excluded automatically. Reserve existing outfit IDs and garment combinations so the new batch adds distinct looks without replacing saved outfits. Preserve all existing records and unknown fields. Resolve `/api/import/library/FILENAME` assets to `$WORK/snapshot/imported/FILENAME`, preserving the saved garment IDs. Use originals, not WebP display copies. Group items by:
 
 - `upperbody` — tops
 - `wholebody_up` — jackets and outer layers

@@ -25,7 +25,7 @@ export async function saveOutfitCollection({ dataDir, stagedManifestPath, store,
     const manifest = await readManifest(directory);
     const imageDir = path.join(directory, "outfit-images");
     const existing = new Map(manifest.outfits.map((outfit) => [outfit.id, outfit]));
-    const currentIds = store ? new Set(JSON.parse(await storage.readFile(path.join(directory, 'library.json'), 'utf8')).map(item => item.id)) : null;
+    const currentIds = store ? new Set(JSON.parse(await storage.readFile(path.join(directory, 'library.json'), 'utf8')).filter(item => !item.hidden).map(item => item.id)) : null;
     const additions = [];
     const saved = [];
     // Validate the whole batch and every ID before publishing any images.

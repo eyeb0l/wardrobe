@@ -100,3 +100,19 @@ test('local skill import honors the selected directory and never writes reposito
   const snapshot=await snapshotForSkill({...selected,out:h.root+'/local-snapshot'});assert.equal(snapshot.wardrobeCount,1);
   await assert.rejects(snapshotForSkill({...selected,out:dataDir+'/snapshot'}),/outside the live data/);
 });
+
+test('skill snapshots omit deleted cutouts and cloud outfit saves reject hidden garments',async t=>{
+  const h=await setup(t);
+  await h.store.withLease(async()=>{
+    const records=JSON.parse(await h.store.readFile(CLOUD_ROOT+'/library.json','utf8'));
+    records[0].hidden=true;
+    await h.store.writeFile(CLOUD_ROOT+'/library.json',JSON.stringify(records));
+    await h.store.rm(CLOUD_ROOT+'/imported/old.png');
+  });
+  const out=h.root+'/hidden-snapshot';
+  assert.equal((await snapshotForSkill({...h.selected,out})).wardrobeCount,0);
+  assert.deepEqual(JSON.parse(await fs.readFile(out+'/library.json','utf8')),[]);
+  const staged=h.root+'/hidden-outfits.json';
+  await fs.writeFile(staged,JSON.stringify({version:1,outfits:[{id:'hidden-look',name:'Hidden look',occasion:['casual'],garmentIds:['owned'],reason:'Must not publish',status:'accepted',image:'outfit-images/reviewed.png'}]}));
+  await assert.rejects(saveOutfitCollection({dataDir:CLOUD_ROOT,store:h.store,stagedManifestPath:staged}),/no longer in the live wardrobe/);
+});
