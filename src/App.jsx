@@ -5,8 +5,7 @@ import { OptimizedImage } from "./OptimizedImage.jsx";
 import { OutfitView } from "./outfit-view.jsx";
 import { ShoppingView } from "./shopping-view.jsx";
 
-const STORAGE_KEY = "open-wardrobe-edits-v1";
-const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
+import { wardrobeRequest, migrateBrowserEdits } from "./wardrobe-sync.mjs";
 
 const TYPES = [
   { id: "all", label: "All" },
@@ -21,48 +20,6 @@ const TYPES = [
 const TYPE_MAP = Object.fromEntries(TYPES.map((type) => [type.id, type]));
 const TYPE_ORDER = Object.fromEntries(TYPES.slice(1).map((type, index) => [type.id, index]));
 
-
-function readEdits() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-
-function persistEdit(item) {
-  const edits = readEdits();
-  edits[item.id] = {
-    name: item.name || "",
-    part: item.part,
-    color: item.color || null,
-    secondaryColor: item.secondaryColor || null,
-    tags: item.tags || [],
-  };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(edits));
-}
-
-function removePersistedEdit(id) {
-  const edits = readEdits();
-  delete edits[id];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(edits));
-}
-
-function readDeletedItems() {
-  try {
-    const value = JSON.parse(localStorage.getItem(DELETED_STORAGE_KEY) || "[]");
-    return new Set(Array.isArray(value) ? value : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function persistDeletedItem(id) {
-  const deleted = readDeletedItems();
-  deleted.add(id);
-  localStorage.setItem(DELETED_STORAGE_KEY, JSON.stringify([...deleted]));
-}
 
 function rgbToHex(red, green, blue) {
   return `#${[red, green, blue].map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`;
@@ -345,6 +302,9 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
   const shakeTimerRef = useRef(null);
   const [sampling, setSampling] = useState(null);
   const [sampleStatus, setSampleStatus] = useState("");
+  const [revision, setRevision] = useState(item.revision);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [palette, setPalette] = useState(item.palette || []);
   const [draft, setDraft] = useState({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
   const [shaking, setShaking] = useState(false);
@@ -410,13 +370,6 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
     if (!isDirty) setCloseBlocked(false);
   }, [isDirty]);
 
-  useEffect(() => {
-    setSampling(null);
-    setSampleStatus("");
-    setPalette(item.palette || []);
-    setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
-  }, [item]);
-
   const cancelEditing = () => {
     setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
     setSampling(null);
@@ -424,10 +377,23 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
     onClose();
   };
 
-  const saveEditing = () => {
-    onSave({ ...item, ...draft, name: draft.name.trim(), tags: draft.tags.map((tag) => tag.trim()).filter(Boolean) });
-    setSampling(null);
-    setSampleStatus("Changes saved.");
+  const saveEditing = async () => {
+    setSaving(true); setSaveError("");
+    try {
+      const saved = await onSave({ ...item, ...draft, revision, name: draft.name.trim(), tags: draft.tags.map(tag => tag.trim()).filter(Boolean) });
+      setRevision(saved.revision);
+      setDraft({ name: saved.name || "", part: saved.part, color: saved.color || "#9a9286", secondaryColor: saved.secondaryColor || null, tags: [...(saved.tags || [])] });
+      setSampling(null);
+      setSampleStatus("Changes saved across devices.");
+    } catch (error) { setSaveError(error.message); }
+    finally { setSaving(false); }
+  };
+
+  const deleteSelected = async () => {
+    setSaving(true); setSaveError("");
+    try { await onDelete(item.id, revision); }
+    catch (error) { setSaveError(error.message); }
+    finally { setSaving(false); }
   };
 
   const handleImageLoad = (event) => {
@@ -511,7 +477,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
         </>
       )}
 
-      <div className="viewer-details editing">
+      <fieldset className="viewer-details editing" disabled={saving} style={{ border: 0, minWidth: 0, margin: 0 }}>
         <ItemEditor
           draft={draft}
           setDraft={setDraft}
@@ -524,19 +490,20 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
         <button className="secondary-button modeled-regenerate-button" type="button" disabled={isDirty} title={isDirty ? "Save or cancel your changes first" : undefined} onClick={() => onRegenerate(item)}>
           <ArrowCounterClockwise size={15} aria-hidden="true" /> {hasModeledImage ? "Regenerate modelled shot" : "Create modelled shot"}
         </button>
+        {saveError && <p className="status error" role="alert">{saveError}</p>}
         {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}
 
         <div className="viewer-actions">
-          <button className="delete-button" type="button" onClick={() => onDelete(item.id)}>
+          <button className="delete-button" type="button" onClick={deleteSelected}>
             <Trash size={15} weight="regular" aria-hidden="true" /> Delete
           </button>
           <span className="action-spacer" />
           <button className="secondary-button" type="button" onClick={cancelEditing}>Cancel</button>
           <button className="primary-button" type="button" onClick={saveEditing}>
-            <Check size={15} weight="bold" aria-hidden="true" /> Save
+            <Check size={15} weight="bold" aria-hidden="true" /> {saving ? "Saving…" : "Save"}
           </button>
         </div>
-      </div>
+      </fieldset>
     </aside>
     </div>
     </div>
@@ -552,6 +519,10 @@ export function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [syncNotice, setSyncNotice] = useState("");
+  const requestVersion = useRef(0);
+  const mutating = useRef(false);
+  const refreshing = useRef(false);
 
   useEffect(() => { if (route === "/shopping") setShoppingOpened(true); }, [route]);
 
@@ -570,21 +541,30 @@ export function App() {
     window.scrollTo(0, 0);
   };
 
-  useEffect(() => {
-    fetch("/api/import/wardrobe", { cache: "no-store" })
-      .then((response) => {
-        if (!response.ok) throw new Error("Could not load the wardrobe.");
-        return response.json();
-      })
-      .then((loadedItems) => {
-        const edits = readEdits();
-        const deleted = readDeletedItems();
-        const visibleItems = loadedItems.filter((item) => !deleted.has(item.id));
-        setItems(visibleItems.map((item) => ({ ...item, ...(edits[item.id] || {}) })));
-      })
-      .catch((requestError) => setError(requestError.message))
-      .finally(() => setLoading(false));
+  const refreshWardrobe = useCallback(async () => {
+    if (mutating.current || refreshing.current) return;
+    refreshing.current = true;
+    const version = ++requestVersion.current;
+    try {
+      let migrationError = "";
+      try { setSyncNotice(await migrateBrowserEdits(window.localStorage)); }
+      catch (error) { migrationError = error.message; }
+      const loaded = await wardrobeRequest("/api/import/wardrobe");
+      if (version !== requestVersion.current) return;
+      setItems(loaded);
+      setError(migrationError);
+    } catch (error) { if (version === requestVersion.current) setError(error.message); }
+    finally { refreshing.current = false; setLoading(false); }
   }, []);
+
+  useEffect(() => {
+    refreshWardrobe();
+    const refreshVisible = () => { if (document.visibilityState === "visible") refreshWardrobe(); };
+    window.addEventListener("focus", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    const timer = setInterval(refreshVisible, 30_000);
+    return () => { clearInterval(timer); window.removeEventListener("focus", refreshVisible); document.removeEventListener("visibilitychange", refreshVisible); };
+  }, [refreshWardrobe]);
 
   const selectedItem = items.find((item) => item.id === selectedId) || null;
 
@@ -604,25 +584,28 @@ export function App() {
     setSelectedId(null);
   };
 
-  const saveItem = (updatedItem) => {
-    setItems((current) => current.map((item) => item.id === updatedItem.id ? updatedItem : item));
-    persistEdit(updatedItem);
+  const saveItem = async (updatedItem) => {
+    mutating.current = true; ++requestVersion.current;
+    try {
+      const changes = Object.fromEntries(["name", "part", "color", "secondaryColor", "tags"].map(key => [key, updatedItem[key]]));
+      const saved = await wardrobeRequest(`/api/import/wardrobe/${encodeURIComponent(updatedItem.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: updatedItem.revision, changes }),
+      });
+      setItems(current => current.map(item => item.id === saved.id ? saved : item));
+      setError("");
+      return saved;
+    } finally { mutating.current = false; refreshWardrobe(); }
   };
 
-  const deleteItem = async (id) => {
-    if (id.startsWith("import-")) {
-      try {
-        const response = await fetch(`/api/import/wardrobe/${id}`, { method: "DELETE" });
-        if (!response.ok && response.status !== 404) throw new Error("Could not delete the imported item.");
-      } catch (requestError) {
-        setError(requestError.message);
-        return;
-      }
-    }
-    setItems((current) => current.filter((item) => item.id !== id));
-    removePersistedEdit(id);
-    persistDeletedItem(id);
-    setSelectedId(null);
+  const deleteItem = async (id, revision) => {
+    mutating.current = true; ++requestVersion.current;
+    try {
+      await wardrobeRequest(`/api/import/wardrobe/${encodeURIComponent(id)}`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision }),
+      });
+      setItems(current => current.filter(item => item.id !== id));
+      setSelectedId(null); setError("");
+    } finally { mutating.current = false; refreshWardrobe(); }
   };
 
   const addImportedItem = useCallback((newItem) => {
@@ -663,6 +646,7 @@ export function App() {
           </nav>
         </header>
 
+        {syncNotice && <p className="status" role="status">{syncNotice}</p>}
         {error && <p className="status error">{error}</p>}
         {!error && loading && <p className="status">Loading wardrobe</p>}
         {!error && !loading && !items.length && <p className="status empty">Drop, paste, or add a photo to import your first piece.</p>}
@@ -681,7 +665,7 @@ export function App() {
         )}
       </main>
 
-      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} />}
+      {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} />}
       <WardrobeImportFlow regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} />
       </>}
     </div>

@@ -7,6 +7,7 @@ import { sendDisplayImage } from "../scripts/display-image.mjs";
 import { createTask, saveTask, reservePaidCall } from "./task-store.mjs";
 import { generateWardrobe } from "./generation-workflow.mjs";
 import { recoverOutbox } from "./outbox.mjs";
+import { maintenance } from "./maintenance.mjs";
 
 let lastRecovery = 0;
 
@@ -39,6 +40,7 @@ export default async function handler(req, res) {
   }
   const requestUrl = new URL(req.url, "http://localhost");
   const pathname = requestUrl.pathname;
+  if (pathname === "/api/maintenance/storage") return maintenance(req, res, createCloudStore());
   const kind = pathname.startsWith("/api/import/") ? "import" : pathname.startsWith("/api/outfits") ? "outfit" : pathname.startsWith("/api/shopping/") ? "shopping" : null;
   if (!kind) return json(res, 404, { error: "Not found" });
   if (!["GET", "POST", "DELETE", "PATCH", "PUT"].includes(req.method)) return json(res, 405, { error: "Method not allowed" });

@@ -1,3 +1,4 @@
+import { readLibrary, withLibraryLock, publicLibraryItem, saveLibraryEdit, deleteLibraryItem, migrateLibraryEdits, editableFields } from './wardrobe-library.mjs';
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
@@ -484,12 +485,16 @@ export function wardrobeImportApi(options = {}) {
   }
 
   async function loadImported() {
-    try { return JSON.parse(await readFile(importedFile, "utf8")); }
-    catch (error) { if (error.code === "ENOENT") return []; throw error; }
+    return readLibrary(importedFile);
   }
 
   async function persistImported(job, includeModeled = false) {
+    return withLibraryLock(importedFile, () => persistImportedLocked(job, includeModeled));
+  }
+
+  async function persistImportedLocked(job, includeModeled) {
     const id = `import-${job.id}`;
+    if ((await loadImported()).some(item => item.id === id && item.hidden)) throw Object.assign(new Error("Wardrobe item was deleted"), { status: 404 });
     if (job.modeledReplacement) {
       const records = await loadImported();
       const existing = records.find((record) => record.id === id);
@@ -500,7 +505,7 @@ export function wardrobeImportApi(options = {}) {
       await copyFile(path.join(jobsDir, job.id, source), path.join(libraryAssetDir, modeledName));
       const record = { ...existing, modeledImage: `${LIBRARY_ASSET_ROOT}/${modeledName}`, modelReferenceId: job.modelReferenceId || "default" };
       await atomicJson(importedFile, records.map((item) => item.id === id ? record : item));
-      return record;
+      return publicLibraryItem(record);
     }
     await mkdir(libraryAssetDir, { recursive: true });
     const garmentName = `${id}-garment.png`;
@@ -534,9 +539,14 @@ export function wardrobeImportApi(options = {}) {
       modelReferenceId: job.modelReferenceId || "default",
       importJobId: job.id,
     };
+    if (existing?._editVersion) {
+      for (const field of editableFields) record[field] = existing[field];
+      record._editVersion = existing._editVersion;
+      record.hidden = existing.hidden;
+    }
     const next = [...records.filter((item) => item.id !== id), record];
     await atomicJson(importedFile, next);
-    return record;
+    return publicLibraryItem(record);
   }
 
   async function generate(job, stageName) {
@@ -720,7 +730,7 @@ export function wardrobeImportApi(options = {}) {
     try {
       if (options.serverless) validateServerlessMutation(req);
       if (url.pathname === "/api/import/wardrobe" && req.method === "GET") {
-        return json(res, 200, await loadImported());
+        return json(res, 200, (await loadImported()).filter(item => !item.hidden).map(publicLibraryItem));
       }
       if (url.pathname === "/api/import/config" && req.method === "GET") {
         return json(res, 200, await setupStatus());
@@ -739,7 +749,7 @@ export function wardrobeImportApi(options = {}) {
         const id = modeledMatch[1];
         if (!preparingModeled.has(id)) {
           const task = (async () => {
-            const item = (await loadImported()).find((record) => record.id === id);
+            const item = (await loadImported()).find((record) => record.id === id && !record.hidden);
             if (!item) throw Object.assign(new Error("Wardrobe item not found"), { status: 404 });
             const jobId = id.slice(7);
             const existing = await loadJob(jobId);
@@ -772,17 +782,23 @@ export function wardrobeImportApi(options = {}) {
         }
         return json(res, 200, await preparingModeled.get(id));
       }
-      const wardrobeDeleteMatch = url.pathname.match(/^\/api\/import\/wardrobe\/(import-[a-f0-9-]{36})$/i);
-      if (wardrobeDeleteMatch && req.method === "DELETE") {
-        const id = wardrobeDeleteMatch[1];
-        const records = await loadImported();
-        const next = records.filter((record) => record.id !== id);
-        if (next.length === records.length) return json(res, 404, { error: "Imported wardrobe item not found" });
-        await atomicJson(importedFile, next);
-        const assets = await readdir(libraryAssetDir);
-        await Promise.all(assets.filter((name) => name === `${id}-garment.png` || name === `${id}-modeled.png` || (name.startsWith(`${id}-modeled-`) && name.endsWith(".png")))
-          .map((name) => rm(path.join(libraryAssetDir, name), { force: true })));
-        return json(res, 200, { deleted: true, id });
+      if (url.pathname === "/api/import/wardrobe/migrate-edits" && req.method === "POST") {
+        return json(res, 200, await migrateLibraryEdits(importedFile, await body(req, 1024 * 1024, true)));
+      }
+      const wardrobeEditMatch = url.pathname.match(/^\/api\/import\/wardrobe\/([a-z0-9][a-z0-9._-]{0,159})$/i);
+      if (wardrobeEditMatch && req.method === "PATCH") {
+        return json(res, 200, await saveLibraryEdit(importedFile, wardrobeEditMatch[1], await body(req, 16 * 1024, true)));
+      }
+      if (wardrobeEditMatch && req.method === "DELETE") {
+        const id = wardrobeEditMatch[1];
+        const { revision } = await body(req, 1024, true);
+        const result = await deleteLibraryItem(importedFile, id, revision);
+        if (result.imported) {
+          const assets = await readdir(libraryAssetDir);
+          await Promise.all(assets.filter((name) => name === `${id}-garment.png` || name === `${id}-modeled.png` || (name.startsWith(`${id}-modeled-`) && name.endsWith(".png")))
+            .map((name) => rm(path.join(libraryAssetDir, name), { force: true })));
+        }
+        return json(res, 200, result);
       }
       const libraryAssetMatch = url.pathname.match(/^\/api\/import\/library\/([\w.-]+)$/i);
       if (libraryAssetMatch && req.method === "GET") {

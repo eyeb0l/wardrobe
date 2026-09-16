@@ -160,6 +160,7 @@ export function wardrobeShoppingApi(options = {}) {
     if (!Array.isArray(records)) throw fail("The wardrobe library is invalid. Restore library.json before continuing.", 503);
     const result = new Map();
     for (const record of records) {
+      if (record?.hidden) continue;
       if (!object(record) || !validId(record.id) || !PARTS.includes(record.part) || result.has(record.id)) continue;
       const match = typeof record.image === "string" && record.image.match(/^\/api\/import\/library\/([a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp))$/i);
       if (!match) continue;

@@ -4,6 +4,7 @@
   "buildCommand": "npm run build:vercel",
   "outputDirectory": ".vercel/output",
   "regions": ["sin1"],
+  "crons": [{ "path": "/api/maintenance/storage", "schedule": "0 20 * * *" }],
   "headers": [
     { "source": "/api/(.*)", "headers": [
       { "key": "Cache-Control", "value": "private, no-store" },
