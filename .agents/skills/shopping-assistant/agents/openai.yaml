@@ -1,4 +1,4 @@
 interface:
   display_name: "Shopping Assistant"
   short_description: "Assess purchases and shop for your wardrobe"
-  default_prompt: "Use $shopping-assistant to assess a potential purchase against my model reference and wardrobe, or help me shop when I ask."
+  default_prompt: "Use $shopping-assistant to assess a potential purchase against my model reference and live wardrobe, or help me shop when I ask."

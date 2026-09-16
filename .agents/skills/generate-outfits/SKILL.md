@@ -1,11 +1,11 @@
 ---
 name: generate-outfits
-description: Curate outfits and create modeled photos from clothes already imported into this local Wardrobe. Use for wardrobe-based outfit ideas, styling, or lookbooks.
+description: Curate outfits and create modeled photos from clothes already imported into this Wardrobe. Use for wardrobe-based outfit ideas, styling, or lookbooks.
 ---
 
 # Generate Outfits
 
-Create a complete local outfit collection from `data/library.json`: select strong combinations, generate a square modeled image for each, verify every result, and add the finished outfits and images to the saved collection.
+Create a complete outfit collection from the current Wardrobe: select strong combinations, generate a square modeled image for each, verify every result, and add the finished outfits and images to the saved collection.
 
 ## Scope and inputs
 
@@ -13,25 +13,21 @@ Ask for the outfit count unless the user already supplied a positive number; do 
 
 For a modeled collection, completion means the requested number of reviewed images and the saved manifest, not just suggestions or prompts. If the user explicitly requests suggestions only, stop at that scope.
 
-## Requirements
+## Choose the live context
 
-- Read and follow the built-in `imagegen` skill before generating images.
-- Require `data/library.json` and enough distinct top-and-bottom combinations for the requested count. Modeled photos also require a local identity reference: use `WARDROBE_MODEL_REFERENCE` when set, otherwise `data/model-reference.png`. Resolve relative paths from the repository root.
-- Keep every source garment and identity image local and unchanged.
-- Never add `data/`, the identity reference, garment images, or generated photos to Git.
-- Select wardrobe garments only from the current database with successfully resolved local assets. The styling basics below do not require wardrobe records.
+Read [the shared storage workflow](../../../docs/SKILL_STORAGE.md) first. Use the migrated cloud wardrobe by default; local mode is only for an explicit local request. Take a fresh task snapshot into `$WORK/snapshot`, then use that copy's `library.json`, `outfits.json`, original cutouts, and selected identity reference. Do not curate from the repository's old `data/` snapshot or treat local saves as production updates.
 
-Paths below use `data/` as shorthand for the configured `WARDROBE_DATA_DIR` (environment or repository `.env`, default `data`), resolved from the repository root. Use the same data directory as the running app.
+Read and follow the built-in `imagegen` skill before generation. Require enough distinct top-and-bottom combinations and the user's selected reference (default when no other is selected). Preserve original reference files. Keep task files and generated images outside the live store and Git. Suggestions-only work does not require generating or saving photographs.
 
 ## Parallel work
 
-Use subagents when the user requests more than eight outfits or explicitly asks for parallel generation. Keep one main agent responsible for the complete wardrobe inventory, global combination uniqueness, garment-usage balance, manifest reconciliation, and final QA.
+For more than eight outfits, use bounded batches; delegate only when the user or active instructions authorize parallel agent work. Keep one main agent responsible for the complete wardrobe inventory, global combination uniqueness, garment-usage balance, manifest reconciliation, and final QA.
 
 Assign each worker a disjoint set of outfit IDs plus the exact identity and garment reference paths. Require every worker to return the outfit ID, filled prompt, reference list, generated path, status, and visual-review notes. Never allow two workers to generate or write the same outfit ID. Run workers in waves when concurrency is limited, reconcile results after every wave, and resume only missing or failed IDs.
 
 ## 1. Inspect the wardrobe
 
-Read `data/library.json` and the existing `data/outfits.json` when present. Reserve existing outfit IDs and garment combinations so the new batch adds distinct looks without replacing saved outfits. Preserve all existing records and unknown fields. Resolve `/api/import/library/FILENAME` assets to `data/imported/FILENAME`. Group items by:
+Read `$WORK/snapshot/library.json` and `$WORK/snapshot/outfits.json`. Reconcile visible browser-only edits and hidden items when relevant. Reserve existing outfit IDs and garment combinations so the new batch adds distinct looks without replacing saved outfits. Preserve all existing records and unknown fields. Resolve `/api/import/library/FILENAME` assets to `$WORK/snapshot/imported/FILENAME`, preserving the saved garment IDs. Use originals, not WebP display copies. Group items by:
 
 - `upperbody` — tops
 - `wholebody_up` — jackets and outer layers
@@ -61,7 +57,7 @@ Use these styling principles:
 
 Cover a useful mix of the user’s requested contexts. Without specific direction, balance casual, smart-casual, warm-weather, layered, dark-tonal, and statement looks as the wardrobe permits.
 
-Keep working files in a temporary directory outside `data/` (referred to here as `$WORK`). Build `$WORK/outfits.json` with the final target count:
+Use the temporary `$WORK` directory established by the snapshot workflow. Build `$WORK/outfits.json` with the final target count:
 
 ```json
 {
@@ -75,13 +71,14 @@ Keep working files in a temporary directory outside `data/` (referred to here as
       "reason": "Deep navy and camel create controlled warm-cool contrast.",
       "setting": "a quiet warm-stone courtyard with restrained greenery",
       "image": "outfit-images/navy-camel-classic.png",
-      "status": "planned"
+      "status": "planned",
+      "modelReferenceId": "default"
     }
   ]
 }
 ```
 
-Use stable lowercase hyphenated IDs that are unused in the saved collection. Reject duplicate garment combinations even when names or settings differ. The working manifest contains only the newly requested batch; its count is separate from the total saved collection.
+Set `modelReferenceId` to the reference actually selected. Use stable lowercase hyphenated IDs that are unused in the saved collection. Reject duplicate garment combinations even when names or settings differ. The working manifest contains only the newly requested batch; its count is separate from the total saved collection.
 
 ## 3. Prepare references and prompts
 
@@ -93,7 +90,7 @@ Rotate restrained warm, natural settings across the collection while keeping one
 
 ## 4. Generate every outfit
 
-Create one square 1:1 modeled PNG per outfit with Imagegen. Keep working outputs outside `data/` until they pass review.
+Create one square 1:1 modeled PNG per outfit with Imagegen. Keep working outputs in `$WORK` until they pass review.
 
 Generate in bounded batches when the collection is large. Track every outfit as `planned`, `generated`, `accepted`, or `failed`; resume only missing or failed IDs.
 
@@ -113,19 +110,25 @@ Require:
 
 Regenerate identity drift, missing or redesigned garments, fake closures or text, anatomy failures, or cropped feet. Do not mark an outfit accepted based on plausibility alone.
 
-## 6. Deliver locally
+## 6. Save to the selected wardrobe
 
-After all requested outfits pass, save exactly one accepted image per unique outfit:
+After all requested outfits pass, place exactly one accepted PNG per unique outfit at `$WORK/outfit-images/OUTFIT-ID.png`. In `$WORK/outfits.json`, keep the image path `outfit-images/OUTFIT-ID.png` and set `status` to `accepted`. Stage only this new batch.
 
-1. Place each reviewed PNG at `$WORK/outfit-images/OUTFIT-ID.png`, outside the configured data directory. Set its working manifest `image` to `outfit-images/OUTFIT-ID.png` and `status` to `accepted`.
-2. Stop this repository's Wardrobe server before saving. The server and save helper share an exclusive writer lock; never bypass or delete a live writer's lock.
-3. From the repository root, run `node scripts/save-outfit-collection.mjs "$WORK/outfits.json"`. The helper resolves `WARDROBE_DATA_DIR` from the environment or `.env`; use `--data-dir PATH` only when intentionally selecting another store. It reads the latest validated manifest, adds the reviewed outfits, and publishes images under immutable content-hash filenames. An identical rerun is safe; a conflicting outfit ID is rejected without replacing that outfit.
-4. Read the helper's returned `outfits` and `manifestPath`, reopen every resulting image, and verify that the new batch has the requested count of unique accepted outfits. Confirm prior records remain present; the gallery total may exceed the requested count. Restart the server when appropriate.
+From the repository root, validate against the live collection, then publish:
 
-Use this helper for delivery instead of directly copying into the live image directory or rewriting the live manifest. If saving fails, retain the staged batch and retry after correcting the reported problem. Preserve corrupt or unsupported-version files for recovery; do not replace them with an empty collection.
+```sh
+node --env-file=.env.cloud scripts/save-outfit-collection.mjs \
+  "$WORK/outfits.json" --target cloud --dry-run
+node --env-file=.env.cloud scripts/save-outfit-collection.mjs \
+  "$WORK/outfits.json" --target cloud
+```
 
-Do not claim the current gallery displays outfits unless the app has an outfit route. The completed local assets and manifest are still the deliverable.
+The helper preserves previous records and unknown fields, validates current garment IDs, and uses the cloud writer lease. Images get immutable content-hash filenames. An identical rerun is safe; a conflicting outfit ID is rejected. Do not stop the hosted app, write a local manifest as a substitute, or rerun the initial migration.
+
+Read the returned `outfits` and `manifestPath`, verify the new batch has the requested count of unique accepted records, and inspect the original results and the authenticated production `/outfits` gallery. Check that prior records remain present. The gallery total can exceed the requested batch count. If saving or verification fails, keep the staged batch, reconcile the current store, and complete only the missing work; do not regenerate already accepted photographs merely because a save was uncertain.
+
+For an explicit local request, omit `--env-file=.env.cloud`, pass `--target local`, and follow the shared workflow's local writer-lock instructions. Local saving does not update production.
 
 ## Finish
 
-Report the requested and completed count, output paths, any regenerated failures, and the styling mix. Display up to 12 modeled outfits in chat and point the user to the local folder for the rest.
+Report the requested and completed count, destination (cloud or local), gallery verification, any unresolved failures, and the styling mix. Link the hosted `/outfits` page for cloud delivery; use absolute output paths for explicit local delivery. Display up to 12 reviewed photographs in chat when supported; do not share private Blob URLs.

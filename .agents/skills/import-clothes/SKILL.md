@@ -1,26 +1,26 @@
 ---
 name: import-clothes
-description: Extract garments from photos as transparent cutouts, optionally create modeled photos, and import them into this local Wardrobe. Use for photo-folder imports, modeled garment photos, or cutout-only delivery.
+description: Extract garments from photos as transparent cutouts, optionally create modeled photos, and import them into this Wardrobe. Use for photo-folder imports, modeled garment photos, or cutout-only delivery.
 ---
 
 # Import Clothes
 
-Turn photos of worn clothing into source-faithful transparent catalog PNGs and modeled editorial photos, then add the approved results to the local Wardrobe database.
+Turn photos of worn clothing into source-faithful transparent catalog PNGs and modeled editorial photos, then add the approved results to the selected Wardrobe store.
 
 ## Inputs
 
-Obtain the source-image folder unless the user already supplied it. Resolve relative paths from the repository root. Confirm this is the Wardrobe repository by checking for `package.json`, `scripts/import-job-api.mjs`, and `data/` in `.gitignore`.
+Read [the shared storage workflow](../../../docs/SKILL_STORAGE.md) first. The migrated cloud wardrobe is the default import destination; local mode requires an explicit local request. Obtain the source-image folder unless the user already supplied it. Resolve relative paths from the repository root. Confirm this is the Wardrobe repository by checking for `package.json`, `scripts/import-job-api.mjs`, and `data/` in `.gitignore`.
 
 A request to add clothes to Wardrobe authorizes direct import after QA; the default deliverables are cutouts and modeled photos. For cutout-only requests, use the supplied new output-folder name or ask for one, and skip modeled generation and database import.
 
-When modeled photos are in scope, check at the start for a local PNG identity reference: use `WARDROBE_MODEL_REFERENCE` when set, otherwise `data/model-reference.png`. Resolve relative paths from the repository root. If the reference is missing, ask for its local path before modeled generation; cutout work can continue.
+For an import or modeled-photo request, take a fresh task snapshot into `$WORK/snapshot` using the shared workflow. Use its library for duplicate checks and its original identity image for the selected reference. Honor the user's selection, otherwise use `default` if available. Do not fall back to a laptop reference when cloud access fails. Ask for a missing reference before modeled generation; source inventory and cutout work can continue. A cutout-only folder delivery needs neither cloud access nor an identity reference.
 
 Complete the requested delivery mode through visual review and saved outputs. Temporary prompts or manifests alone are not completion.
 
 ## Rules
 
 - Read and follow the built-in `imagegen` skill before generating or editing an image.
-- Keep source and identity images local and unchanged. Never add them, `data/`, or generated clothing photos to Git.
+- Preserve source and identity originals. Private working copies may be used for the authorized generation; keep them, snapshots, credentials, and generated clothing photos out of Git.
 - Produce one clothing item per PNG, except an established matching pair such as shoes.
 - Remove the wearer, skin, hair, mannequin, hanger, props, other layers, and scene.
 - Preserve only source-supported color, material, silhouette, construction, pattern, and legible marks.
@@ -31,16 +31,18 @@ Complete the requested delivery mode through visual review and saved outputs. Te
 
 ## Parallel work
 
-Use subagents for large source folders or more than eight generated items when the current environment supports them. Give each worker a disjoint set of source files or manifest slugs and require it to return the slug, prompt, reference paths, chroma path, modeled path, and visual-review notes.
+Use bounded batches for large folders or more than eight generated items; delegate only when the user or active instructions authorize parallel agent work. Give each worker a disjoint set of source files or manifest slugs and require it to return the slug, prompt, reference paths, chroma path, modeled path, and visual-review notes.
 
 Keep one main agent responsible for the global item inventory, physical-identity deduplication, manifest reconciliation, database write, and final contact-sheet QA. Never let two workers generate or write the same slug. Run batches in waves when concurrency is limited, and resume only missing or failed slugs.
 
 ## Temporary workspace
 
-Keep intermediate files outside `data/`, for example:
+Reuse the `$WORK` directory from the snapshot workflow, or create one for cutout-only delivery. Keep intermediate files outside the live store and tracked repository files, for example:
 
 ```bash
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/wardrobe-import.XXXXXX")"
+if [ -z "${WORK:-}" ]; then
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/wardrobe-import.XXXXXX")"
+fi
 mkdir -p "$WORK"/{source-jpg,crops,chroma,items,modeled,qa}
 ```
 
@@ -65,6 +67,7 @@ Write `$WORK/manifest.json` using this final shape:
       "slug": "navy-fair-isle-cardigan",
       "file": "navy-fair-isle-cardigan.png",
       "modeledFile": "navy-fair-isle-cardigan.png",
+      "modelReferenceId": "default",
       "name": "Navy Fair Isle Cardigan",
       "part": "wholebody_up",
       "color": "#172033",
@@ -87,7 +90,7 @@ Use only these `part` values:
 - `accessories_up` — accessories
 - `shoes` — shoes
 
-Use lowercase hyphenated slugs, six-digit hex colors, at most 12 short lowercase tags, and `null` when there is no genuinely distinct secondary color. Keep working records as `status: "generate"` or `status: "hold"`; change a record to `accepted` only after final QA. The import script ignores every non-accepted record. Omit `modeledFile` for cutout-only delivery.
+Use lowercase hyphenated slugs, six-digit hex colors, at most 12 short lowercase tags, and `null` when there is no genuinely distinct secondary color. Keep working records as `status: "generate"` or `status: "hold"`; change a record to `accepted` only after final QA. The import script ignores every non-accepted record. Set `modelReferenceId` to the reference actually used. Omit both modeled fields for cutout-only delivery.
 
 ### 3. Prepare focused references
 
@@ -140,21 +143,23 @@ When modeled photos are in scope, read [references/modeled-photo.md](references/
 
 Proceed after QA when direct import was requested. If import was not authorized, present the accepted item count and names and obtain approval before writing to the database.
 
-Run the bundled deterministic importer from the repository root:
+Run the deterministic importer from the repository root, validating first:
 
-```bash
-node .agents/skills/import-clothes/scripts/import-to-wardrobe.mjs \
-  --items "$WORK/items" \
-  --modeled "$WORK/modeled" \
+```sh
+node --env-file=.env.cloud .agents/skills/import-clothes/scripts/import-to-wardrobe.mjs \
+  --target cloud --items "$WORK/items" --modeled "$WORK/modeled" \
+  --manifest "$WORK/manifest.json" --dry-run
+node --env-file=.env.cloud .agents/skills/import-clothes/scripts/import-to-wardrobe.mjs \
+  --target cloud --items "$WORK/items" --modeled "$WORK/modeled" \
   --manifest "$WORK/manifest.json"
 ```
 
-The script validates cutout transparency and modeled PNG format, copies files into `data/imported/`, and atomically updates `data/library.json`. It derives stable UUIDs from cutout content, so rerunning an identical import updates metadata and modeled photos without creating duplicates. This does not replace visual QA or physical-item deduplication. `--dry-run` validates and reports the proposed import without writing files.
+The entrypoint uses `scripts/import-reviewed-clothes.mjs`. It fully validates accepted PNGs, derives stable item IDs from cutout content, reads the latest live library under the cloud writer lease, and publishes originals privately before updating that library. Reimporting an identical cutout updates its metadata and supplied modeled photo without duplicating the item. It preserves unrelated items and fields, uses immutable modeled filenames, and leaves WebP display-copy creation to the app. This does not replace physical-item deduplication or visual QA. `--dry-run` performs no destination writes.
 
-Restart the dev server only if the running app does not pick up the database change, then verify the new item count at `/api/import/wardrobe` and visually inspect the gallery.
+Verify the returned IDs and item count against the live `/api/import/wardrobe` through authenticated access, then inspect the production gallery and modeled images. Do not restart a local server or rerun the migration to make cloud changes appear. For an explicit local import, omit `--env-file=.env.cloud`, pass `--target local`, and follow the shared local writer-lock instructions; optional `--data-dir PATH` selects that local store.
 
 For cutout-only delivery, create the requested new child folder under the repository root and copy only accepted PNGs into it. Do not write the database.
 
 ## Finish
 
-Report the delivered count, skipped/held items or unrecoverable fragments, and absolute output paths. For imports, include the database path and gallery verification result. Display up to 12 final cutouts in chat.
+Report the delivered count, skipped/held items or unrecoverable fragments, and destination. For cloud imports, link the hosted gallery and state its verification result. For local or cutout-only delivery, provide absolute output paths and make clear that production was not updated. Display up to 12 final cutouts in chat when supported; do not expose private Blob URLs.

@@ -4,22 +4,23 @@ Use this reference for supplied images and for each candidate found during perso
 
 ## Resolve the comparison context
 
-Read the current files rather than assuming an earlier inventory count. Paths below are relative to the Wardrobe repository root; honor configured overrides without exposing API keys or dumping `.env`.
+Follow [the shared storage workflow](../../../../docs/SKILL_STORAGE.md) and read a fresh task snapshot from the selected target. The hosted wardrobe is the default. Do not use repository `data/` as current production evidence.
 
-| Context | Project source |
+| Context | Snapshot source |
 | --- | --- |
-| Data directory | `WARDROBE_DATA_DIR`, default `data` |
-| Owned items | `library.json` in that directory |
-| Garment images | `/api/import/library/FILENAME` maps to `imported/FILENAME` in that directory |
-| Default person reference | `WARDROBE_MODEL_REFERENCE`, default `data/model-reference.png`, resolved from the repository root independently of the data-directory override |
-| Other references | `model-reference-N.png` in the data directory, with N at least 2 |
-| App reference IDs | `default`, `model-reference-N` |
+| Owned items | `$WORK/snapshot/library.json` |
+| Original garment images | `/api/import/library/FILENAME` maps to `$WORK/snapshot/imported/FILENAME` |
+| Available original references | `snapshot.json` lists IDs and files copied from the selected store |
+| Default reference | `model-reference.png`, ID `default`, when present |
+| Other references | `model-reference-N.png`, ID `model-reference-N`, N ≥ 2 |
+
+Use original cutouts and identity images for close inspection. Responsive WebP copies are appropriate for the app's display but should not replace source evidence. The snapshot is read-only context; shopping advice never publishes it back.
 
 Honor a reference selected by the user or already chosen in the active Shopping draft. Otherwise use the configured default and identify that choice briefly. If it is missing, use another reference only when the user has selected it or confirms the choice. Continue wardrobe-only analysis while requesting a needed reference; do not invent personal suitability. With no usable wardrobe, give only the supported visual assessment and explain that ownership, duplication and combinations remain unverified.
 
 The app overlays browser-only edits and deletions on the library. When available through the browser tool's permitted APIs or a user-supplied export, use the current visible wardrobe snapshot. The corresponding keys in `src/App.jsx` are `open-wardrobe-edits-v1` and `open-wardrobe-deleted-v1`. Resolve images against server-owned library records, not arbitrary paths from a browser snapshot. If those edits cannot be retrieved, say the comparison uses the saved library and flag a known discrepancy rather than silently treating both sources as identical.
 
-Resolve local assets within the expected directory, report unreadable items, and inspect all usable categories: `upperbody`, `dresses`, `wholebody_up`, `lowerbody`, `accessories_up`, `shoes`. Dresses are complete garments. An unavailable file is not evidence that the user owns no similar piece.
+Resolve downloaded originals within the snapshot directory, report unreadable items, and inspect all usable categories: `upperbody`, `dresses`, `wholebody_up`, `lowerbody`, `accessories_up`, `shoes`. Dresses are complete garments. An unavailable file is not evidence that the user owns no similar piece.
 
 For a larger wardrobe, create labeled contact sheets in a temporary directory and inspect every sheet. The existing `outfitContactSheets(items)` export in `scripts/outfit-api.mjs` makes sheets of up to 12 items; it needs each item's `file` and `name`. Keep the exact ordered ID/name mapping with the sheets. Open promising matches individually when a thumbnail cannot establish construction or duplication. Use garment names in advice, not internal ITEM numbers.
 
@@ -61,6 +62,6 @@ For a shortlist, consider duplication between candidates as well as duplication 
 
 Native skill advice can be delivered directly in chat. Do not claim that advice or a shortlist was saved to Shopping: the app currently holds its draft and result in page memory, clearing them on reload.
 
-When the user asks to run the web app itself, inspect its current setup and use its UI or documented local endpoints. `GET /api/shopping/config` returns readiness and available references. `POST /api/shopping/analyze` takes `{image, modelReferenceId, notes, wardrobeItems}` and sends the candidate, selected reference, notes and wardrobe sheets to the configured AI provider. It returns `{assessment, context, analyzedAt}`. The assessment fields are `itemName`, `verdict`, `summary`, `personalFit`, `wardrobeFit`, `overlap`, `watchOuts` and `pairings`; each pairing contains `itemIds` and `reason`.
+When the user asks to run the web app itself, inspect its current setup and use its authenticated production UI or current API contracts. Preview deployments have no production API access. `GET /api/shopping/config` returns readiness and available references. `POST /api/shopping/analyze` takes `{image, modelReferenceId, notes, wardrobeItems}` and sends the candidate, selected reference, notes and wardrobe sheets to the configured AI provider. It returns `{assessment, context, analyzedAt}`. The assessment fields are `itemName`, `verdict`, `summary`, `personalFit`, `wardrobeFit`, `overlap`, `watchOuts` and `pairings`; each pairing contains `itemIds` and `reason`.
 
 Use `scripts/shopping-api.mjs` as the source for current validation limits and schema when JSON/API parity is requested; ordinary chat advice need not reproduce JSON. Preserve the configured model. A request for native skill advice alone does not authorize an additional external API run. Honor an already authorized app run; do not repeat a paid check automatically after a timeout or uncertain outcome.
