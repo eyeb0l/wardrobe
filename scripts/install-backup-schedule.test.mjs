@@ -3,6 +3,9 @@ import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/p
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { BACKUP_AGENT_LABEL, createBackupSchedule, parseScheduleArgs, renderLaunchAgent } from './install-backup-schedule.mjs';
 
 async function fixture(t) {
@@ -115,4 +118,20 @@ test('installation rejects non-macOS/root and reports bootstrap failure without 
     },
   }), /did not confirm installation/);
   assert.match(await readFile(path.join(home, 'Library', 'LaunchAgents', `${BACKUP_AGENT_LABEL}.plist`), 'utf8'), /<plist/);
+});
+
+
+test('CLI help is available without credentials, filesystem writes, or installation', async () => {
+  assert.deepEqual(parseScheduleArgs(['--help']), { help: true });
+  assert.deepEqual(parseScheduleArgs(['-h']), { help: true });
+  const script = fileURLToPath(new URL('./install-backup-schedule.mjs', import.meta.url));
+  const { stdout, stderr } = await promisify(execFile)(process.execPath, [script, '--help'], {
+    env: { WARDROBE_TEST_SECRET: 'must-never-be-output' }, timeout: 10_000,
+  });
+  assert.match(stdout, /--out FILE/);
+  assert.match(stdout, /no schedule is enabled/);
+  assert.match(stdout, /--install/);
+  assert.match(stdout, /must be logged in/);
+  assert.doesNotMatch(stdout, /must-never-be-output/);
+  assert.equal(stderr, '');
 });

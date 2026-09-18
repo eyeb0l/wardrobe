@@ -7,6 +7,22 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 
 export const BACKUP_AGENT_LABEL = 'com.iris.wardrobe-backup';
+export const SCHEDULE_USAGE = `Prepare or install daily Wardrobe backups on an always-on Mac.
+
+Usage:
+  node scripts/install-backup-schedule.mjs --project DIRECTORY --env-file FILE --repo DIRECTORY --key-file FILE --out FILE
+  node scripts/install-backup-schedule.mjs --project DIRECTORY --env-file FILE --repo DIRECTORY --key-file FILE --install
+
+--out FILE     Write a new reviewable LaunchAgent plist; no schedule is enabled.
+--install      Install and enable a user LaunchAgent on this Mac (macOS only).
+--node FILE    Optional absolute Node 22+ executable; defaults to this Node runtime.
+--help, -h     Show this help without reading credentials or changing any files.
+
+The agent checks hourly and at login; run-due backs up only when 24 hours have
+elapsed. The Mac account must be logged in. Credentials and encryption keys
+remain in their separate files; their contents are never embedded in the plist.
+Existing output files or schedules are never overwritten.
+`;
 const runFile = promisify(execFile);
 const escapeXml = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 const absolutePath = (value, label) => {
@@ -43,6 +59,7 @@ ${args.map(arg => `    <string>${escapeXml(arg)}</string>`).join('\n')}
 }
 
 export function parseScheduleArgs(args) {
+  if (args.includes('--help') || args.includes('-h')) return { help: true };
   const result = {};
   const names = { '--project': 'project', '--env-file': 'envFile', '--repo': 'repo', '--key-file': 'keyFile', '--out': 'out', '--node': 'node' };
   for (let index = 0; index < args.length; index++) {
@@ -125,6 +142,9 @@ export async function createBackupSchedule(options, {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  try { console.log(JSON.stringify(await createBackupSchedule(parseScheduleArgs(process.argv.slice(2))), null, 2)); }
+  try {
+    const options = parseScheduleArgs(process.argv.slice(2));
+    console.log(options.help ? SCHEDULE_USAGE : JSON.stringify(await createBackupSchedule(options), null, 2));
+  }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
