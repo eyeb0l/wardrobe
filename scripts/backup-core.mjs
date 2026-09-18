@@ -37,7 +37,13 @@ async function atomicWrite(file, bytes) {
   const temp = `${file}.${randomUUID()}.tmp`;
   const handle = await fs.open(temp, 'wx', 0o600);
   try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
-  try { await fs.rename(temp, file); } catch (error) { await fs.rm(temp, { force: true }); throw error; }
+  try {
+    await fs.rename(temp, file);
+    // Persist directory entries as well as object bytes before a snapshot can
+    // become the durable completion marker after a power loss.
+    const directory = await fs.open(path.dirname(file), 'r');
+    try { await directory.sync(); } finally { await directory.close(); }
+  } catch (error) { await fs.rm(temp, { force: true }); throw error; }
 }
 async function checkOutsideGit(dir) {
   let current = await fs.realpath(path.dirname(path.resolve(dir)));
@@ -228,6 +234,9 @@ export async function pruneBackups(repo, { apply = false, now = new Date() } = {
   const objects = (await fs.readdir(path.join(repo.repo,'objects'))).filter(n => /^[a-f0-9]{64}\.bin$/.test(n) && !referenced.has(n));
   if (apply) {
     for (const id of remove) await fs.unlink(path.join(repo.repo, 'snapshots', `${id}.bin`));
+    // Make removed references durable before deleting their shared objects.
+    const snapshotsDirectory = await fs.open(path.join(repo.repo, 'snapshots'), 'r');
+    try { await snapshotsDirectory.sync(); } finally { await snapshotsDirectory.close(); }
     for (const name of objects) { await readRegular(path.join(repo.repo, 'objects', name)); await fs.unlink(path.join(repo.repo, 'objects', name)); }
   }
   return { applied: apply, retained: keep.size, removedSnapshots: remove.length, removedObjects: objects.length };

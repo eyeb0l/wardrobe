@@ -210,3 +210,25 @@ test("expiry inside the replacement transaction rolls back the complete publicat
     assert.deepEqual(await h.store.backupInventory(), before, "the failed final fence rolls back the prior DELETE too");
   });
 });
+
+
+test("restore verifies uploaded original bytes before replacing any existing metadata", async (t) => {
+  const h = await harness(t);
+  await h.store.withLease(async () => {
+    await h.store.writeFile(`${CLOUD_ROOT}/keep.json`, '{"keep":true}');
+    const before = await h.store.backupInventory();
+    const corrupted = Buffer.from(png);
+    corrupted[corrupted.length - 1] ^= 1;
+    for (const [bytes, code] of [[png.subarray(0, -1), "EIO"], [corrupted, "EIO"], [null, "ENOENT"]]) {
+      h.blob.get = async (url, options) => {
+        assert.equal(options.access, "private");
+        assert.equal(options.useCache, false, "verification must read the uploaded object without the cache");
+        assert.ok(h.blobs.has(url));
+        return bytes ? { statusCode: 200, stream: new Response(bytes).body } : null;
+      };
+      await assert.rejects(h.store.replaceFromBackup([file("new/state.json", "{}"), file("new/image.png", png)]), { code });
+      assert.deepEqual(await h.store.backupInventory(), before);
+    }
+    assert.equal(h.blobs.size, 3, "unpublished uploads remain eligible for normal garbage collection");
+  });
+});

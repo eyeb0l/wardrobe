@@ -326,6 +326,10 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
           const uploaded = await (await getBlob()).put(`wardrobe/${randomUUID()}${path.posix.extname(file.path)}`, file.bytes,
             { access: "private", addRandomSuffix: true, allowOverwrite: false });
           blobUrl = uploaded.url;
+          await store.assertLease();
+          const verified = await readBlob(blobUrl, file.path, false);
+          if (!verified.equals(file.bytes)) throw error("EIO", file.path, "Restored image verification failed");
+          await store.assertLease();
           uploadedBlobs += 1;
         }
         rows.push({ path: file.path, kind: "file", text_content: file.text, blob_url: blobUrl, size: file.bytes.length });
