@@ -75,7 +75,7 @@ Gallery edits to names, categories, colours and tags, plus hidden/deleted items,
 
 On first opening the upgraded app in each browser, older browser-only edits and hidden items migrate automatically. Existing shared edits take precedence over an older browser's copy. A local backup remains under `open-wardrobe-legacy-backup-v1`; failed migrations retain the original browser keys and retry on the next refresh. Deleted items retain a small metadata tombstone so a delayed import or migration cannot resurrect them. Hidden items are excluded from outfit and shopping inventories. Local development still uses its own data directory; this sync is between devices accessing the same hosted app.
 
-Retain the original local backup. There is currently no cloud export/restore command or automatic cloud-to-local backup in this repository. Configure and verify any provider backup arrangements separately, keeping database records and image objects together. Rolling back a deployment rolls back code, not wardrobe data.
+Retain the original local backup. The [encrypted backup and recovery commands](BACKUPS.md) export complete cloud recovery points, verify image bytes, restore into a new local directory, and support an explicitly reviewed cloud replacement. A portable daily-backup entry point and macOS schedule helper support an always-on backup host; a schedule must be installed on that host separately. Rolling back a deployment rolls back code, not wardrobe data.
 
 ## Automatic storage cleanup
 
