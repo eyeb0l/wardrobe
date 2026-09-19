@@ -82,7 +82,7 @@ test("cloud directories, exact bytes, atomic publication and immutable links", a
     assert.equal(h.blobs.size, 1, "unlink does not race with surviving links or readers");
   }));
   assert.equal((await store.stat(`${CLOUD_ROOT}/renamed/image.png`)).size, 7);
-  assert.ok(h.reads.every(({ options }) => options.access === "private" && options.useCache === false));
+  assert.ok(h.reads.every(({ options }) => options.access === "private" && options.useCache === true));
 });
 
 test("cloud fs rejects path escape, missing parents, type collisions, and exclusive overwrites", async (t) => {
@@ -270,4 +270,21 @@ test("a callback failure after acquiring ownership never replays the action", as
   assert.equal(callbacks, 1);
   assert.equal(await h.store.readFile(`${CLOUD_ROOT}/committed.json`, "utf8"), "true");
   await h.other().withLease(async () => {});
+});
+
+test("warm original reads deduplicate by immutable URL while replacement, deletion and backup verification stay fresh", async t => {
+  const h = await harness(t), file = `${CLOUD_ROOT}/image.png`, alias = `${CLOUD_ROOT}/alias.png`;
+  const original = Buffer.from([0,1,2,3]);
+  await h.store.withLease(async()=>{await h.store.writeFile(file,original);await h.store.link(file,alias)});
+  const [a,b] = await Promise.all([h.store.readFile(file),h.store.readFile(alias)]);
+  assert.equal(h.reads.length,1);assert.equal(h.reads[0].options.useCache,true);
+  a.fill(9);assert.deepEqual(b,original);assert.deepEqual(await h.store.readFile(file),original);
+  const url = h.reads[0].url;
+  await h.store.withLease(()=>h.store.readBackupBlob(url));
+  assert.equal(h.reads.length,2);assert.equal(h.reads[1].options.useCache,false,'verification must bypass all caches');
+  const replacement=Buffer.from([0,5,6,7]);
+  await h.store.withLease(()=>h.store.writeFile(file,replacement));
+  assert.deepEqual(await h.store.readFile(file),replacement);
+  assert.deepEqual(await h.store.readFile(alias),original,'a surviving link retains its own immutable identity');
+  await h.store.withLease(()=>h.store.rm(file));await assert.rejects(h.store.readFile(file),{code:'ENOENT'});
 });

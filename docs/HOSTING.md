@@ -63,6 +63,16 @@ node --env-file=.env.cloud scripts/warm-display-images.mjs --apply
 
 The command is resumable and leaves originals unchanged. Fresh cloud migrations create the table automatically. Unreferenced originals and display copies are collected by the daily storage cleanup described below.
 
+### Keeping transfer usage low
+
+Ordinary original-image reads use the private Blob CDN because uploads always receive new immutable URLs. The hosted request handler also retains at most 64 MiB / 256 image entries per warm instance (at most 8 MiB per entry), coalescing simultaneous reads of the same object. Every request still resolves the current database file reference and passes the existing access checks; replacement and deletion take effect immediately. A cold instance can still download a file again. Backup reads and restored-upload integrity checks explicitly bypass both byte caches.
+
+Original-image responses, like WebP responses, use `private, no-cache` with an ETag derived from the immutable object identity. An unchanged browser revalidation returns 304 without downloading either the PNG or WebP. No private response is put into the public CDN cache and no original is made public or recompressed.
+
+Reading outfit settings checks wardrobe metadata and file existence rather than downloading every garment to inspect its dimensions. Full image validation still runs for generation. Checking an empty accessory-suggestion cache does not download the outfit photo. These changes avoid background image reads unrelated to the picture being displayed.
+
+Blob cache misses consume simple operations and Fast Origin Transfer. Blob downloads still consume Blob Data Transfer even on CDN hits, so avoiding downloads is more effective than CDN caching alone. See [Vercel Blob usage](https://vercel.com/docs/vercel-blob/usage-and-pricing) and [private Blob caching](https://vercel.com/docs/vercel-blob/private-storage). Usage already recorded does not decrease after a release. Initial migration, derivative preparation, originals needed for paid generation, skill snapshots, and first full backups also contribute to usage; later encrypted backups reuse unchanged images locally.
+
 ### Releasing code
 
 Modeled garment generation plans a fresh setting with the configured vision model before making the image request. Each attempt therefore includes one scene-planning request and one image request. It uses the reviewed cutout, user direction and known previous settings; it has no backdrop catalog. Planning and image prompts share `scripts/modeled-photo-prompts.mjs` with the import-clothes skill, whose prompt CLI renders the same text without API calls. Approved app and skill imports retain `modeledSetting` for future planning; existing photographs without it remain usable.

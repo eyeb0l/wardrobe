@@ -39,7 +39,7 @@ async function harness(t) {
     async get(url, options) {
       blobReads.push({ url, options });
       assert.equal(options.access, "private");
-      assert.equal(options.useCache, false);
+      assert.equal(options.useCache, true);
       return blobs.has(url) ? { statusCode: 200, stream: new Response(blobs.get(url)).body } : null;
     },
   };

@@ -3,13 +3,17 @@ import { waitUntil } from "@vercel/functions";
 import { createCloudStore } from "../scripts/cloud-store.mjs";
 import { withStorage } from "../scripts/storage-fs.mjs";
 import { createPlugin, DATA_ROOT } from "./plugins.mjs";
-import { sendDisplayImage } from "../scripts/display-image.mjs";
+import { sendDisplayImage, sendOriginalImage } from "../scripts/display-image.mjs";
 import { createTask, saveTask, reservePaidCall } from "./task-store.mjs";
 import { generateWardrobe } from "./generation-workflow.mjs";
 import { recoverOutbox } from "./outbox.mjs";
 import { maintenance } from "./maintenance.mjs";
 
 let lastRecovery = 0;
+let imageStore;
+// Reuse only the byte cache/client across warm requests. Each path lookup and
+// route authorization is still fresh; writer ownership uses AsyncLocalStorage.
+const requestStore = () => imageStore ??= createCloudStore();
 
 function json(res, status, value) {
   res.statusCode = status;
@@ -49,15 +53,17 @@ export default async function handler(req, res) {
     lastRecovery = Date.now();
     waitUntil(recoverOutbox());
   }
-  const store = createCloudStore();
+  const store = requestStore();
   let plugin;
   const serve = () => withStorage(store, async () => {
     // The library's image route only requires an existing file in imported/.
     // Avoid loading every import job for each gallery thumbnail. Authentication
     // and the production gate above still apply to every request.
     const libraryImage = pathname.match(/^\/api\/import\/library\/([\w.-]+\.(?:png|jpe?g|webp))$/i);
-    if (readOnly && libraryImage && (requestUrl.searchParams.has("format") || requestUrl.searchParams.has("w"))) {
-      await sendDisplayImage(req, res, `${DATA_ROOT}/imported/${libraryImage[1]}`, requestUrl);
+    if (readOnly && libraryImage) {
+      const file = `${DATA_ROOT}/imported/${libraryImage[1]}`;
+      if (await sendDisplayImage(req, res, file, requestUrl)) return;
+      await sendOriginalImage(req, res, file);
       return;
     }
     plugin = await createPlugin(kind, {

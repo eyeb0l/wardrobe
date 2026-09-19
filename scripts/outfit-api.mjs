@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
-import { sendDisplayImage } from "./display-image.mjs";
+import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
 import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishImage } from "./outfit-storage.mjs";
@@ -237,7 +237,7 @@ export function wardrobeOutfitApi(options = {}) {
     return reference;
   }
 
-  async function inventory() {
+  async function inventory({ verifyImages = true } = {}) {
     const records = await readJson(path.join(dataDir, "library.json"), []);
     if (!Array.isArray(records)) throw fail("The wardrobe library is invalid. Restore library.json before generating.", 503);
     const found = new Map();
@@ -247,8 +247,12 @@ export function wardrobeOutfitApi(options = {}) {
       if (!match) continue;
       try {
         const file = await containedFile(importedDir, match[1]);
-        const meta = await sharp(await readFile(file), { limitInputPixels: 64e6 }).metadata();
-        if (!meta.width || !meta.height) continue;
+        // Settings only need existing, contained file references. Full decoding
+        // remains required by generation, never by an ordinary settings read.
+        if (verifyImages) {
+          const meta = await sharp(await readFile(file), { limitInputPixels: 64e6 }).metadata();
+          if (!meta.width || !meta.height) continue;
+        }
         found.set(record.id, { id: record.id, part: record.part, name: String(record.name || "Wardrobe piece").slice(0, 120), color: String(record.color || "").slice(0, 20), tags: Array.isArray(record.tags) ? record.tags.filter((item) => typeof item === "string").slice(0, 12).map((item) => item.slice(0, 40)) : [], file });
       } catch { /* Missing, escaped, or unreadable cutouts cannot be curated. */ }
     }
@@ -277,11 +281,16 @@ export function wardrobeOutfitApi(options = {}) {
     return saved?.imageHash === source.imageHash && saved.model === source.model && saved.contextHash === source.contextHash && saved.recipeVersion === source.recipeVersion;
   }
 
-  async function accessorySource(id) {
+  async function accessoryImage(id) {
     const outfit = (await manifest()).outfits.find((item) => item.id === id && item.status === "accepted");
     const filename = acceptedFilename(outfit?.image);
     if (!filename) throw fail("Saved outfit not found", 404);
-    const bytes = await readFile(await containedFile(imageDir, filename));
+    return { outfit, file: await containedFile(imageDir, filename) };
+  }
+
+  async function accessorySource(id) {
+    const { outfit, file } = await accessoryImage(id);
+    const bytes = await readFile(file);
     const context = JSON.stringify({ name: String(outfit.name || "").slice(0, 120), occasion: outfit.occasion, reason: String(outfit.reason || "").slice(0, 600) });
     return { bytes, context, imageHash: createHash("sha256").update(bytes).digest("hex"), contextHash: createHash("sha256").update(context).digest("hex"), model: models().vision, recipeVersion: accessoryRecipeVersion };
   }
@@ -300,9 +309,16 @@ export function wardrobeOutfitApi(options = {}) {
   }
 
   async function accessoryStatus(id) {
-    const source = await accessorySource(id);
     const saved = (await accessoryCache()).outfits[id];
-    const suggestions = accessoryIdentityMatches(saved, source) ? accessorySuggestions(saved.suggestions) : null;
+    let suggestions = null;
+    if (saved) {
+      const source = await accessorySource(id);
+      if (accessoryIdentityMatches(saved, source)) suggestions = accessorySuggestions(saved.suggestions);
+    } else {
+      // Validate the saved record/path without downloading a full outfit photo
+      // merely to discover that this optional text cache is empty.
+      await accessoryImage(id);
+    }
     return { suggestions, generating: accessoryRequests.has(id), hasApiKey: Boolean(setting("OPENAI_API_KEY").trim()) };
   }
 
@@ -352,8 +368,8 @@ export function wardrobeOutfitApi(options = {}) {
     return pairs;
   }
 
-  async function configuration() {
-    const [items, refs] = await Promise.all([inventory(), references()]);
+  async function configuration({ verifyImages = true } = {}) {
+    const [items, refs] = await Promise.all([inventory({ verifyImages }), references()]);
     const counts = Object.fromEntries(PARTS.map((part) => [part, [...items.values()].filter((item) => item.part === part).length]));
     const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
     const hasModelReference = refs.length > 0;
@@ -702,7 +718,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       ensureActive();
       if (req.method !== "GET") { ensureWritable(); mutationOrigin(req); }
       if (url.pathname === API && req.method === "GET") return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits() });
-      if (url.pathname === `${API}/config` && req.method === "GET") return sendJson(res, 200, await configuration());
+      if (url.pathname === `${API}/config` && req.method === "GET") return sendJson(res, 200, await configuration({ verifyImages: false }));
       if (url.pathname === `${API}/jobs` && req.method === "GET") return sendJson(res, 200, { jobs: [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob), warnings: jobWarnings });
       const accessories = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/accessories$/);
       if (accessories && req.method === "GET") return sendJson(res, 200, await accessoryStatus(accessories[1]));
@@ -739,6 +755,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         if (!FILE.test(filename) || !(await manifest()).outfits.some((item) => item.status === "accepted" && acceptedFilename(item.image) === filename)) throw fail("Image not found", 404);
         const file = await containedFile(imageDir, filename);
         if (await sendDisplayImage(req, res, file, url)) return;
+        if (await sendOriginalImage(req, res, file)) return;
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "no-store");
         return res.end(await readFile(file));
@@ -754,6 +771,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         if (!FILE.test(filename) || !job.outfits.some((item) => item.internal?.candidateFile === filename || item.internal?.previousImage === filename)) throw fail("Candidate image not found", 404);
         const file = await containedFile(path.join(jobsDir, job.id), filename);
         if (await sendDisplayImage(req, res, file, url)) return;
+        if (await sendOriginalImage(req, res, file)) return;
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "no-store");
         return res.end(await readFile(file));
