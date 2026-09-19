@@ -296,3 +296,48 @@ test("hosted outfit uploads reject queued generation and survive fresh invocatio
   assert.equal(h.requests.length, calls);
   assert.equal(h.scheduled.length, 1);
 });
+
+test("per-outfit rendering, approval and retry never download unrelated garment originals", async (t) => {
+  const h = await hostedHarness(t, { plan: [plan()] });
+  const plugin = await h.makePlugin();
+  const job = await h.create(plugin, 1);
+  await plugin.runTask(h.scheduled[0]);
+  const unrelated = new Set(h.items.filter(item => !["top-3", "bottom-1"].includes(item.id)).map(item => `${item.id}.png`));
+  let unrelatedReads = 0, selectedReads = 0;
+  const storage = { ...localFs, async readFile(file, ...args) {
+    if (unrelated.has(path.basename(String(file)))) unrelatedReads++;
+    if (["top-3.png", "bottom-1.png"].includes(path.basename(String(file)))) selectedReads++;
+    return localFs.readFile(file, ...args);
+  } };
+  await withStorage(storage, () => plugin.runTask(h.scheduled[0]));
+  const reviewed = await h.request(plugin, "GET", `${API}/jobs/${job.id}`);
+  assert.equal(reviewed.outfits[0].status, "review");
+  const outfit = reviewed.outfits[0];
+  await withStorage(storage, () => h.request(plugin, "POST", `${API}/jobs/${job.id}/outfits/${outfit.id}/retry`, {}, 202));
+  await withStorage(storage, () => plugin.runTask(h.scheduled.at(-1)));
+  await withStorage(storage, () => h.request(plugin, "POST", `${API}/jobs/${job.id}/outfits/${outfit.id}/approve`));
+  assert.ok(selectedReads >= 8, "instrumentation observes required selected inputs");
+  assert.equal(unrelatedReads, 0, "per-outfit actions must not read unrelated originals");
+  assert.deepEqual(h.requests, ["planning", "image", "image"]);
+});
+
+test("selected garment changes are still decoded before a paid call or approval", async (t) => {
+  const h = await hostedHarness(t, { plan: [plan()] });
+  const plugin = await h.makePlugin();
+  const job = await h.create(plugin, 1);
+  await plugin.runTask(h.scheduled[0]);
+  const selected = path.join(h.dataDir, "imported", "top-3.png");
+  const original = await readFile(selected);
+  await writeFile(selected, "corrupt image");
+  await plugin.runTask(h.scheduled[0]);
+  assert.deepEqual(h.requests, ["planning"], "corrupt selected originals cannot reach the provider");
+  await writeFile(selected, original);
+  const failed = await h.request(plugin, "GET", `${API}/jobs/${job.id}`);
+  const endpoint = `${API}/jobs/${job.id}/outfits/${failed.outfits[0].id}`;
+  await h.request(plugin, "POST", `${endpoint}/retry`, {}, 202);
+  await plugin.runTask(h.scheduled.at(-1));
+  await writeFile(selected, "corrupt again");
+  await h.request(plugin, "POST", `${endpoint}/approve`, {}, 409);
+  await writeFile(selected, original);
+  await h.request(plugin, "POST", `${endpoint}/approve`);
+});

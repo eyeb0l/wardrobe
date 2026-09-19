@@ -237,7 +237,7 @@ export function wardrobeOutfitApi(options = {}) {
     return reference;
   }
 
-  async function inventory({ verifyImages = true } = {}) {
+  async function inventory({ verifyImages = true, verifyImageIds } = {}) {
     const records = await readJson(path.join(dataDir, "library.json"), []);
     if (!Array.isArray(records)) throw fail("The wardrobe library is invalid. Restore library.json before generating.", 503);
     const found = new Map();
@@ -248,8 +248,10 @@ export function wardrobeOutfitApi(options = {}) {
       try {
         const file = await containedFile(importedDir, match[1]);
         // Settings only need existing, contained file references. Full decoding
-        // remains required by generation, never by an ordinary settings read.
-        if (verifyImages) {
+        // remains required for every selected generation/approval input. Keep
+        // metadata for all garments so pair-reservation checks remain complete.
+        // Per-outfit actions need not download unrelated wardrobe images.
+        if (verifyImages && (!verifyImageIds || verifyImageIds.has(record.id))) {
           const meta = await sharp(await readFile(file), { limitInputPixels: 64e6 }).metadata();
           if (!meta.width || !meta.height) continue;
         }
@@ -478,7 +480,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
   }
 
   async function generate(job, outfit) {
-    const items = validateSelection(outfit.garmentIds, await inventory());
+    const items = validateSelection(outfit.garmentIds, await inventory({ verifyImageIds: new Set(outfit.garmentIds) }));
     const reference = await resolveReference(job.modelReferenceId);
     const inputs = [{ file: reference.file, name: "identity.png" }, ...items.map((item) => ({ file: item.file, name: `${item.part}-${item.id}.png` }))];
     const previous = outfit.internal.previousImage;
@@ -693,7 +695,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       outfit.image = `${API}/images/${acceptedFilename(existing.image)}`;
       return;
     }
-    const items = await inventory();
+    const items = await inventory({ verifyImageIds: new Set(outfit.garmentIds) });
     validateSelection(outfit.garmentIds, items);
     const key = pairKey(outfit.garmentIds, items);
     if (current.outfits.some((item) => item.status === "accepted" && pairKey(item.garmentIds || [], items) === key)) throw fail("This top-and-bottom combination is already saved.", 409);
@@ -820,7 +822,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           } else {
             if (queued.has(job.id) || !["review", "failed", "rejected"].includes(outfit.status)) throw fail("Wait for this collection to finish generating before retrying an outfit.", 409);
             await readyReference(next.modelReferenceId);
-            const items = await inventory();
+            const items = await inventory({ verifyImageIds: new Set(outfit.garmentIds) });
             validateSelection(outfit.garmentIds, items);
             if ((await usedPairs(items, null, outfit.id)).has(pairKey(outfit.garmentIds, items))) throw fail("This top-and-bottom combination is already saved or being generated.", 409);
             outfit.prompt = input.prompt === undefined ? outfit.prompt : shortText(input.prompt, "correction (maximum 2000 characters)", 2000, false);
