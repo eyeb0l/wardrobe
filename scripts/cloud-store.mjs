@@ -159,6 +159,20 @@ function neonDatabase(databaseUrl) {
   };
 }
 
+// Keep byte classification identical for ordinary writes and full restore. A
+// UTF-8 BOM and non-JSON text outside the existing text suffixes stay in Blob.
+function storedText(target, bytes) {
+  try {
+    const decoded = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+    if (!decoded.includes("\0") && !decoded.startsWith("\uFEFF")) {
+      if (/\.json(?:\.|$)|\.tmp$/.test(target)) return decoded;
+      JSON.parse(decoded);
+      return decoded;
+    }
+  } catch { /* Binary content is stored in private Blob. */ }
+  return null;
+}
+
 function fileStat(row) {
   return {
     size: Number(row.size), mtime: new Date(row.updated_at), mtimeMs: new Date(row.updated_at).getTime(),
@@ -180,6 +194,19 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     try { await db.query("SELECT wardrobe_fs_mutate($1::uuid, $2::text, $3::jsonb)", [owner.token, operation, JSON.stringify(args)]); }
     catch (failure) {
       if (/^(EACCES|EEXIST|ENOENT|ENOTDIR|EISDIR|EPERM|EINVAL|ENOTEMPTY|ESTALE)$/.test(failure.message)) throw error(failure.message, args.path ?? CLOUD_ROOT);
+      throw failure;
+    }
+  };
+  const fencedTransaction = async (statements) => {
+    const owner = owned();
+    const assertion = { text: "SELECT wardrobe_fs_mutate($1::uuid, 'assert', '{}'::jsonb)", values: [owner.token] };
+    try {
+      // The assertion locks the lease row until commit, so another owner and
+      // garbage collection cannot cross this publication boundary.
+      const results = await db.transaction([assertion, ...statements, assertion]);
+      return results.slice(1, -1);
+    } catch (failure) {
+      if (failure.message === "ESTALE") throw error("ESTALE", CLOUD_ROOT);
       throw failure;
     }
   };
@@ -252,6 +279,74 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       }
       return { path: file, originalBytes: Number(source.size), variants };
     },
+    // These internal backup primitives intentionally require a caller-owned
+    // lease. The backup CLI supplies destination checks and recovery safeguards.
+    async backupInventory() {
+      const [rows] = await fencedTransaction([{
+        text: "SELECT path, kind, text_content, blob_url, size, updated_at FROM wardrobe_files ORDER BY path",
+      }]);
+      return rows;
+    },
+    async readBackupBlob(url) {
+      const [rows] = await fencedTransaction([{
+        text: "SELECT path FROM wardrobe_files WHERE kind = 'file' AND blob_url = $1 ORDER BY path LIMIT 1",
+        values: [url],
+      }]);
+      if (!rows.length) throw error("EACCES", CLOUD_ROOT, "Backup images must be referenced by the cloud store");
+      const bytes = await readBlob(url, rows[0].path, false);
+      await store.assertLease();
+      return bytes;
+    },
+    async replaceFromBackup(files) {
+      owned();
+      if (!Array.isArray(files)) throw error("EINVAL", CLOUD_ROOT, "Restore files must be an array");
+      const paths = new Set();
+      const directories = new Set();
+      const staged = files.map((file) => {
+        if (!file || typeof file !== "object") throw error("EINVAL", CLOUD_ROOT, "Invalid restore file");
+        const target = canonical(file.path);
+        if (target !== file.path || target === CLOUD_ROOT || paths.has(target)) throw error("EINVAL", target, "Restore paths must be unique canonical file paths");
+        if (!(file.bytes instanceof Uint8Array)) throw error("EINVAL", target, "Restore file bytes are required");
+        paths.add(target);
+        for (let parent = path.posix.dirname(target); parent !== CLOUD_ROOT; parent = path.posix.dirname(parent)) directories.add(parent);
+        // Own the bytes before any await so callers cannot change a staged file.
+        const bytes = Buffer.from(file.bytes);
+        return { path: target, bytes, text: storedText(target, bytes) };
+      });
+      for (const directory of directories) {
+        if (paths.has(directory)) throw error("ENOTDIR", directory, "A restore file is also a parent directory");
+      }
+      await store.assertLease();
+      const rows = [...directories].sort().map((directory) => ({ path: directory, kind: "dir", text_content: null, blob_url: null, size: 0 }));
+      let uploadedBlobs = 0;
+      for (const file of staged) {
+        let blobUrl = null;
+        if (file.text === null) {
+          await store.assertLease();
+          const uploaded = await (await getBlob()).put(`wardrobe/${randomUUID()}${path.posix.extname(file.path)}`, file.bytes,
+            { access: "private", addRandomSuffix: true, allowOverwrite: false });
+          blobUrl = uploaded.url;
+          await store.assertLease();
+          const verified = await readBlob(blobUrl, file.path, false);
+          if (!verified.equals(file.bytes)) throw error("EIO", file.path, "Restored image verification failed");
+          await store.assertLease();
+          uploadedBlobs += 1;
+        }
+        rows.push({ path: file.path, kind: "file", text_content: file.text, blob_url: blobUrl, size: file.bytes.length });
+      }
+      // Upload failures and transaction rollbacks leave existing metadata intact.
+      // Unpublished immutable objects are eligible for the normal GC grace period.
+      await fencedTransaction([
+        { text: "DELETE FROM wardrobe_files WHERE path <> $1", values: [CLOUD_ROOT] },
+        {
+          text: `INSERT INTO wardrobe_files (path, kind, text_content, blob_url, size)
+            SELECT path, kind, text_content, blob_url, size FROM jsonb_to_recordset($1::jsonb)
+              AS restored(path text, kind text, text_content text, blob_url text, size bigint)`,
+          values: [JSON.stringify(rows)],
+        },
+      ]);
+      return { files: staged.length, directories: directories.size, uploadedBlobs };
+    },
     async initialize() { await db.transaction(CLOUD_SCHEMA_SQL.map((text) => ({ text }))); },
     async assertLease() { await mutate("assert", {}); },
     async withLease(callback) {
@@ -309,14 +404,7 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       const flag = settings.flag ?? "w";
       if (flag !== "w" && flag !== "wx") throw error("ENOTSUP", target, "Only w and wx writes are supported");
       const bytes = typeof contents === "string" ? Buffer.from(contents, settings.encoding ?? "utf8") : Buffer.from(contents);
-      let text = null;
-      try {
-        const decoded = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-        if (!decoded.includes("\0") && !decoded.startsWith("\uFEFF")) {
-          if (/\.json(?:\.|$)|\.tmp$/.test(target)) text = decoded;
-          else { JSON.parse(decoded); text = decoded; }
-        }
-      } catch { /* Binary content is stored in private Blob. */ }
+      const text = storedText(target, bytes);
       let blobUrl = null;
       if (text === null) {
         await store.assertLease();
