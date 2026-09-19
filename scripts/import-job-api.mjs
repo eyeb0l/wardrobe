@@ -579,10 +579,10 @@ export function wardrobeImportApi(options = {}) {
         const output = path.join(dir, `${stageName}-${stage.attempts}.png`);
         const key = setting("OPENAI_API_KEY");
         if (!key) throw new Error("OPENAI_API_KEY is not configured");
-        const sourceFile = stageName === "garment" && current.internal.cropFile ? current.internal.cropFile : current.internal.originalFile;
-        const original = { data: await readFile(path.join(dir, sourceFile)), mime: "image/png", name: sourceFile };
         let bytes;
         if (stageName === "garment") {
+          const sourceFile = current.internal.cropFile || current.internal.originalFile;
+          const original = { data: await readFile(path.join(dir, sourceFile)), mime: "image/png", name: sourceFile };
           chromaKeyUsed = chooseChromaKey(current.metadata.color, current.metadata.secondaryColor);
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, chromaKeyUsed);
           stage.generationPrompt = current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt;

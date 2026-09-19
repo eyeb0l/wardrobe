@@ -3,6 +3,7 @@ import { OptimizedImage } from "./OptimizedImage.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, Check, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { IMAGE_ACCEPT, formatImageBytes, isImageUpload, prepareUploadImage } from "./image-upload.mjs";
+import { activeImportJobIds } from "./import-polling.mjs";
 import "./import-flow.css";
 
 const API = "/api/import/jobs";
@@ -223,19 +224,31 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
       .catch(() => {});
   }, []);
 
-  const refresh = useCallback(async (id) => {
+  const refresh = useCallback(async (id, signal) => {
     try {
-      const next = await api(`${API}/${id}`);
+      const next = await api(`${API}/${id}`, { signal });
+      if (signal.aborted) return;
       setJobs((current) => current.map((job) => job.id === id ? next : job));
       setDrafts((current) => current[id] ? current : { ...current, [id]: defaultDraft(next) });
-    } catch (requestError) { setError(requestError.message); }
+    } catch (requestError) { if (!signal.aborted) setError(requestError.message); }
   }, []);
 
+  // Keep the timer stable across progress updates, but cancel stale reads when
+  // a job enters review or a user action takes ownership of it.
+  const pollingIds = JSON.stringify(activeImportJobIds(jobs).filter((id) => id !== busyId));
   useEffect(() => {
-    if (!jobs.some((job) => (job.stages?.crop?.status === "approved" && ["processing", "pending", "queued"].includes(job.stages?.garment?.status)) || ["processing", "queued"].includes(job.stages?.modeled?.status) || (job.stages?.garment?.status === "approved" && job.stages?.modeled?.status === "pending"))) return undefined;
-    const timer = setInterval(() => jobs.forEach((job) => refresh(job.id)), 900);
-    return () => clearInterval(timer);
-  }, [jobs, refresh]);
+    const ids = JSON.parse(pollingIds);
+    if (!ids.length) return undefined;
+    const controller = new AbortController();
+    let timer;
+    const poll = async () => {
+      await Promise.all(ids.map((id) => refresh(id, controller.signal)));
+      // Schedule after completion so a slow request cannot overlap itself.
+      if (!controller.signal.aborted) timer = setTimeout(poll, 900);
+    };
+    timer = setTimeout(poll, 900);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [pollingIds, refresh]);
 
   const submitFiles = useCallback(async (files) => {
     if (!setup?.ready) { setOpen(true); return; }

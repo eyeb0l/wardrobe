@@ -5,7 +5,12 @@ import { readTask, saveTask, reservePaidCall } from "./task-store.mjs";
 
 export const INTERRUPTED = "Generation was interrupted. Check API usage before retrying; retry starts a new paid request.";
 
-export async function executeCloudTask(id, step, { store = createCloudStore(), pluginFactory = createPlugin, reserve = reservePaidCall,
+// Reuse only this worker's storage client and bounded immutable-byte cache.
+// Paths still resolve from the database; each invocation acquires its own lease.
+let workerStore;
+const defaultStore = () => workerStore ??= createCloudStore();
+
+export async function executeCloudTask(id, step, { store = defaultStore(), pluginFactory = createPlugin, reserve = reservePaidCall,
   enabled = () => process.env.WARDROBE_HOSTED_ENABLED === "1" && process.env.VERCEL_ENV === "production",
 } = {}) {
   return store.withLease(() => withStorage(store, async () => {

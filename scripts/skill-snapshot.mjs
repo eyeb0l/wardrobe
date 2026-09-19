@@ -10,13 +10,24 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
 // A task snapshot, not a backup: owned cutouts, reference originals and saved
 // outfit metadata only. Jobs, credentials and generated display copies stay out.
-export async function snapshotForSkill({ target, dataDir, store, reference, out }) {
+export async function snapshotForSkill({ target, dataDir, store, reference, out, reuse }) {
   if (!out) throw new Error('--out must name a new directory outside the live data directory.');
   const output = path.resolve(out);
   const parent = await local.realpath(path.dirname(output));
   const resolvedOutput = path.join(parent, path.basename(output));
   const sourceRoot = target === 'local' ? await local.realpath(dataDir) : dataDir;
   if (resolvedOutput === sourceRoot || resolvedOutput.startsWith(sourceRoot + path.sep)) throw new Error('Keep task snapshots outside the live data directory.');
+  let reuseRoot;
+  const reusable = new Map();
+  if (reuse) {
+    reuseRoot = await local.realpath(path.resolve(reuse));
+    const previous = JSON.parse(await local.readFile(path.join(reuseRoot, 'snapshot.json'), 'utf8'));
+    if (!Array.isArray(previous.files) || previous.target !== target) throw new Error('--reuse must name a completed snapshot of the same target.');
+    for (const file of previous.files) {
+      if (typeof file.name === 'string' && /^(?:imported\/[\w.-]+\.(?:png|jpe?g|webp)|model-reference(?:-[1-9]\d*)?\.png)$/i.test(file.name)
+        && /^[a-f0-9]{64}$/.test(file.sha256) && /^blob-sha256:[a-f0-9]{64}$/.test(file.identity)) reusable.set(file.name, file);
+    }
+  }
   // Read and validate the authoritative metadata before creating the output.
   const libraryPath = path.join(dataDir, 'library.json');
   const libraryBytes = await store.readFile(libraryPath);
@@ -42,29 +53,47 @@ export async function snapshotForSkill({ target, dataDir, store, reference, out 
   await local.mkdir(resolvedOutput, { mode: 0o700 }); // Existing output is never overwritten.
   await local.mkdir(path.join(resolvedOutput, 'imported'), { mode: 0o700 });
   const fingerprints = [];
+  let reusedImages = 0;
   for (const [name, source] of files) {
     if (target === 'local' && name.startsWith('imported/')) {
       const real = await local.realpath(source);
       if (!real.startsWith(sourceRoot + path.sep)) throw new Error(`Wardrobe image escapes its data directory: ${name}`);
     }
     const before = await store.stat(source);
-    const bytes = await store.readFile(source);
+    const identity = await store.imageIdentity?.(source);
+    let bytes;
+    const previous = reusable.get(name);
+    if (identity && previous?.identity === identity) {
+      // Reuse only a verified original with the same live immutable identity.
+      // Read into an independent buffer: no symlinks/hardlinks to older tasks.
+      try {
+        const cachedFile = path.join(reuseRoot, name);
+        const real = await local.realpath(cachedFile);
+        if (real.startsWith(reuseRoot + path.sep) && (await local.lstat(cachedFile)).isFile()) {
+          const cached = await local.readFile(cachedFile);
+          if (cached.length === before.size && hash(cached) === previous.sha256) bytes = cached;
+        }
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    if (bytes) reusedImages++;
+    else bytes = await store.readFile(source);
     const after = await store.stat(source);
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error('Wardrobe changed during snapshot; retry into a fresh directory.');
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || bytes.length !== after.size
+      || identity !== await store.imageIdentity?.(source)) throw new Error('Wardrobe changed during snapshot; retry into a fresh directory.');
     await local.writeFile(path.join(resolvedOutput, name), bytes, { flag: 'wx', mode: 0o600 });
-    fingerprints.push({ name, source, size: after.size, mtimeMs: after.mtimeMs, sha256: hash(bytes) });
+    fingerprints.push({ name, source, size: after.size, mtimeMs: after.mtimeMs, sha256: hash(bytes), identity });
   }
   // Recheck metadata and versions without taking or modifying the writer lease.
   if (!Buffer.from(libraryBytes).equals(Buffer.from(await store.readFile(libraryPath))) || JSON.stringify(outfits) !== JSON.stringify(await withStorage(store, () => readManifest(dataDir)))) throw new Error('Wardrobe metadata changed during snapshot; retry into a fresh directory.');
   for (const file of fingerprints) {
     const current = await store.stat(file.source);
-    if (current.size !== file.size || current.mtimeMs !== file.mtimeMs) throw new Error('Wardrobe image changed during snapshot; retry into a fresh directory.');
+    if (current.size !== file.size || current.mtimeMs !== file.mtimeMs || file.identity !== await store.imageIdentity?.(file.source)) throw new Error('Wardrobe image changed during snapshot; retry into a fresh directory.');
   }
   await local.writeFile(path.join(resolvedOutput, 'library.json'), JSON.stringify(library, null, 2), { flag: 'wx', mode: 0o600 });
   await local.writeFile(path.join(resolvedOutput, 'outfits.json'), JSON.stringify(outfits, null, 2), { flag: 'wx', mode: 0o600 });
-  const result = { target, capturedAt: new Date().toISOString(), directory: resolvedOutput, wardrobeCount: library.length,
+  const result = { target, capturedAt: new Date().toISOString(), directory: resolvedOutput, wardrobeCount: library.length, reusedImages,
     outfitCount: outfits.outfits.length, references: references.map(({ id, file }) => ({ id, file })),
-    files: fingerprints.map(({ name, sha256 }) => ({ name, sha256 })) };
+    files: fingerprints.map(({ name, sha256, identity }) => ({ name, sha256, ...(identity ? { identity } : {}) })) };
   // Written last: its presence identifies a completed, verified task snapshot.
   await local.writeFile(path.join(resolvedOutput, 'snapshot.json'), JSON.stringify(result, null, 2), { flag: 'wx', mode: 0o600 });
   return result;
@@ -74,7 +103,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   try {
     const options = parseSkillArgs(process.argv.slice(2));
     const selected = await skillStorage(options);
-    const result = await snapshotForSkill({ ...selected, out: options.out });
+    const result = await snapshotForSkill({ ...selected, out: options.out, reuse: options.reuse });
     console.log(JSON.stringify({ ...result, files: result.files.length }, null, 2));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

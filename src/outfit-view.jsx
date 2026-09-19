@@ -43,10 +43,15 @@ function jobSummary(job) {
   return `${accepted} ${accepted === 1 ? "outfit" : "outfits"} added to your collection`;
 }
 
-function Photo({ src, alt, className = "", priority = false }) {
+// Sizes follow the card, modal and reference layouts in outfit-view.css.
+const CARD_PHOTO_SIZES = "(max-width: 580px) calc(100vw - 36px), (max-width: 860px) calc((100vw - 66px) / 2), (max-width: 960px) calc((100vw - 86px) / 2), (max-width: 1180px) calc((100vw - 104px) / 3), (max-width: 1800px) calc((100vw - 160px) / 3), 547px";
+const DETAIL_PHOTO_SIZES = "(max-width: 580px) calc(100vw - 22px), (max-width: 734px) calc(100vw - 66px), (max-width: 960px) 670px, (max-width: 1304px) calc(60vw - 39.6px), 743px";
+const GARMENT_PHOTO_SIZES = "(max-width: 580px) calc((100vw - 86px) / 3), (max-width: 960px) calc((100vw - 162px) / 4), 140px";
+
+function Photo({ src, alt, className = "", priority = false, sizes = CARD_PHOTO_SIZES }) {
   const [failedSource, setFailedSource] = useState(null);
   if (!src || failedSource === src) return <div className={`outfit-photo-fallback ${className}`} role="img" aria-label={alt}>Photo unavailable</div>;
-  return <OptimizedImage src={src} alt={alt} className={className} priority={priority} onError={() => setFailedSource(src)} sizes="(max-width: 580px) 100vw, (max-width: 960px) 50vw, 33vw" />;
+  return <OptimizedImage src={src} alt={alt} className={className} priority={priority} onError={() => setFailedSource(src)} sizes={sizes} />;
 }
 
 function OutfitModal({ title, className = "", onClose, children }) {
@@ -98,7 +103,7 @@ function GarmentReferences({ outfit, itemsById }) {
       {(outfit.garmentIds || []).map((id) => {
         const item = itemsById.get(id);
         return <div className="outfit-piece" key={id}>
-          {item ? <Photo src={item.thumbnail || item.image} alt={item.name || "Wardrobe piece"} /> : <div className="outfit-piece-missing" aria-hidden="true">—</div>}
+          {item ? <Photo src={item.thumbnail || item.image} alt={item.name || "Wardrobe piece"} sizes={GARMENT_PHOTO_SIZES} /> : <div className="outfit-piece-missing" aria-hidden="true">—</div>}
           <p>{item?.name || "Piece no longer in your wardrobe"}</p>
         </div>;
       })}
@@ -149,7 +154,7 @@ function AccessorySuggestions({ outfit }) {
 
 function OutfitDetails({ outfit, itemsById, children }) {
   return <div className="outfit-detail-layout">
-    <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className="outfit-photo-fallback" role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <Photo key={outfit.image || outfit.id} src={outfit.image} alt={`${outfit.name}, modeled head to toe`} priority />}</div>
+    <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className="outfit-photo-fallback" role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <Photo key={outfit.image || outfit.id} src={outfit.image} alt={`${outfit.name}, modeled head to toe`} sizes={DETAIL_PHOTO_SIZES} priority />}</div>
     <div className="outfit-detail-copy">
       <p className="outfit-occasion">{occasionText(outfit)}</p>
       <p className="outfit-reason">{outfit.reason}</p>
@@ -191,7 +196,7 @@ function GenerateForm({ config, configError, refreshing, onRefresh, busy, error,
     {references.length ? <fieldset className="outfit-reference-picker" disabled={busy}>
       <legend>Model reference</legend>
       <div className="outfit-reference-options">{references.map((reference) => <label key={reference.id} className={effectiveReference === reference.id ? "selected" : ""}>
-        <Photo src={reference.imageUrl} alt="" />
+        <Photo src={reference.imageUrl} alt="" sizes="116px" />
         <span><input type="radio" name="outfit-model-reference" aria-label={reference.label} value={reference.id} checked={effectiveReference === reference.id} onChange={() => setModelReferenceId(reference.id)} />{reference.label}</span>
       </label>)}</div>
       <button type="button" className="outfit-text-button" onClick={onRefresh} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh photos"}</button>
@@ -228,7 +233,7 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob }) {
     </div>
     {outfits.length ? <>
       <nav className="outfit-review-strip" aria-label="Choose an outfit to review">{outfits.map((outfit, index) => <button type="button" key={outfit.id} className={outfit.id === selected?.id ? "selected" : ""} onClick={() => select(outfit.id)} aria-pressed={outfit.id === selected?.id} aria-label={`${index + 1}. ${outfit.name}: ${outfit.status === "review" ? "ready to review" : outfit.status === "accepted" ? "added to collection" : outfit.status === "failed" ? "needs a retry" : outfit.status === "rejected" ? "rejected" : "creating photo"}`}>
-        {outfit.image ? <Photo src={outfit.image} alt="" /> : <span className="outfit-review-number">{String(index + 1).padStart(2, "0")}</span>}
+        {outfit.image ? <Photo src={outfit.image} alt="" sizes="40px" /> : <span className="outfit-review-number">{String(index + 1).padStart(2, "0")}</span>}
         <span>{outfit.name}</span>{outfit.status === "accepted" ? <Check size={14} aria-hidden="true" /> : null}
       </button>)}</nav>
       <h3 className="outfit-review-title">{selected.name}</h3>

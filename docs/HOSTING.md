@@ -67,9 +67,22 @@ The command is resumable and leaves originals unchanged. Fresh cloud migrations 
 
 Ordinary original-image reads use the private Blob CDN because uploads always receive new immutable URLs. The hosted request handler also retains at most 64 MiB / 256 image entries per warm instance (at most 8 MiB per entry), coalescing simultaneous reads of the same object. Every request still resolves the current database file reference and passes the existing access checks; replacement and deletion take effect immediately. A cold instance can still download a file again. Backup reads and restored-upload integrity checks explicitly bypass both byte caches.
 
+Task workers reuse the same bounded storage client across steps when the platform keeps their process warm. Each step still acquires a fresh fenced lease and reads current task/file metadata. Separate instances and explicitly supplied stores do not share this cache; capacity estimates must allow for cold workers. There is no durable worker cache or change to direct backup verification.
+
 Original-image responses, like WebP responses, use `private, no-cache` with an ETag derived from the immutable object identity. An unchanged browser revalidation returns 304 without downloading either the PNG or WebP. No private response is put into the public CDN cache and no original is made public or recompressed.
 
-Reading outfit settings checks wardrobe metadata and file existence rather than downloading every garment to inspect its dimensions. Full image validation still runs for generation. Checking an empty accessory-suggestion cache does not download the outfit photo. These changes avoid background image reads unrelated to the picture being displayed.
+Reading outfit and Shopping settings checks wardrobe metadata and file existence rather than downloading originals to inspect their dimensions. Actual generation and Shopping analysis still validate their inputs. Modeled import generation reads the cutout and identity reference without downloading the unused source upload. Small outfit thumbnails request an appropriate display size; detail views retain their larger derivatives. Import polling fetches only jobs that can advance on the server, with no overlapping polls.
+
+Outfit planning validates originals while preparing the same contact sheets, then rechecks selected garments and current combination reservations before committing the plan. Rendering, retries and approval validate only selected garment images. Hosted approval publishes the validated candidate through a fenced, exclusive metadata link, retaining its immutable original and any existing WebP variants. Removing a candidate reference cannot remove an accepted image that still refers to that Blob. Local approval continues to publish independent image bytes.
+
+New accessory-suggestion cache entries include an opaque immutable image identity plus the portable content hash. Hosted cache hits verify the current identity and styling/model/recipe context without reading the photo. Legacy entries or entries restored under a different Blob identity retain the content-hash fallback. Empty-cache checks never download the photo. Read-only checks do not silently rewrite saved metadata.
+
+To give existing suggestions the same fast path, use the optional one-time upgrade below. The default dry run reports candidate counts and estimated original bytes without downloading images or writing data. Review that estimate against the remaining transfer allowance before applying. `--apply` takes the normal writer lease, verifies original hashes, and adds identity metadata only to matching entries. It preserves suggestions and other fields, makes no model calls, and is idempotent. A restored store may need it again because restored images receive new Blob identities.
+
+```sh
+node --env-file=.env.cloud scripts/upgrade-accessory-cache.mjs --target cloud
+node --env-file=.env.cloud scripts/upgrade-accessory-cache.mjs --target cloud --apply
+```
 
 Blob cache misses consume simple operations and Fast Origin Transfer. Blob downloads still consume Blob Data Transfer even on CDN hits, so avoiding downloads is more effective than CDN caching alone. See [Vercel Blob usage](https://vercel.com/docs/vercel-blob/usage-and-pricing) and [private Blob caching](https://vercel.com/docs/vercel-blob/private-storage). Usage already recorded does not decrease after a release. Initial migration, derivative preparation, originals needed for paid generation, skill snapshots, and first full backups also contribute to usage; later encrypted backups reuse unchanged images locally.
 

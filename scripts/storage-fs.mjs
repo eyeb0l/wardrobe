@@ -6,6 +6,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 const context = new AsyncLocalStorage();
 export const withStorage = (store, callback) => context.run(store, callback);
 export const currentStorage = () => context.getStore();
+// A hosted immutable image identity always comes from a fresh path lookup.
+// Local files are mutable, so callers must fall back to checking their bytes.
+export const imageIdentity = async (file) => context.getStore()?.imageIdentity?.(file);
 const operation = (name) => (...args) => (context.getStore() ?? local)[name](...args);
 export const readFile = operation("readFile");
 export const writeFile = operation("writeFile");

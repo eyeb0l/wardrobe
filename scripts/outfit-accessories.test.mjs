@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import * as localFs from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { API, accessoryIdeas, harness } from "./test-helpers/outfit-harness.mjs";
+import { withStorage } from "./storage-fs.mjs";
 
 const endpoint = `${API}/original-1/accessories`;
 const response = () => Response.json({ output_text: JSON.stringify({ suggestions: accessoryIdeas }) });
@@ -126,4 +128,102 @@ test("a cache schema change during generation cannot be overwritten by the late 
   release();
   assert.match((await pending).error, /unsupported schema version/);
   assert.equal(await readFile(cacheFile(h), "utf8"), future);
+});
+
+function immutableStorage() {
+  const revisions = new Map();
+  const reads = [];
+  const store = { ...localFs,
+    async imageIdentity(file) {
+      await localFs.stat(file); // A stale cache must never bypass current existence.
+      return `blob-sha256:fixture-${path.basename(file)}-${revisions.get(path.basename(file)) || 0}`;
+    },
+    async readFile(file, ...args) {
+      const value = await localFs.readFile(file, ...args);
+      if (String(file).endsWith(".png")) reads.push(value.length);
+      return value;
+    },
+  };
+  return { store, reads, replace(file) { revisions.set(path.basename(file), (revisions.get(path.basename(file)) || 0) + 1); }, run: (work) => withStorage(store, work) };
+}
+
+test("immutable accessory cache hits read no image bodies across five fresh plugin instances", async (t) => {
+  const h = await harness(t, { analysis: response });
+  const storage = immutableStorage();
+  await storage.run(() => h.request("POST", endpoint, {}));
+  assert.deepEqual(storage.reads, [h.output.length], "generation reads the source once; immutable identity validates the commit");
+  storage.reads.length = 0;
+  for (let index = 0; index < 5; index++) {
+    await h.restart({ freshModule: true });
+    assert.deepEqual((await storage.run(() => h.request("GET", endpoint))).suggestions, accessoryIdeas);
+    assert.deepEqual((await storage.run(() => h.request("POST", endpoint, {}))).suggestions, accessoryIdeas);
+  }
+  assert.deepEqual(storage.reads, []);
+  assert.equal(h.requests.length, 1);
+  assert.match((await readCache(h)).outfits["original-1"].imageIdentity, /^blob-sha256:/);
+});
+
+test("legacy and restored accessory caches retain portable hashes and promote identities only on explicit requests", async (t) => {
+  const h = await harness(t, { analysis: response });
+  const storage = immutableStorage();
+  await storage.run(() => h.request("POST", endpoint, {}));
+  const file = path.join(h.dataDir, "outfit-images", "original-1.png");
+  for (const mode of ["legacy", "restored"]) {
+    const cache = await readCache(h);
+    if (mode === "legacy") delete cache.outfits["original-1"].imageIdentity;
+    else storage.replace(file); // A restore gives identical bytes a different URL.
+    await writeFile(cacheFile(h), JSON.stringify(cache));
+    const previous = await readFile(cacheFile(h), "utf8");
+    storage.reads.length = 0;
+    assert.deepEqual((await storage.run(() => h.request("GET", endpoint))).suggestions, accessoryIdeas);
+    assert.deepEqual(storage.reads, [h.output.length]);
+    assert.equal(await readFile(cacheFile(h), "utf8"), previous, "GET never migrates or writes the cache");
+    await storage.run(() => h.request("POST", endpoint, {}));
+    assert.equal(h.requests.length, 1, "hash-compatible migration never pays for another analysis");
+    assert.equal((await readCache(h)).outfits["original-1"].imageHash, createHash("sha256").update(h.output).digest("hex"));
+    storage.reads.length = 0;
+    assert.deepEqual((await storage.run(() => h.request("GET", endpoint))).suggestions, accessoryIdeas);
+    assert.deepEqual(storage.reads, []);
+  }
+  assert.deepEqual((await h.request("GET", endpoint)).suggestions, accessoryIdeas, "cloud backup remains usable after restoring onto local files");
+});
+
+test("immutable identity does not hide changed context, replacement bytes or deletion", async (t) => {
+  const h = await harness(t, { analysis: response });
+  const storage = immutableStorage();
+  await storage.run(() => h.request("POST", endpoint, {}));
+  const manifestFile = path.join(h.dataDir, "outfits.json");
+  const originalManifest = await readFile(manifestFile, "utf8");
+  const manifest = JSON.parse(originalManifest);
+  manifest.outfits[0].reason = "New context";
+  await writeFile(manifestFile, JSON.stringify(manifest));
+  storage.reads.length = 0;
+  assert.equal((await storage.run(() => h.request("GET", endpoint))).suggestions, null);
+  assert.deepEqual(storage.reads, [], "context-only invalidation needs no photo download");
+  await writeFile(manifestFile, originalManifest);
+  const file = path.join(h.dataDir, "outfit-images", "original-1.png");
+  await writeFile(file, await h.image("#123456"));
+  storage.replace(file);
+  assert.equal((await storage.run(() => h.request("GET", endpoint))).suggestions, null);
+  assert.equal(storage.reads.length, 1);
+  await localFs.rm(file);
+  storage.reads.length = 0;
+  await storage.run(() => h.request("GET", endpoint, undefined, 404));
+  assert.deepEqual(storage.reads, []);
+  assert.equal(h.requests.length, 1);
+});
+
+test("an immutable photo replacement during accessory analysis rejects the late response", async (t) => {
+  let release;
+  const h = await harness(t, { analysis: () => new Promise((resolve) => { release = () => resolve(response()); }) });
+  const storage = immutableStorage();
+  const pending = storage.run(() => h.request("POST", endpoint, {}, 409));
+  while (!release) await delay(2);
+  const file = path.join(h.dataDir, "outfit-images", "original-1.png");
+  await writeFile(file, await h.image("#654321"));
+  storage.replace(file);
+  release();
+  assert.match((await pending).error, /changed/);
+  await assert.rejects(readFile(cacheFile(h)), { code: "ENOENT" });
+  assert.deepEqual(storage.reads, [h.output.length], "fresh metadata catches replacement without downloading the new body");
 });

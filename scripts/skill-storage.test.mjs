@@ -17,9 +17,9 @@ async function setup(t) {
   const pg=new PGlite();t.after(()=>pg.close());
   const database={query:async(sql,args=[]) => (await pg.query(sql,args)).rows,
     transaction: statements=>pg.transaction(async tx=>{for(const s of statements)await tx.query(s.text,s.values);})};
-  const objects=new Map();
+  const objects=new Map(), reads=[];
   const blob={put:async(name,bytes,opts)=>{assert.equal(opts.access,'private');const url='https://private.test/'+name;objects.set(url,Buffer.from(bytes));return {url};},
-    get:async(url,opts)=>{assert.equal(opts.access,'private');return {statusCode:200,stream:new Response(objects.get(url)).body};}};
+    get:async(url,opts)=>{reads.push(url);assert.equal(opts.access,'private');return {statusCode:200,stream:new Response(objects.get(url)).body};}};
   const store=createCloudStore({database,blob});await store.initialize();
   const opaque=await sharp({create:{width:60,height:60,channels:4,background:'red'}}).png().toBuffer();
   const cutout=await sharp({create:{width:80,height:80,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite([{input:opaque,left:10,top:10}]).png().toBuffer();
@@ -35,7 +35,7 @@ async function setup(t) {
   const manifest=root+'/manifest.json';const item={slug:'piece',file:'piece.png',modeledFile:'piece.png',modelReferenceId:'default',name:'New piece',part:'upperbody',color:'#ff0000',status:'accepted'};
   await fs.writeFile(manifest,JSON.stringify({items:[item]}));
   const selected=await skillStorage({target:'cloud',store});
-  return {root,store,objects,pg,cutout,opaque,item,manifest,selected,options:{items:root+'/items',modeled:root+'/modeled',manifest,selected},other:()=>createCloudStore({database,blob})};
+  return {root,store,objects,reads,pg,cutout,opaque,item,manifest,selected,options:{items:root+'/items',modeled:root+'/modeled',manifest,selected},other:()=>createCloudStore({database,blob})};
 }
 
 test('target selection is explicit and never falls back to local on cloud failure',async()=>{
@@ -118,4 +118,50 @@ test('skill snapshots omit deleted cutouts and cloud outfit saves reject hidden 
   const staged=h.root+'/hidden-outfits.json';
   await fs.writeFile(staged,JSON.stringify({version:1,outfits:[{id:'hidden-look',name:'Hidden look',occasion:['casual'],garmentIds:['owned'],reason:'Must not publish',status:'accepted',image:'outfit-images/reviewed.png'}]}));
   await assert.rejects(saveOutfitCollection({dataDir:CLOUD_ROOT,store:h.store,stagedManifestPath:staged}),/no longer in the live wardrobe/);
+});
+
+test('fresh skill snapshots reuse only hash-verified originals with a matching live immutable identity', async t => {
+  const h = await setup(t), first = h.root + '/first';
+  await snapshotForSkill({...h.selected, out:first});
+  assert.equal(h.reads.length,2);
+  h.reads.length=0;
+  const next=await snapshotForSkill({...h.selected,store:h.other(),out:h.root+'/next',reuse:first});
+  assert.equal(next.reusedImages,2);
+  assert.equal(h.reads.length,0,'fresh cloud client reuses verified originals without Blob reads');
+  await fs.writeFile(first+'/imported/old.png',Buffer.alloc(h.cutout.length));
+  const repaired=await snapshotForSkill({...h.selected,store:h.other(),out:h.root+'/repaired',reuse:first});
+  assert.equal(repaired.reusedImages,1);assert.equal(h.reads.length,1);
+  assert.deepEqual(await fs.readFile(h.root+'/repaired/imported/old.png'),h.cutout);
+  h.reads.length=0;
+  await h.store.withLease(()=>h.store.writeFile(CLOUD_ROOT+'/model-reference.png',h.cutout));
+  const replaced=await snapshotForSkill({...h.selected,store:h.other(),out:h.root+'/replaced',reuse:h.root+'/next'});
+  assert.equal(replaced.reusedImages,1);assert.equal(h.reads.length,1,'changed immutable identity downloads its new original');
+  assert.deepEqual(await fs.readFile(h.root+'/replaced/model-reference.png'),h.cutout);
+  await h.store.withLease(async()=>{
+    await h.store.writeFile(CLOUD_ROOT+'/library.json','[]');
+    await h.store.rm(CLOUD_ROOT+'/imported/old.png');
+  });
+  h.reads.length=0;
+  const deleted=await snapshotForSkill({...h.selected,store:h.other(),out:h.root+'/deleted',reuse:h.root+'/replaced'});
+  assert.equal(deleted.wardrobeCount,0);assert.equal(h.reads.length,0);
+  await assert.rejects(fs.stat(h.root+'/deleted/imported/old.png'),{code:'ENOENT'});
+});
+
+test('snapshot reuse rejects escaping cache symlinks and detects replacement even with matching size and timestamp', async t => {
+  const h=await setup(t), first=h.root+'/first';
+  await snapshotForSkill({...h.selected,out:first});
+  await fs.unlink(first+'/imported/old.png');
+  await fs.writeFile(h.root+'/outside.png',h.cutout);
+  await fs.symlink(h.root+'/outside.png',first+'/imported/old.png');
+  h.reads.length=0;
+  const safe=await snapshotForSkill({...h.selected,store:h.other(),out:h.root+'/safe',reuse:first});
+  assert.equal(safe.reusedImages,1);assert.equal(h.reads.length,1);
+  const cold=h.other();let checks=0;
+  const unstable={...cold,imageIdentity:async(file)=>{
+    const identity=await cold.imageIdentity(file);
+    if(file.endsWith('/old.png')&&++checks===2)return 'blob-sha256:'+'0'.repeat(64);
+    return identity;
+  }};
+  await assert.rejects(snapshotForSkill({...h.selected,store:unstable,out:h.root+'/unstable',reuse:h.root+'/safe'}),/changed during snapshot/);
+  await assert.rejects(fs.stat(h.root+'/unstable/snapshot.json'),{code:'ENOENT'});
 });
