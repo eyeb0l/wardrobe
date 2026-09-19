@@ -1,10 +1,11 @@
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { DISPLAY_WIDTHS, DISPLAY_RECIPE } from "../shared/image-variants.mjs";
 import { displayKey, displayETag, encodeDisplayImage, matchesETag } from "./display-image.mjs";
 import { GC_SCHEMA_SQL, collectBlobs } from "./blob-gc.mjs";
+import { immutableByteCache } from "./immutable-byte-cache.mjs";
 
 export const CLOUD_ROOT = "/wardrobe-data";
 const LEASE_SECONDS = 270;
@@ -217,10 +218,17 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     if (!rows[0]) throw error("ENOENT", target);
     return rows[0];
   };
+  const cachedBlob = immutableByteCache();
   const readBlob = async (url, file, useCache = true) => {
-    const result = await (await getBlob()).get(url, { access: "private", useCache });
-    if (!result || result.statusCode !== 200 || !result.stream) throw error("ENOENT", file, "Stored image is unavailable");
-    return Buffer.from(await new Response(result.stream).arrayBuffer());
+    const download = async () => {
+      const result = await (await getBlob()).get(url, { access: "private", useCache });
+      if (!result || result.statusCode !== 200 || !result.stream) throw error("ENOENT", file, "Stored image is unavailable");
+      return Buffer.from(await new Response(result.stream).arrayBuffer());
+    };
+    // All uploads have unique immutable URLs. Database path lookups remain fresh,
+    // so caching bytes cannot hide replacement/deletion. Integrity checks for
+    // backups and restore explicitly bypass both this cache and Blob's CDN.
+    return useCache ? cachedBlob(url, download) : download();
   };
   const imageRow = async (file, width) => {
     if (width !== undefined && !DISPLAY_WIDTHS.includes(width)) throw Object.assign(new Error("Unsupported display image size"), { status: 400 });
@@ -259,6 +267,12 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     // Derivatives are immutable, independently reproducible cache entries. Their
     // insert-only writes do not take the wardrobe writer lease or change originals.
     async initializeDisplayImages() { await db.query(DISPLAY_CACHE_SCHEMA); },
+    async originalImage(file, condition) {
+      const source = await imageRow(file);
+      const etag = `"original-${createHash("sha256").update(source.blob_url).digest("hex")}"`;
+      if (matchesETag(condition, etag)) return { etag, notModified: true };
+      return { etag, bytes: await readBlob(source.blob_url, file) };
+    },
     async displayImage(file, width, condition) {
       const source = await imageRow(file, width);
       const etag = displayETag(displayKey(source.blob_url, width));
@@ -403,9 +417,7 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       else {
         // Only persisted SDK-returned URLs are ever read. No caller-supplied URL
         // is fetched, and every Blob operation explicitly requires private access.
-        const result = await (await getBlob()).get(row.blob_url, { access: "private", useCache: false });
-        if (!result || result.statusCode !== 200 || !result.stream) throw error("ENOENT", file, "Stored image is unavailable");
-        bytes = Buffer.from(await new Response(result.stream).arrayBuffer());
+        bytes = await readBlob(row.blob_url, file);
       }
       const encoding = typeof options === "string" ? options : options?.encoding;
       return encoding ? bytes.toString(encoding) : bytes;

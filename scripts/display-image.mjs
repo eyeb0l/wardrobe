@@ -54,3 +54,18 @@ export async function sendDisplayImage(req, res, file, url) {
   else { res.setHeader('Content-Length', result.bytes.length); res.end(result.bytes); }
   return true;
 }
+
+// Preserve the original bytes while letting a signed-in browser revalidate them
+// without fetching Blob content. Local routes retain their existing behavior.
+export async function sendOriginalImage(req, res, file) {
+  const store = currentStorage();
+  if (!store?.originalImage) return false;
+  const result = await store.originalImage(file, req.headers['if-none-match']);
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Cache-Control', 'private, no-cache');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('ETag', result.etag);
+  if (result.notModified) { res.statusCode = 304; res.end(); }
+  else { res.setHeader('Content-Length', result.bytes.length); res.end(result.bytes); }
+  return true;
+}

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
-import { sendDisplayImage } from "./display-image.mjs";
+import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
 import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 import { buildModeledPhotoPrompt, buildModeledSettingPrompt, normalizeModeledSetting } from "./modeled-photo-prompts.mjs";
@@ -838,6 +838,7 @@ export function wardrobeImportApi(options = {}) {
         const file = path.join(libraryAssetDir, path.basename(libraryAssetMatch[1]));
         await stat(file);
         if (await sendDisplayImage(req, res, file, url)) return;
+        if (await sendOriginalImage(req, res, file)) return;
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", options.serverless ? "private, no-store" : "public, max-age=31536000, immutable");
         return res.end(await readFile(file));
@@ -847,6 +848,7 @@ export function wardrobeImportApi(options = {}) {
         const file = path.join(jobsDir, assetMatch[1], path.basename(assetMatch[2]));
         await stat(file);
         if (!file.endsWith(".svg") && await sendDisplayImage(req, res, file, url)) return;
+        if (!file.endsWith(".svg") && await sendOriginalImage(req, res, file)) return;
         res.setHeader("Content-Type", file.endsWith(".svg") ? "image/svg+xml" : "image/png");
         res.setHeader("Cache-Control", "no-store");
         return res.end(await readFile(file));

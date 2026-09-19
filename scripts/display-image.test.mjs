@@ -105,3 +105,21 @@ test('responsive URLs preserve version queries and never optimize uploads, SVGs,
   assert.equal(displayImageSource(src,320),src+'&format=webp&w=320');
   for(const src of ['data:image/png;base64,abc','blob:abc','https://external.test/a.png','/api/import/assets/a/placeholder.svg','/api/secret.json'])assert.equal(displayImageSource(src),null);
 });
+
+test('private original responses revalidate without Blob reads and never return stale replacements/deletions',async t=>{
+  const {sendOriginalImage}=await import('./display-image.mjs');
+  const h=await fixture(t);
+  const request=async(condition)=>{
+    const headers={};let bytes;
+    const res={statusCode:200,setHeader(k,v){headers[k]=v},end(value){bytes=value}};
+    await withStorage(h.store,()=>sendOriginalImage({headers:{'if-none-match':condition}},res,h.file));
+    return {headers,bytes,status:res.statusCode};
+  };
+  const first=await request();assert.deepEqual(first.bytes,h.original);assert.equal(first.headers['Cache-Control'],'private, no-cache');
+  const reads=h.gets.length;const second=await request(first.headers.ETag);
+  assert.equal(second.status,304);assert.equal(second.bytes,undefined);assert.equal(h.gets.length,reads);
+  const replacement=await sharp({create:{width:100,height:100,channels:4,background:'red'}}).png().toBuffer();
+  await h.store.withLease(()=>h.store.writeFile(h.file,replacement));
+  const next=await request(first.headers.ETag);assert.equal(next.status,200);assert.deepEqual(next.bytes,replacement);assert.notEqual(next.headers.ETag,first.headers.ETag);
+  await h.store.withLease(()=>h.store.rm(h.file));await assert.rejects(request(next.headers.ETag),{code:'ENOENT'});
+});

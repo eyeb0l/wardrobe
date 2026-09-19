@@ -534,3 +534,32 @@ test("refused outfit photos expose the sent prompt and accept a manual photo thr
   await h.action(job, outfit, "upload", input, 409);
   assert.equal((await sharp(await h.request("GET", `${approved.outfits[0].image}?format=webp&w=640`)).metadata()).format, "webp");
 });
+
+test("reading outfit settings transfers no image bytes and real generation still validates images",async t=>{
+  const {withStorage}=await import('./storage-fs.mjs');
+  const h=await harness(t);const imageReads=[];
+  const tracking={...fs,readFile:async(file,...args)=>{if(/\.(png|jpe?g|webp)$/i.test(file))imageReads.push(file);return fs.readFile(file,...args)}};
+  const config=await withStorage(tracking,()=>h.request('GET',`${API}/config`));
+  assert.equal(config.counts.upperbody,6);assert.equal(config.availableCombinations,18);
+  assert.deepEqual(imageReads,[],'a settings request must not download full-resolution wardrobe/reference images');
+  assert.equal(h.requests.length,0,'reading settings must not call a paid provider');
+  await writeFile(path.join(h.dataDir,'imported','top-6.png'),'damaged image');
+  await writeFile(path.join(h.dataDir,'library.json'),JSON.stringify(h.items.map(item=>item.id==='top-5'?{...item,hidden:true}:item)));
+  const refreshed=await withStorage(tracking,()=>h.request('GET',`${API}/config`));
+  assert.equal(refreshed.counts.upperbody,5,'metadata updates and hidden records are resolved on every request');
+  const created=await withStorage(tracking,()=>h.create());await h.settled(created.id);
+  assert.ok(imageReads.length>0,'generation retains image validation');
+  const prompt=h.requests.find(r=>r.kind==='analysis').request.input[0].content[0].text;
+  assert.ok(!prompt.includes('top-6'),'damaged images are excluded before paid curation');
+  assert.ok(!prompt.includes('top-5'),'hidden images are excluded before paid curation');
+});
+
+test('empty accessory suggestions validate the saved image path without downloading it',async t=>{
+  const {withStorage}=await import('./storage-fs.mjs');const h=await harness(t);let images=0;
+  const tracking={...fs,readFile:async(file,...args)=>{if(/\.png$/i.test(file))images++;return fs.readFile(file,...args)}};
+  const status=await withStorage(tracking,()=>h.request('GET',`${API}/original-1/accessories`));
+  assert.equal(status.suggestions,null);assert.equal(images,0);
+  await withStorage(tracking,()=>h.request('GET',`${API}/missing/accessories`,undefined,404));
+  await rm(path.join(h.dataDir,'outfit-images','original-1.png'));
+  await withStorage(tracking,()=>h.request('GET',`${API}/original-1/accessories`,undefined,404));assert.equal(images,0);
+});
