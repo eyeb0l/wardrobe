@@ -204,6 +204,7 @@ function GenerateForm({ config, configError, refreshing, onRefresh, busy, error,
 }
 
 function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob }) {
+  const [cropping, setCropping] = useState(false);
   const outfits = job.outfits || [];
   const [selectedId, setSelectedId] = useState(() => outfits.find((outfit) => ["review", "failed"].includes(outfit.status))?.id || outfits[0]?.id || null);
   const [correction, setCorrection] = useState("");
@@ -222,7 +223,7 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob }) {
       <p role="status" aria-live="polite">{jobSummary(job)}</p>
       {running(job) ? <p className="outfit-small">You can close this window and come back. Your progress is saved.</p> : null}
       {job.error ? <p className="outfit-error">{job.error}</p> : null}
-      {job.status === "failed" || outfits.some((outfit) => outfit.status === "failed") ? <button className="outfit-secondary" type="button" onClick={() => onRetryJob(job.id)} disabled={busy || running(job)}><ArrowCounterClockwise size={16} aria-hidden="true" />Retry unfinished outfits</button> : null}
+      {job.status === "failed" || outfits.some((outfit) => outfit.status === "failed") ? <button className="outfit-secondary" type="button" onClick={() => onRetryJob(job.id)} disabled={busy || cropping || running(job)}><ArrowCounterClockwise size={16} aria-hidden="true" />Retry unfinished outfits</button> : null}
       {error ? <p className="outfit-error" role="alert">{error}</p> : null}
     </div>
     {outfits.length ? <>
@@ -235,11 +236,11 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob }) {
         <div className="outfit-review-actions">
           {selected.status === "failed" ? <p className="outfit-error">{selected.error || "This image couldn't be created. Retry to generate it again."}</p> : null}
           {["planned", "generating"].includes(selected.status) ? <p className="outfit-small" role="status">{selected.status === "generating" ? "Creating this photo…" : "This photo is next in line."}</p> : null}
-          {canReview ? <><p className="outfit-small">Check your likeness, every piece, and the fit against the references.</p><div className="outfit-action-row"><button className="outfit-primary" type="button" disabled={busy} onClick={() => onAction(job.id, selected.id, "approve")}><Check size={17} aria-hidden="true" />Accept into collection</button><button className="outfit-secondary" type="button" disabled={busy} onClick={() => onAction(job.id, selected.id, "reject")}>Reject</button></div></> : null}
+          {canReview ? <><p className="outfit-small">Check your likeness, every piece, and the fit against the references.</p><div className="outfit-action-row"><button className="outfit-primary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "approve")}><Check size={17} aria-hidden="true" />Accept into collection</button><button className="outfit-secondary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "reject")}>Reject</button></div></> : null}
           {selected.status === "accepted" ? <p className="outfit-added"><Check size={17} aria-hidden="true" />Added to your collection.</p> : null}
           {selected.status === "rejected" ? <p className="outfit-small">Rejected. This look is not in your collection.</p> : null}
           {nextReview && ["accepted", "rejected"].includes(selected.status) ? <button className="outfit-secondary" type="button" onClick={() => select(nextReview.id)}>Next to review <ArrowRight size={16} aria-hidden="true" /></button> : null}
-          {canRetry ? <div className="outfit-correction"><label className="outfit-field" htmlFor={`correction-${selected.id}`}><span>{selected.status === "failed" ? "Retry notes" : "Adjust this photo"} <em>optional</em></span><textarea id={`correction-${selected.id}`} rows="2" maxLength={1500} value={correction} disabled={busy} onChange={(event) => setCorrection(event.target.value)} placeholder="For example, keep the coat open and show the full shoes" /></label><div className="outfit-action-row"><button className="outfit-secondary" type="button" disabled={busy || running(job)} onClick={() => onAction(job.id, selected.id, "retry", { prompt: correction.trim() })}><ArrowCounterClockwise size={16} aria-hidden="true" />{selected.status === "failed" ? "Retry photo" : "Regenerate photo"}</button>{selected.status === "failed" && <CopyPrompt prompt={selected.generationPrompt} className="outfit-secondary" disabled={busy} />}</div><ModeledPhotoUpload key={selected.id} kind="outfit" className="outfit-secondary" disabled={busy || running(job)} onUpload={(image) => onAction(job.id, selected.id, "upload", image)} />{running(job) ? <p className="outfit-small">You can retry this photo when the current generation finishes.</p> : null}</div> : null}
+          {canRetry ? <div className="outfit-correction"><label className="outfit-field" htmlFor={`correction-${selected.id}`}><span>{selected.status === "failed" ? "Retry notes" : "Adjust this photo"} <em>optional</em></span><textarea id={`correction-${selected.id}`} rows="2" maxLength={1500} value={correction} disabled={busy || cropping} onChange={(event) => setCorrection(event.target.value)} placeholder="For example, keep the coat open and show the full shoes" /></label><div className="outfit-action-row"><button className="outfit-secondary" type="button" disabled={busy || cropping || running(job)} onClick={() => onAction(job.id, selected.id, "retry", { prompt: correction.trim() })}><ArrowCounterClockwise size={16} aria-hidden="true" />{selected.status === "failed" ? "Retry photo" : "Regenerate photo"}</button>{selected.status === "failed" && <CopyPrompt prompt={selected.generationPrompt} className="outfit-secondary" disabled={busy || cropping} />}</div><ModeledPhotoUpload key={selected.id} kind="outfit" className="outfit-secondary" disabled={busy || running(job)} onEditingChange={setCropping} onUpload={(image) => onAction(job.id, selected.id, "upload", image)} />{running(job) ? <p className="outfit-small">You can retry this photo when the current generation finishes.</p> : null}</div> : null}
         </div>
       </OutfitDetails>
     </> : <div className="outfit-planning-state"><div className={running(job) ? "outfit-progress-line" : ""} aria-hidden="true" /><p>{job.status === "failed" ? "Your existing collection is safe. Retry when you're ready." : "Finding a balanced mix of colors, shapes, and pieces from your wardrobe."}</p></div>}
@@ -325,7 +326,7 @@ export function OutfitView({ items = EMPTY_ITEMS }) {
   };
 
   const mutate = async (key, path, body, after) => {
-    if (busy.current) return;
+    if (busy.current) return false;
     busy.current = true;
     ++mutationVersion.current;
     setBusyKey(key);
@@ -333,7 +334,7 @@ export function OutfitView({ items = EMPTY_ITEMS }) {
     try {
       const job = await request(path, { method: "POST", body: JSON.stringify(body || {}) });
       if (mounted.current) { setJobs((current) => mergeJobs(current, [job])); await after?.(job); }
-    } catch (error) { if (mounted.current) setActionError(error.message); }
+    } catch (error) { if (mounted.current) setActionError(error.message); return false; }
     finally { busy.current = false; ++mutationVersion.current; if (mounted.current) setBusyKey(""); }
   };
   const closeModal = () => { setModal(null); setActionError(""); };

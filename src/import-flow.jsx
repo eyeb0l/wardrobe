@@ -80,6 +80,7 @@ function ModelReferencePicker({ references, selected, onSelect, onRefresh, disab
 }
 
 function ReviewEditor({ job, stage, draft, setDraft, regenPrompt, setRegenPrompt, imageChoice, setImageChoice, references, selectedReference, setSelectedReference, refreshReferences, busy, onAction, onUpload }) {
+  const [cropping, setCropping] = useState(false);
   const isCrop = stage === "crop";
   const isGarment = stage === "garment";
   const useOriginal = isCrop && job.canUseOriginal && imageChoice === "original";
@@ -97,7 +98,7 @@ function ReviewEditor({ job, stage, draft, setDraft, regenPrompt, setRegenPrompt
       <div className="import-fields">
         <p className="import-editor__stage">{isCrop ? "Detected item" : isGarment ? "Garment image" : "Modeled image"}</p>
         {isCrop ? job.canUseOriginal ? (
-          <fieldset className="import-image-choice" disabled={busy}>
+          <fieldset className="import-image-choice" disabled={busy || cropping}>
             <legend>This looks like a clean product photo</legend>
             <label><input type="radio" name={`image-choice-${job.id}`} value="original" checked={imageChoice === "original"} onChange={() => setImageChoice("original")} /><span><strong>Use original image</strong><small>Keep the uploaded image and its white or transparent background. No garment generation.</small></span></label>
             <label><input type="radio" name={`image-choice-${job.id}`} value="extract" checked={imageChoice === "extract"} onChange={() => setImageChoice("extract")} /><span><strong>Extract garment</strong><small>Generate a clean garment cutout with a transparent background.</small></span></label>
@@ -112,19 +113,19 @@ function ReviewEditor({ job, stage, draft, setDraft, regenPrompt, setRegenPrompt
             <div className="import-field"><label htmlFor={`tags-${job.id}`}>Details</label><input id={`tags-${job.id}`} value={draft.tags} placeholder="casual, cotton, striped" onChange={(event) => setDraft({ ...draft, tags: event.target.value })} /></div>
           </>
         ) : <p className="import-card__detail">{isReady ? "Choose a reference and optional direction, then regenerate. Your current shot stays in your wardrobe until you approve its replacement." : isFailed ? "The modeled image could not be created. Retry, or upload a photo you created elsewhere." : "Approve this editorial image to attach it to the new wardrobe piece, or regenerate it with a different reference or direction."}</p>}
-        {!isCrop && <ModelReferencePicker references={references} selected={selectedReference} onSelect={setSelectedReference} onRefresh={refreshReferences} disabled={busy} />}
+        {!isCrop && <ModelReferencePicker references={references} selected={selectedReference} onSelect={setSelectedReference} onRefresh={refreshReferences} disabled={busy || cropping} />}
         {referenceChanged && !isFailed && <p className="import-card__detail">Regenerate to apply this reference to the modeled image.</p>}
         {!isCrop && <div className="import-field import-regenerate-field">
           <label htmlFor={`regenerate-${job.id}-${stage}`}>{originalGarment ? "Extraction direction" : "Regeneration direction"} <span>optional</span></label>
           <textarea id={`regenerate-${job.id}-${stage}`} rows="3" value={regenPrompt} onChange={(event) => setRegenPrompt(event.target.value)} placeholder={isGarment ? "Example: preserve the original zipper and remove the retail tag" : "Example: use a quiet evening street and show the full garment"} />
         </div>}
         <div className="import-actions">
-          {!isFailed && !isReady && <button className="import-button" disabled={busy} onClick={() => onAction("reject")}><Trash size={14} /> Reject</button>}
-          {!isCrop && <button className="import-button" disabled={busy || (stage === "modeled" && !referenceAvailable)} onClick={() => onAction("regenerate", regenPrompt)}><ArrowCounterClockwise size={14} /> {isFailed ? "Retry" : originalGarment ? "Extract garment" : "Regenerate"}</button>}
-          {isFailed && <CopyPrompt prompt={job.stages[stage]?.generationPrompt} className="import-button" disabled={busy} />}
-          {!isFailed && !isReady && <button className="import-button import-button--primary" disabled={busy || referenceChanged || (isGarment && !referenceAvailable) || (isGarment && (!draft.name.trim() || !primaryValid || !secondaryValid))} onClick={() => onAction(useOriginal ? "use-original" : "approve")}><Check size={14} weight="bold" /> {isCrop ? useOriginal ? "Use original image" : "Extract garment" : "Approve"}</button>}
+          {!isFailed && !isReady && <button className="import-button" disabled={busy || cropping} onClick={() => onAction("reject")}><Trash size={14} /> Reject</button>}
+          {!isCrop && <button className="import-button" disabled={busy || cropping || (stage === "modeled" && !referenceAvailable)} onClick={() => onAction("regenerate", regenPrompt)}><ArrowCounterClockwise size={14} /> {isFailed ? "Retry" : originalGarment ? "Extract garment" : "Regenerate"}</button>}
+          {isFailed && <CopyPrompt prompt={job.stages[stage]?.generationPrompt} className="import-button" disabled={busy || cropping} />}
+          {!isFailed && !isReady && <button className="import-button import-button--primary" disabled={busy || cropping || referenceChanged || (isGarment && !referenceAvailable) || (isGarment && (!draft.name.trim() || !primaryValid || !secondaryValid))} onClick={() => onAction(useOriginal ? "use-original" : "approve")}><Check size={14} weight="bold" /> {isCrop ? useOriginal ? "Use original image" : "Extract garment" : "Approve"}</button>}
         </div>
-        {stage === "modeled" && <ModeledPhotoUpload key={job.id} className="import-button" disabled={busy} onUpload={onUpload} />}
+        {stage === "modeled" && <ModeledPhotoUpload key={job.id} className="import-button" disabled={busy} onUpload={onUpload} onEditingChange={setCropping} />}
       </div>
     </div>
   );
@@ -331,7 +332,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
       const updated = await api(`${API}/${job.id}/stages/modeled/upload`, { method: "POST", body: JSON.stringify(image) });
       setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
       setSelectedReviewId(job.id);
-    } catch (requestError) { setError(requestError.message); }
+    } catch (requestError) { setError(requestError.message); return false; }
     finally { setBusyId(null); }
   };
 

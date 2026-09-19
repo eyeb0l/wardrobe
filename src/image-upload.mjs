@@ -58,11 +58,11 @@ async function decodeImage(file, kind) {
   }
 }
 
-function encode(canvas, mime, quality) {
+export function encode(canvas, mime, quality) {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The photo couldn’t be prepared. Try another image.")), mime, quality));
 }
 
-function dataUrl(blob) {
+export function dataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -71,14 +71,23 @@ function dataUrl(blob) {
   });
 }
 
-export async function prepareUploadImage(file, { preserveSmall = true, maxEdge = 2400 } = {}) {
+export async function decodeUploadImage(file) {
   if (!(file instanceof Blob) || !file.size) throw new Error("Choose a photo first.");
   if (file.size > MAX_INPUT_BYTES) throw new Error("Choose a photo smaller than 50 MB, or take a screenshot of it.");
   const kind = imageKind(new Uint8Array(await file.slice(0, 80).arrayBuffer()));
   const decoded = await decodeImage(file.slice(0, file.size, kind), kind);
+  if (!decoded.width || !decoded.height || decoded.width * decoded.height > MAX_PIXELS) {
+    decoded.close();
+    throw new Error("This photo is too large to prepare. Use a photo up to 64 megapixels or a screenshot.");
+  }
+  return { ...decoded, kind };
+}
+
+export async function prepareUploadImage(file, { preserveSmall = true, maxEdge = 2400 } = {}) {
+  const decoded = await decodeUploadImage(file);
+  const { kind } = decoded;
   const canvas = document.createElement("canvas");
   try {
-    if (!decoded.width || !decoded.height || decoded.width * decoded.height > MAX_PIXELS) throw new Error("This photo is too large to prepare. Use a photo up to 64 megapixels or a screenshot.");
     const result = async (blob, width, height, compressed, converted) => ({
       blob, dataUrl: await dataUrl(blob), width, height, originalBytes: file.size,
       bytes: blob.size, name: file.name || "Photo", compressed, converted,
