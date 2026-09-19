@@ -3,6 +3,8 @@ import { mkdir, readFile, readdir, realpath, stat, writeFile } from "./storage-f
 import path from "node:path";
 import sharp from "sharp";
 import { sendDisplayImage } from "./display-image.mjs";
+import { normalizeModeledUpload } from "./modeled-upload.mjs";
+import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishImage } from "./outfit-storage.mjs";
 import { acquireOutfitStoreLock } from "./outfit-store-lock.mjs";
 
@@ -32,13 +34,13 @@ async function containedFile(directory, filename) {
   return resolved;
 }
 
-async function readBody(req) {
+async function readBody(req, limit = 16 * 1024) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += bytes.length;
-    if (size > 16 * 1024) throw fail("Request body is too large", 413);
+    if (size > limit) throw fail("Request body is too large", 413);
     chunks.push(bytes);
   }
   try {
@@ -68,7 +70,7 @@ function sendJson(res, status, value) {
 
 function publicOutfit(outfit) {
   const { internal, ...publicValue } = outfit;
-  return structuredClone(publicValue);
+  return { ...structuredClone(publicValue), generationPrompt: internal?.history?.at(-1)?.prompt || null };
 }
 
 function publicJob(job) {
@@ -533,7 +535,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "generating"; item.attempts += 1; item.error = null; recompute(next); });
       try {
         const filename = await generate(job, outfit);
-        await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "review"; item.image = `${API}/jobs/${job.id}/assets/${filename}`; item.internal.candidateFile = filename; item.error = null; recompute(next); });
+        await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "review"; item.image = `${API}/jobs/${job.id}/assets/${filename}`; item.internal.candidateFile = filename; item.source = "generated"; item.error = null; recompute(next); });
       } catch (error) {
         if (disposed) return;
         await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "failed"; item.error = safeError(error); recompute(next); });
@@ -775,14 +777,25 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         sendJson(res, 202, publicJob(job));
         return;
       }
-      const outfitAction = action.match(/^outfits\/([a-z0-9-]+)\/(approve|reject|retry)$/);
+      const outfitAction = action.match(/^outfits\/([a-z0-9-]+)\/(approve|reject|retry|upload)$/);
       if (req.method === "POST" && outfitAction) {
-        const input = await readBody(req);
+        const input = await readBody(req, outfitAction[2] === "upload" ? MODELED_UPLOAD_BODY_BYTES : undefined);
         await transition(job, async (next) => {
           const outfit = next.outfits.find((item) => item.id === outfitAction[1]);
           if (!outfit) throw fail("Outfit not found", 404);
           if (outfitAction[2] === "approve") await approve(next, outfit);
-          else if (outfitAction[2] === "reject") {
+          else if (outfitAction[2] === "upload") {
+            if (queued.has(job.id) || ["planning", "generating"].includes(next.status) || !["review", "failed", "rejected"].includes(outfit.status)) throw fail("Wait for this collection to finish generating before uploading a photo.", 409);
+            const bytes = await normalizeModeledUpload(input, "outfit");
+            const filename = `${outfit.id}-upload-${randomUUID()}.png`;
+            await writeFile(path.join(jobsDir, job.id, filename), bytes, { flag: "wx" });
+            outfit.internal.previousImage = outfit.internal.candidateFile || outfit.internal.previousImage || null;
+            outfit.internal.candidateFile = filename;
+            outfit.image = `${API}/jobs/${job.id}/assets/${filename}`;
+            outfit.status = "review";
+            outfit.source = "uploaded";
+            outfit.error = null;
+          } else if (outfitAction[2] === "reject") {
             if (!["review", "failed", "rejected"].includes(outfit.status)) throw fail("This outfit cannot be rejected at its current stage.", 409);
             outfit.status = "rejected";
             outfit.error = null;

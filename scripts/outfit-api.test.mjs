@@ -500,3 +500,37 @@ test("accessory response cannot be saved across an outfit photo change or restar
   const state = await h.request('GET', endpoint);
   assert.equal(state.suggestions, null);assert.equal(state.generating, false);
 });
+
+test("refused outfit photos expose the sent prompt and accept a manual photo through review without more model calls", async (t) => {
+  const h = await harness(t, { edit: () => Response.json({ error: { code: "moderation_blocked", message: "Refused" } }, { status: 400 }) });
+  const job = await h.settled((await h.create()).id);
+  const outfit = job.outfits[0];
+  assert.equal(outfit.status, "failed");
+  assert.equal(outfit.generationPrompt, h.requests.find((entry) => entry.kind === "edit").form.get("prompt"));
+  const calls = h.requests.length;
+  const invalid = { imageDataUrl: `data:image/png;base64,${(await h.image("#887766", 900, 600)).toString("base64")}` };
+  await h.action(job, outfit, "upload", invalid, 400);
+  assert.equal((await h.request("GET", `${API}/jobs/${job.id}`)).outfits[0].status, "failed");
+  const input = { imageDataUrl: `data:image/png;base64,${(await h.image("#887766", 1024, 1024)).toString("base64")}` };
+  const uploaded = await h.action(job, outfit, "upload", input);
+  assert.equal(uploaded.outfits[0].status, "review");
+  assert.equal(uploaded.outfits[0].source, "uploaded");
+  assert.equal((await h.request("GET", API)).outfits.length, h.originals.length);
+  const variant = await h.request("GET", `${uploaded.outfits[0].image}?format=webp&w=640`, undefined, null);
+  assert.equal(variant.headers["content-type"], "image/webp");
+  assert.equal((await sharp(variant.result).metadata()).width, 640);
+  await h.restart();
+  const restored = await h.request("GET", `${API}/jobs/${job.id}`);
+  assert.equal(restored.outfits[0].image, uploaded.outfits[0].image);
+  await h.action(job, outfit, "reject");
+  assert.equal((await h.request("GET", API)).outfits.length, h.originals.length);
+  const replacement = await h.action(job, outfit, "upload", input);
+  assert.notEqual(replacement.outfits[0].image, uploaded.outfits[0].image);
+  const approved = await h.action(job, outfit, "approve");
+  assert.equal(approved.outfits[0].status, "accepted");
+  const collection = await h.request("GET", API);
+  assert.equal(collection.outfits.length, h.originals.length + 1);
+  assert.equal(h.requests.length, calls);
+  await h.action(job, outfit, "upload", input, 409);
+  assert.equal((await sharp(await h.request("GET", `${approved.outfits[0].image}?format=webp&w=640`)).metadata()).format, "webp");
+});

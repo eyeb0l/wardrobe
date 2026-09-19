@@ -273,3 +273,26 @@ test("create and retry atomically persist task identity with the authorized job 
   assert.equal(snapshots[0].internal.cloudTaskId, h.scheduled[2].taskId);
   assert.notEqual(snapshots[0].internal.cloudTaskId, h.scheduled[1].taskId);
 });
+
+test("hosted outfit uploads reject queued generation and survive fresh invocations without scheduling", async (t) => {
+  const h = await hostedHarness(t, { plan: [plan(1)] });
+  let plugin = await h.makePlugin();
+  const job = await h.create(plugin, 1);
+  await plugin.runTask(h.scheduled[0]);
+  const planned = await h.request(plugin, "GET", `${API}/jobs/${job.id}`);
+  const upload = `${API}/jobs/${job.id}/outfits/${planned.outfits[0].id}/upload`;
+  const input = { imageDataUrl: `data:image/png;base64,${(await h.image("#888888", 1024, 1024)).toString("base64")}` };
+  await h.request(plugin, "POST", upload, input, 409);
+  await plugin.failTask(h.scheduled[0], "Refused");
+  const calls = h.requests.length;
+  await h.request(plugin, "POST", upload, input, 403, { origin: "https://evil.invalid" });
+  const uploaded = await h.request(plugin, "POST", upload, input);
+  assert.equal(uploaded.outfits[0].status, "review");
+  await plugin.closeBundle();
+  plugin = await h.makePlugin();
+  const restored = await h.request(plugin, "GET", `${API}/jobs/${job.id}`);
+  assert.equal(restored.outfits[0].image, uploaded.outfits[0].image);
+  await h.request(plugin, "POST", `${API}/jobs/${job.id}/outfits/${planned.outfits[0].id}/approve`);
+  assert.equal(h.requests.length, calls);
+  assert.equal(h.scheduled.length, 1);
+});

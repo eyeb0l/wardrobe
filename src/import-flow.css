@@ -251,7 +251,7 @@
 .import-card__detail--status[data-tone="processing"]::before { animation: import-pulse 1.2s ease-in-out infinite; }
 .import-card__detail--status[data-tone="error"] { color: #8a3f35; }
 .import-card__detail--status[data-tone="complete"] { color: #49604b; }
-.import-card__actions { display: flex; gap: 4px; }
+.import-card__actions { display: flex; flex-wrap: wrap; gap: 4px; max-width: 300px; }
 .import-card__delete { color: #7c4038; }
 .import-card__delete:hover,
 .import-card__delete:focus-visible { background: rgba(124, 64, 56, 0.1); }

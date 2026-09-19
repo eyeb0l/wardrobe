@@ -877,3 +877,9 @@ button { font: inherit; }
 
 .modeled-regenerate-button { display: inline-flex; align-items: center; gap: 7px; margin-top: 20px; }
 .modeled-regenerate-button:disabled { opacity: .5; cursor: not-allowed; }
+
+.manual-photo-upload { margin-top: 14px; }
+.manual-photo-help { margin: 8px 0 0; color: var(--text-muted, #666); font-size: 12px; line-height: 1.5; }
+.manual-photo-error { margin: 8px 0 0; color: #a12f24; font-size: 13px; }
+.manual-photo-copy { display: block; flex-basis: 100%; min-width: 0; font-size: 12px; }
+.manual-photo-copy textarea { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; }

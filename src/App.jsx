@@ -488,7 +488,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
         />
 
         <button className="secondary-button modeled-regenerate-button" type="button" disabled={isDirty} title={isDirty ? "Save or cancel your changes first" : undefined} onClick={() => onRegenerate(item)}>
-          <ArrowCounterClockwise size={15} aria-hidden="true" /> {hasModeledImage ? "Regenerate modelled shot" : "Create modelled shot"}
+          <ArrowCounterClockwise size={15} aria-hidden="true" /> {hasModeledImage ? "Update modelled shot" : "Create modelled shot"}
         </button>
         {saveError && <p className="status error" role="alert">{saveError}</p>}
         {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}

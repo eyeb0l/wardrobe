@@ -4,6 +4,8 @@ import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 
 import path from "node:path";
 import sharp from "sharp";
 import { sendDisplayImage } from "./display-image.mjs";
+import { normalizeModeledUpload } from "./modeled-upload.mjs";
+import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 
 const API_ROOT = "/api/import/jobs";
 const ASSET_ROOT = "/api/import/assets";
@@ -570,7 +572,9 @@ export function wardrobeImportApi(options = {}) {
         if (stageName === "garment") {
           chromaKeyUsed = chooseChromaKey(current.metadata.color, current.metadata.secondaryColor);
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, chromaKeyUsed);
-          bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt });
+          stage.generationPrompt = current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt;
+          await saveJob(current);
+          bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: stage.generationPrompt });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
           failedAssetUrl = `${ASSET_ROOT}/${current.id}/${rawName}`;
@@ -591,7 +595,9 @@ export function wardrobeImportApi(options = {}) {
           }
           const model = { data: modelData, mime: "image/png", name: "model.png" };
           const basePrompt = options.modeledPrompt || MODELED_PROMPT;
-          bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt });
+          stage.generationPrompt = current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt;
+          await saveJob(current);
+          bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: stage.generationPrompt });
         }
         await writeFile(output, bytes);
         const fresh = await loadJob(current.id);
@@ -623,6 +629,7 @@ export function wardrobeImportApi(options = {}) {
     stage.status = "queued";
     stage.decision = null;
     stage.error = null;
+    stage.generationPrompt = null;
     stage.updatedAt = new Date().toISOString();
     if (options.serverless) stage.taskId = randomUUID();
   }
@@ -919,6 +926,20 @@ export function wardrobeImportApi(options = {}) {
         await saveJob(job);
         return json(res, 200, publicJob(job));
       }
+      if (action === "stages/modeled/upload" && req.method === "POST") {
+        validateServerlessMutation(req);
+        const stage = job.stages.modeled;
+        if (job.stages.garment.status !== "approved" || !["ready", "review", "failed"].includes(stage.status)
+          || running.has(`${job.id}:modeled`)) throw Object.assign(new Error("Wait for modeled generation to finish before uploading a photo."), { status: 409 });
+        const input = await body(req, MODELED_UPLOAD_BODY_BYTES, true);
+        const bytes = await normalizeModeledUpload(input, "garment");
+        const filename = `modeled-upload-${randomUUID()}.png`;
+        await writeFile(path.join(jobsDir, job.id, filename), bytes, { flag: "wx" });
+        Object.assign(stage, { status: "review", decision: null, source: "uploaded", assetUrl: `${ASSET_ROOT}/${job.id}/${filename}`,
+          error: null, failedAssetUrl: null, taskId: null, attempts: stage.attempts + 1, updatedAt: new Date().toISOString() });
+        await saveJob(job);
+        return json(res, 200, publicJob(job));
+      }
       const stageMatch = action.match(/^stages\/(crop|garment|modeled)\/(approve|reject|regenerate)$/);
       if (stageMatch && req.method === "POST") {
         const [, stageName, decision] = stageMatch;
@@ -984,6 +1005,18 @@ export function wardrobeImportApi(options = {}) {
     }
   }
 
+  // Keep a slow upload from racing approval, deletion or a new generation.
+  // Hosted requests additionally hold the shared storage lease.
+  const mutations = new Map();
+  async function serializedHandler(req, res, next) {
+    const id = req.url?.match(/^\/api\/import\/jobs\/([a-f0-9-]{36})(?:[/?]|$)/i)?.[1];
+    if (!id || ["GET", "HEAD", "OPTIONS"].includes(req.method)) return handler(req, res, next);
+    const previous = mutations.get(id) || Promise.resolve();
+    const task = previous.catch(() => {}).then(() => handler(req, res, next));
+    mutations.set(id, task);
+    try { await task; } finally { if (mutations.get(id) === task) mutations.delete(id); }
+  }
+
   return {
     name: "wardrobe-import-job-api",
     apply: "serve",
@@ -1035,7 +1068,7 @@ export function wardrobeImportApi(options = {}) {
         }
       }
     },
-    configureServer(server) { server.middlewares.use(handler); },
-    configurePreviewServer(server) { server.middlewares.use(handler); },
+    configureServer(server) { server.middlewares.use(serializedHandler); },
+    configurePreviewServer(server) { server.middlewares.use(serializedHandler); },
   };
 }

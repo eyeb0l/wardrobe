@@ -342,3 +342,58 @@ test("saved modeled shots reopen, regenerate and replace only after approval", a
   await h.request("GET", updated.modeledImage, undefined, 404);
   await h.request("GET", original.modeledImage, undefined, 404);
 });
+
+test("a refused modeled shot exposes the exact prompt and manual uploads require approval, survive restart and serve WebP", async (t) => {
+  const h = await harness(t);
+  h.setAnalysis([dress], true);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage()).toString("base64") });
+  const jobUrl = `/api/import/jobs/${job.id}`;
+  const upload = `${jobUrl}/stages/modeled/upload`;
+  const photo = await sharp({ create: { width: 900, height: 600, channels: 3, background: "#887766" } }).jpeg().toBuffer();
+  const input = { imageDataUrl: `data:image/jpeg;base64,${photo.toString("base64")}` };
+  await h.request("POST", upload, input, 409);
+  await h.request("POST", `${jobUrl}/stages/crop/use-original`);
+  await h.request("POST", `${jobUrl}/stages/garment/approve`);
+  await h.waitForStage(job.id, "modeled");
+  await h.request("POST", `${jobUrl}/stages/modeled/approve`);
+  const [original] = await h.request("GET", "/api/import/wardrobe");
+  const originalBytes = await h.request("GET", original.modeledImage);
+  await h.request("POST", `/api/import/wardrobe/import-${job.id}/modeled`);
+  let sentPrompt;
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    sentPrompt = options.body.get("prompt");
+    return Response.json({ error: { code: "moderation_blocked", message: "Image request refused" } }, { status: 400 });
+  });
+  await h.request("POST", `${jobUrl}/stages/modeled/regenerate`, { prompt: "Keep the complete dress visible" });
+  let failed;
+  for (let i = 0; i < 100; i++) {
+    failed = await h.request("GET", jobUrl);
+    if (failed.stages.modeled.status === "failed") break;
+    await delay(10);
+  }
+  assert.equal(failed.stages.modeled.status, "failed");
+  assert.equal(failed.stages.modeled.generationPrompt, sentPrompt);
+  assert.match(sentPrompt, /Keep the complete dress visible/);
+  t.mock.method(globalThis, "fetch", () => assert.fail("Manual uploads must not call a model"));
+  await h.request("POST", upload, { imageDataUrl: `data:image/png;base64,${h.source.toString("base64")}` }, 400);
+  assert.equal((await h.request("GET", jobUrl)).stages.modeled.status, "failed");
+  const reviewed = await h.request("POST", upload, input);
+  assert.equal(reviewed.stages.modeled.status, "review");
+  assert.equal(reviewed.stages.modeled.source, "uploaded");
+  assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), [original]);
+  const display = await h.request("GET", `${reviewed.stages.modeled.assetUrl}?format=webp&w=640`);
+  assert.equal((await sharp(display).metadata()).format, "webp");
+  assert.equal((await sharp(display).metadata()).width, 640);
+  await h.restart();
+  assert.equal((await h.request("GET", jobUrl)).stages.modeled.assetUrl, reviewed.stages.modeled.assetUrl);
+  await h.request("POST", `${jobUrl}/stages/modeled/reject`);
+  assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), [original]);
+  await h.request("POST", `/api/import/wardrobe/import-${job.id}/modeled`);
+  await h.request("POST", upload, input);
+  const approved = await h.request("POST", `${jobUrl}/stages/modeled/approve`);
+  assert.notEqual(approved.libraryItem.modeledImage, original.modeledImage);
+  const saved = await h.request("GET", approved.libraryItem.modeledImage);
+  assert.equal((await sharp(saved).metadata()).width, 900);
+  assert.deepEqual(await h.request("GET", original.modeledImage), originalBytes);
+  assert.equal((await sharp(await h.request("GET", `${approved.libraryItem.modeledImage}?format=webp&w=640`)).metadata()).format, "webp");
+});

@@ -207,3 +207,28 @@ test("cloud reads neither initialize storage nor clean up hidden jobs", async (t
   assert.deepEqual((await h.request("GET", "/api/import/jobs")).body, []);
   await access(h.jobPath(job.id));
 });
+
+test("hosted manual uploads reject active work and invalidate old task delivery without paid calls", async (t) => {
+  const h = await harness(t);
+  const job = await h.createJob();
+  const base = `/api/import/jobs/${job.id}/stages`;
+  await h.request("POST", `${base}/crop/approve`);
+  await h.plugin.runTask(h.tasks[0]);
+  await h.request("POST", `${base}/garment/approve`);
+  const oldTask = h.tasks[1];
+  const bytes = await sharp({ create: { width: 900, height: 600, channels: 3, background: "#888888" } }).png().toBuffer();
+  const input = { imageDataUrl: `data:image/png;base64,${bytes.toString("base64")}` };
+  assert.equal((await h.request("POST", `${base}/modeled/upload`, input)).status, 409);
+  await h.plugin.failTask(oldTask, "Refused");
+  const calls = h.requests.length;
+  assert.equal((await h.request("POST", `${base}/modeled/upload`, input, { origin: "https://evil.invalid" })).status, 403);
+  const uploaded = await h.request("POST", `${base}/modeled/upload`, input);
+  assert.equal(uploaded.status, 200);
+  assert.equal(uploaded.body.stages.modeled.status, "review");
+  assert.deepEqual(await h.plugin.runTask(oldTask), { skipped: true });
+  await h.restart();
+  assert.equal((await h.loadJob(job.id)).stages.modeled.source, "uploaded");
+  assert.equal((await h.request("POST", `${base}/modeled/approve`)).status, 200);
+  assert.equal(h.requests.length, calls);
+  assert.equal(h.tasks.length, 2, "uploading never queues generation");
+});

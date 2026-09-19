@@ -59,13 +59,28 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 - Detects every garment in a photo with the OpenAI Responses API
 - Extracts clean product cutouts with the OpenAI Images API
 - Offers **Use original image** for a likely single-item product shot on white or transparent background; this skips generative extraction and preserves the uploaded image for review. **Extract garment** remains available and is the default for ordinary photos.
-- Generates an optional modeled editorial preview
+- Generates an optional modeled editorial preview, or accepts a manually uploaded modeled photo for review
 - Shows saved outfit collections with their styling notes and exact wardrobe pieces
 - Curates and generates new outfits through the configured API, with progress, retries, and review before saving
 - Keeps originals, jobs, generated images, and the JSON database local in `data/`
 - Checks potential purchases against your model reference and wardrobe in **Shopping**
 - Supports drag, drop, paste, editing, review, regeneration, and approval
 - Filters Tops, Dresses, Jackets, Bottoms, Accessories, and Shoes. Existing dresses filed under Tops can be moved to Dresses in the item editor.
+
+## Manual modeled photos
+
+If image generation refuses a request or otherwise fails, choose **Copy prompt** beside **Retry** to copy the full prompt from that attempt, including its submitted correction. Copying makes no API call. For imports created before prompt recording was added, that button appears after a new generation attempt. If clipboard access is unavailable, the app shows selectable prompt text.
+
+You can create the photo yourself with another image model, supplying the same identity and garment images in the order described in the prompt. The copied text does not include image attachments; outfit correction prompts may also reference the previous attempt. Review the output for your likeness, exact garment details and complete framing before uploading it. Wardrobe does not automatically switch models or call another provider.
+
+- **Wardrobe piece:** open **Update modelled shot** (or **Create modelled shot**), then **Upload modeled photo**. This is also available while reviewing a failed or completed modeled generation. Use a horizontal 3:2 image at least 768 × 512 pixels; 1536 × 1024 is recommended.
+- **Outfit:** open its generation review and choose **Upload modeled photo** beneath the retry controls. Use a square image at least 512 × 512 pixels; 1024 × 1024 is recommended. Wait for the collection's active generation to finish first.
+
+Uploads use the usual JPEG/PNG/WebP/HEIC preparation described below. The server independently verifies the prepared file, decodes it fully, checks its displayed dimensions (including EXIF orientation), and rejects animated, malformed, oversized or incorrectly shaped images. It does not crop or stretch an upload. The prepared image is stored as a metadata-free PNG at its prepared resolution, with responsive compressed WebP versions served through the same image pipeline as generated photos.
+
+Uploading only creates a review candidate. **Approve** / **Accept into collection** saves it; rejecting a replacement preserves the existing wardrobe photo. Opening the review, copying a prompt and uploading a photo do not generate images or require another model call.
+
+For contributors: use `POST /api/import/jobs/:id/stages/modeled/upload` or `POST /api/outfits/jobs/:jobId/outfits/:outfitId/upload` with `{ "imageDataUrl": "data:image/png;base64,..." }` (JPEG and WebP also accepted). Prepared bytes are capped at 2 MB and the JSON body at 3 MB. Keep these routes inside the existing mutation locks, storage adapter and approval flow; never write straight to the saved library or collection. Keep originals and use the existing display-image routes for compressed delivery. Prompt copying must use the recorded attempt prompt rather than just the editable correction field.
 
 ## Configuration
 
