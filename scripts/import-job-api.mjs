@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { sendDisplayImage } from "./display-image.mjs";
 import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
+import { buildModeledPhotoPrompt, buildModeledSettingPrompt, normalizeModeledSetting } from "./modeled-photo-prompts.mjs";
 
 const API_ROOT = "/api/import/jobs";
 const ASSET_ROOT = "/api/import/assets";
@@ -28,18 +29,6 @@ Set isCleanProductShot to true only when the entire image is a clean product pho
 For each item, supply a concise descriptive name, an estimated primary six-digit hex color, secondaryColor as a genuinely distinct color or null (not a shadow or highlight), and 1-4 short lowercase tags for visible details. Do not guess fabric composition, brands, illegible text, or hidden closures.
 
 Use a tight bounding box enclosing all visible parts of that item, not the entire person. Coordinates are integers normalized to 0-1000 independently across the image width and height. x and y are the top-left corner; width and height are extents, not bottom-right coordinates. Keep x + width <= 1000 and y + height <= 1000. Do not expand the box to guess off-image or fully hidden parts.`;
-
-const MODELED_PROMPT = `Create one photorealistic horizontal 3:2 editorial fashion photograph.
-
-References: Image 1 supplies only the person's identity and body proportions, not their clothes, pose, or background. Image 2 supplies the exact featured garment, including its visible colors, texture, construction, pattern, and legible marks.
-
-Dress the person from Image 1 in the garment from Image 2. Preserve their recognizable face, hair, age, build, skin tone, and natural skin texture. Adapt only the garment's drape and pose to the body; preserve its design, proportions, length, neckline, sleeves, pockets, and actual fastenings. Do not invent an opening or closure. Preserve asymmetry and readable graphics or lettering without inventing uncertain details.
-
-Use plain neutral supporting clothes only where needed to complete the outfit. Invisible basics such as socks are allowed where needed. You may add simple unpatterned black or brown tights, sheer or opaque, when seasonally or stylistically appropriate, even if they are not represented as a wardrobe item. Beyond these basics and the necessary neutral supporting clothes, do not invent other visible garments or accessories. Keep the complete featured item visible with all extremities inside the frame; include both feet for footwear. Use a relaxed mostly front-facing pose with arms away from the featured item. Do not cover it with other clothes or accessories.
-
-Use a quiet neutral real-world setting, soft natural daylight, accurate garment colors, realistic anatomy, and authentic fabric texture. Leave modest environmental space around the person. Identity, garment fidelity, and visibility take priority over styling or scenery.
-
-Do not add captions, text overlays, watermarks, extra people, or invented logos. Existing garment text and logos belong to the garment and must be preserved. Avoid heavy retouching and product-mockup styling.`;
 
 function json(res, status, value) {
   res.statusCode = status;
@@ -399,6 +388,29 @@ async function openAIEdit({ key, baseUrl, model, prompt, images, size, backgroun
   return Buffer.from(encoded, "base64");
 }
 
+async function openAIPlanModeledSetting({ key, baseUrl, model, image, prompt, timeoutMs }) {
+  const normalized = await normalizeImage(image);
+  const response = await fetch(`${baseUrl}/responses`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(Math.min(timeoutMs || 30_000, 30_000)),
+    body: JSON.stringify({
+      model,
+      input: [{ role: "user", content: [
+        { type: "input_text", text: prompt },
+        { type: "input_image", image_url: `data:image/png;base64,${normalized.toString("base64")}` },
+      ] }],
+      text: { format: { type: "json_schema", name: "wardrobe_modeled_setting", strict: true,
+        schema: { type: "object", additionalProperties: false, properties: { setting: { type: "string", minLength: 1, maxLength: 600 } }, required: ["setting"] } } },
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error?.message || `Scene planning failed (${response.status})`);
+  const output = result.output_text || result.output?.flatMap(item => item.content || []).find(item => item.type === "output_text")?.text;
+  if (!output) throw new Error("Scene planning returned no structured result");
+  return normalizeModeledSetting(JSON.parse(output).setting);
+}
+
 async function openAIAnalyze({ key, baseUrl, model, image, mime, timeoutMs }) {
   const response = await fetch(`${baseUrl}/responses`, {
     method: "POST",
@@ -505,7 +517,7 @@ export function wardrobeImportApi(options = {}) {
       const modeledName = `${id}-modeled-${job.generationId}-${job.stages.modeled.attempts}.png`;
       const source = path.basename(new URL(job.stages.modeled.assetUrl, "http://localhost").pathname);
       await copyFile(path.join(jobsDir, job.id, source), path.join(libraryAssetDir, modeledName));
-      const record = { ...existing, modeledImage: `${LIBRARY_ASSET_ROOT}/${modeledName}`, modelReferenceId: job.modelReferenceId || "default" };
+      const record = { ...existing, modeledImage: `${LIBRARY_ASSET_ROOT}/${modeledName}`, modelReferenceId: job.modelReferenceId || "default", modeledSetting: job.stages.modeled.setting || null };
       await atomicJson(importedFile, records.map((item) => item.id === id ? record : item));
       return publicLibraryItem(record);
     }
@@ -538,6 +550,7 @@ export function wardrobeImportApi(options = {}) {
       image: `${LIBRARY_ASSET_ROOT}/${garmentName}`,
       thumbnail: `${LIBRARY_ASSET_ROOT}/${garmentName}`,
       modeledImage: modeledImage || existing?.modeledImage || null,
+      modeledSetting: includeModeled ? job.stages.modeled.setting || null : existing?.modeledSetting || null,
       modelReferenceId: job.modelReferenceId || "default",
       importJobId: job.id,
     };
@@ -594,8 +607,20 @@ export function wardrobeImportApi(options = {}) {
             throw error;
           }
           const model = { data: modelData, mime: "image/png", name: "model.png" };
-          const basePrompt = options.modeledPrompt || MODELED_PROMPT;
-          stage.generationPrompt = current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt;
+          const otherJobs = await Promise.all((await readdir(jobsDir)).filter(id => /^[a-f0-9-]{36}$/i.test(id) && id !== current.id).map(id => loadJob(id)));
+          const recentSettings = [
+            ...(await loadImported()).filter(item => !item.hidden).map(item => item.modeledSetting),
+            ...otherJobs.filter(Boolean).sort((a, b) => (a.updatedAt || "").localeCompare(b.updatedAt || "")).map(job => job.stages?.modeled?.setting),
+            ...(stage.settingHistory || []),
+          ];
+          stage.settingPrompt = buildModeledSettingPrompt({ metadata: current.metadata, previousSetting: stage.setting || null, recentSettings, direction: stage.prompt });
+          // Clear the previous attempt's image prompt while planning. Persist
+          // the new scene before the image request so it survives failures.
+          stage.generationPrompt = null;
+          await saveJob(current);
+          stage.setting = await openAIPlanModeledSetting({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: garment.data, prompt: stage.settingPrompt });
+          stage.settingHistory = [...(stage.settingHistory || []), stage.setting].slice(-12);
+          stage.generationPrompt = buildModeledPhotoPrompt({ setting: stage.setting, direction: stage.prompt });
           await saveJob(current);
           bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: stage.generationPrompt });
         }
@@ -776,7 +801,7 @@ export function wardrobeImportApi(options = {}) {
                 stages: {
                   crop: { ...stageState(), status: "approved" },
                   garment: { ...stageState(), status: "approved", assetUrl: garmentUrl },
-                  modeled: { ...stageState(), status: "ready", assetUrl: item.modeledImage || null },
+                  modeled: { ...stageState(), status: "ready", assetUrl: item.modeledImage || null, setting: item.modeledSetting || null },
                 },
               };
               await saveJob(job);
@@ -936,7 +961,7 @@ export function wardrobeImportApi(options = {}) {
         const filename = `modeled-upload-${randomUUID()}.png`;
         await writeFile(path.join(jobsDir, job.id, filename), bytes, { flag: "wx" });
         Object.assign(stage, { status: "review", decision: null, source: "uploaded", assetUrl: `${ASSET_ROOT}/${job.id}/${filename}`,
-          error: null, failedAssetUrl: null, taskId: null, attempts: stage.attempts + 1, updatedAt: new Date().toISOString() });
+          error: null, failedAssetUrl: null, taskId: null, setting: null, attempts: stage.attempts + 1, updatedAt: new Date().toISOString() });
         await saveJob(job);
         return json(res, 200, publicJob(job));
       }

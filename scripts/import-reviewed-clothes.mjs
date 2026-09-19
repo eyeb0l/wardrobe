@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { normalizeModeledSetting } from './modeled-photo-prompts.mjs';
 import * as local from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -39,6 +40,7 @@ function normalizeItem(item) {
     file: item.file || `${slug}.png`,
     modelReferenceId: item.modelReferenceId || null,
     modeledFile: typeof item.modeledFile === "string" && item.modeledFile ? item.modeledFile : null,
+    modeledSetting: item.modeledSetting == null ? null : normalizeModeledSetting(item.modeledSetting),
     name: typeof item.name === "string" && item.name.trim() ? item.name.trim().slice(0, 120) : slug.split("-").map((word) => word[0].toUpperCase() + word.slice(1)).join(" "),
     part: item.part,
     color: item.color.toLowerCase(),
@@ -127,7 +129,7 @@ export async function importReviewedClothes({ items, modeled, manifest, selected
         secondaryColor: item.secondaryColor, palette: [item.color, item.secondaryColor].filter(Boolean), tags: item.tags,
         image, thumbnail: image, modeledImage: item.modeledAssetName ? `/api/import/library/${item.modeledAssetName}` : existing.modeledImage || null,
         importJobId: existing.importJobId || item.uuid,
-        ...(item.modeledBytes ? { modelReferenceId: referenceId } : {}) };
+        ...(item.modeledBytes ? { modelReferenceId: referenceId, modeledSetting: item.modeledSetting || null } : {}) };
       if (index < 0) next.push(record); else next[index] = record;
     }
     if (!dryRun) {

@@ -27,6 +27,9 @@ async function harness(t, overrides = {}) {
       });
     }
     if (url.endsWith("/responses")) {
+      if (JSON.parse(options.body).text.format.name === "wardrobe_modeled_setting") {
+        return Response.json({ output_text: JSON.stringify({ setting: "A newly planned setting with soft natural light." }) });
+      }
       return Response.json({ output_text: JSON.stringify({ isCleanProductShot: false, items: [{ name: "Grey top", part: "upperbody", color: "#777777", secondaryColor: null, tags: [], boundingBox: { x: 0, y: 0, width: 1000, height: 1000 } }] }) });
     }
     assert.ok(url.endsWith("/images/edits"));
@@ -103,6 +106,7 @@ test("cloud approvals enqueue durable tasks and startup never starts paid image 
   assert.equal(h.requests.length, 2, "approving garment schedules modeling without starting it inline");
   assert.equal((await h.plugin.runTask(h.tasks[1])).job.stages.modeled.status, "review");
   assert.deepEqual(await h.plugin.runTask(h.tasks[1]), { skipped: true });
+  assert.equal(h.requests.length, 4, "one scene plan and one image request; replay repeats neither");
   const image = await h.request("GET", garmentApproved.body.libraryItem.image);
   assert.equal(image.headers["cache-control"], "private, no-store");
 });

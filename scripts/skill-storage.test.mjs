@@ -59,10 +59,13 @@ test('snapshot reads original bytes and metadata without any cloud mutations, re
 
 test('cloud import dry run is read-only, real saves preserve records and reruns reuse originals',async t=>{
   const h=await setup(t);const before=h.objects.size;
+  h.item.modeledSetting='An independently planned brick passage with warm reflected light.';
+  await fs.writeFile(h.manifest,JSON.stringify({items:[h.item]}));
   const dry=await importReviewedClothes({...h.options,dryRun:true});assert.equal(dry.total,2);assert.equal(h.objects.size,before);
   assert.equal(JSON.parse(await h.store.readFile(CLOUD_ROOT+'/library.json','utf8')).length,1);
   const saved=await importReviewedClothes(h.options);const records=JSON.parse(await h.store.readFile(CLOUD_ROOT+'/library.json','utf8'));
   assert.equal(records.length,2);assert.equal(records[0].custom,'keep');assert.equal(records[1].modelReferenceId,'default');
+  assert.equal(records[1].modeledSetting,h.item.modeledSetting,'skill settings remain available to future app planning');
   assert.deepEqual(await h.store.readFile(CLOUD_ROOT+'/imported/'+saved.items[0].assetName),h.cutout);
   assert.equal(records[1].modeledImage.endsWith(saved.items[0].modeledAssetName),true);
   const objectCount=h.objects.size;await importReviewedClothes(h.options);

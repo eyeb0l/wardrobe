@@ -2,22 +2,33 @@
 
 Read this when modeled photos are part of the requested import. Cutout-only delivery does not need this workflow or an identity reference.
 
-For each reviewed cutout, use Imagegen with the resolved identity image first and the exact garment PNG second. Save a horizontal 3:2 PNG as `$WORK/modeled/SLUG.png` and set `modeledFile` to `SLUG.png` in the manifest.
+## Shared prompts
 
-Use this brief, adapting the setting to the item:
+The web app and this skill use [the same prompt builders](../../../../scripts/modeled-photo-prompts.mjs). Render them with [the prompt helper](../../../../scripts/modeled-photo-prompt.mjs); do not maintain or paraphrase a separate image brief here. The helper only renders text and makes no API calls.
 
-```text
-Create a professional horizontal 3:2 editorial fashion photograph of the person in Image 1 wearing the exact clothing item from Image 2.
+For each reviewed cutout, create `$WORK/modeled/SLUG-context.json` containing:
 
-Preserve the person's recognizable face, hair, age, build, skin texture, and body proportions. Preserve the featured garment precisely: color, material, fit, construction, pattern, graphics, logos, text, proportions, closure, and distinctive details. Do not redesign, simplify, replace, or reinterpret it.
+- `metadata`: the item's name, part, colors and tags from the reviewed manifest.
+- `previousSetting`: its last modeled setting, if known, otherwise null.
+- `recentSettings`: known `modeledSetting` values from the fresh library snapshot, plus settings already chosen in this batch and recent attempts. Older photos may have no recorded setting; do not invent their history.
+- `direction`: the user's styling, setting or corrective direction, otherwise an empty string.
 
-Use understated neutral supporting clothes that complete the outfit without covering or competing with the featured item. Invisible basics such as socks are allowed where needed. You may add simple unpatterned black or brown tights, sheer or opaque, when seasonally or stylistically appropriate, even if they are not represented as a wardrobe item. Beyond these basics and the necessary neutral supporting clothes, do not invent other visible garments or accessories. Keep the full featured item and every important detail visible. Use a natural pose with arms and accessories away from it.
+Run from the repository root:
 
-Place the person in a tasteful real-world setting with warm professional natural light, realistic shadows, authentic skin and fabric texture, and restrained editorial color grading. Leave environmental breathing room for flexible cropping.
-
-Avoid hidden garment details, invented closures, fake text or logos, extra statement pieces, crossed arms, bags or scarves covering the item, cropped item extremities, extra people, text overlays, watermarks, product-mockup styling, or synthetic AI polish.
+```sh
+node scripts/modeled-photo-prompt.mjs plan "$WORK/modeled/SLUG-context.json" > "$WORK/modeled/SLUG-plan.txt"
 ```
 
-This styling allowance applies only to modeled photos; do not add tights to source-derived cutouts or create wardrobe records for styling additions.
+Read that rendered planning brief and inspect the exact garment cutout. Follow the brief to invent a fresh setting, as the outfit workflow does; there is no predetermined backdrop list. Save the resulting `setting` string into the same context JSON. On regeneration, update `previousSetting` and `recentSettings` before planning again. Honor an explicit request to keep a setting.
 
-Vary understated settings across a batch while keeping the identity and art direction cohesive. Compare each photo against both references for identity, garment fidelity, visibility, anatomy, and 3:2 framing. Regenerate identity drift, garment redesign, blocked details, anatomy failures, or incorrect framing. Mark the item `accepted` only when its cutout and modeled photo both pass.
+```sh
+node scripts/modeled-photo-prompt.mjs image "$WORK/modeled/SLUG-context.json" > "$WORK/modeled/SLUG-prompt.txt"
+```
+
+Pass the rendered image prompt verbatim to Imagegen with the resolved identity image first and the exact garment PNG second. Save a horizontal 3:2 PNG as `$WORK/modeled/SLUG.png`, set `modeledFile` to `SLUG.png`, and copy the chosen setting into `modeledSetting` in the manifest. This preserves scene context for later web-app or skill generations. Keep the context and rendered prompts with the working artifacts.
+
+## Visual acceptance
+
+Compare every photo against both references for identity, garment fidelity, visibility, anatomy and 3:2 framing. Compare the batch for scene variety and fidelity to the planned locations while keeping the art direction cohesive. Regenerate identity drift, garment redesign, blocked details, anatomy failures, incorrect framing, or an unrequested generic studio background replacing the planned scene. Mark the item `accepted` only when its cutout and modeled photo both pass.
+
+The styling basics allowed by the shared image prompt apply only to modeled photos; do not add tights to source-derived cutouts or create wardrobe records for styling additions.

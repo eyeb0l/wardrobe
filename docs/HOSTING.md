@@ -65,6 +65,8 @@ The command is resumable and leaves originals unchanged. Fresh cloud migrations 
 
 ### Releasing code
 
+Modeled garment generation plans a fresh setting with the configured vision model before making the image request. Each attempt therefore includes one scene-planning request and one image request. It uses the reviewed cutout, user direction and known previous settings; it has no backdrop catalog. Planning and image prompts share `scripts/modeled-photo-prompts.mjs` with the import-clothes skill, whose prompt CLI renders the same text without API calls. Approved app and skill imports retain `modeledSetting` for future planning; existing photographs without it remain usable.
+
 For a connected repository, push reviewed code to the configured production branch. Alternatively, use a Vercel CLI source deployment from the project checkout. Vercel runs `npm run build:vercel`, which builds the frontend and hosted API/workflows together. Run `npm test` and `npm run build:vercel` before releasing changes.
 
 Deploying new source preserves the existing Neon and Blob data. Keep the same storage connections and production environment variables. Local `npm run dev` continues to use the local filesystem independently; hosted edits and newly generated photos do not appear in local `data/` automatically.
