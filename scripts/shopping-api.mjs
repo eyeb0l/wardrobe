@@ -130,7 +130,7 @@ export function wardrobeShoppingApi(options = {}) {
     if (controller.signal.aborted) throw fail("This shopping check was cancelled.", 499);
   };
 
-  async function references() {
+  async function references({ verifyImages = true } = {}) {
     const result = [];
     const defaultPath = path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"));
     try { result.push({ id: "default", label: "Default", file: await containedFile(path.dirname(defaultPath), path.basename(defaultPath)) }); }
@@ -142,7 +142,9 @@ export function wardrobeShoppingApi(options = {}) {
       try { result.push({ id: `model-reference-${number}`, label: `Reference ${number}`, number, file: await containedFile(dataDir, entry.name) }); }
       catch (error) { if (error.code !== "ENOENT" && error.status !== 404) throw error; }
     }
-    // Exclude undecodable or excessively large references from readiness.
+    // Settings need only contained, existing paths. Analysis still excludes
+    // undecodable or excessively large references before any provider request.
+    if (!verifyImages) return result.sort((a, b) => (a.number || 0) - (b.number || 0));
     const available = [];
     for (const reference of result) {
       try {
@@ -153,7 +155,7 @@ export function wardrobeShoppingApi(options = {}) {
     return available.sort((a, b) => (a.number || 0) - (b.number || 0));
   }
 
-  async function inventory() {
+  async function inventory({ verifyImages = true } = {}) {
     let records;
     try { records = JSON.parse(await readFile(path.join(dataDir, "library.json"), "utf8")); }
     catch (error) { if (error.code === "ENOENT") return new Map(); throw fail("The wardrobe library could not be read. Restore library.json before continuing.", 503); }
@@ -166,8 +168,11 @@ export function wardrobeShoppingApi(options = {}) {
       if (!match) continue;
       try {
         const file = await containedFile(importedDir, match[1]);
-        const metadata = await sharp(await readFile(file), { limitInputPixels: 64e6 }).metadata();
-        if (metadata.width && metadata.height && metadata.width * metadata.height <= 64e6) result.set(record.id, { id: record.id, file });
+        if (verifyImages) {
+          const metadata = await sharp(await readFile(file), { limitInputPixels: 64e6 }).metadata();
+          if (!metadata.width || !metadata.height || metadata.width * metadata.height > 64e6) continue;
+        }
+        result.set(record.id, { id: record.id, file });
       } catch { /* Missing or escaped cutouts are not part of the usable wardrobe. */ }
     }
     return result;
@@ -283,7 +288,7 @@ Owned inventory: ${JSON.stringify(items.map(({ file, ...item }, index) => ({ ...
     try {
       ensureActive();
       if (req.method === "GET" && url.pathname === `${API}/config`) {
-        const [refs, items] = await Promise.all([references(), inventory()]);
+        const [refs, items] = await Promise.all([references({ verifyImages: false }), inventory({ verifyImages: false })]);
         const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
         return sendJson(res, 200, { ready: hasApiKey && refs.length > 0 && items.size > 0, hasApiKey, hasModelReference: refs.length > 0,
           modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), wardrobeCount: items.size });

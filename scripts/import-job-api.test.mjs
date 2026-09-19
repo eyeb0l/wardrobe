@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import * as fileSystem from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -8,6 +9,7 @@ import test from "node:test";
 import sharp from "sharp";
 import { chooseChromaKey, hasCleanProductBackground, wardrobeImportApi } from "./import-job-api.mjs";
 import { buildModeledPhotoPrompt, buildModeledSettingPrompt } from "./modeled-photo-prompts.mjs";
+import { withStorage } from "./storage-fs.mjs";
 
 test("chroma selection protects either recorded garment color", () => {
   for (const [primary, secondary, expected] of [
@@ -34,6 +36,12 @@ async function harness(t, env = {}) {
   const identity = await sharp({ create: { width: 80, height: 100, channels: 3, background: "#aaaaaa" } }).png().toBuffer();
   await writeFile(path.join(root, "identity.png"), identity);
   const requests = [];
+  const imageReads = [];
+  const storage = { ...fileSystem, async readFile(filename, ...args) {
+    const bytes = await fileSystem.readFile(filename, ...args);
+    if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
+    return bytes;
+  } };
   let analysisResult = [{ name: "Grey top", part: "upperbody", color: "#777777", secondaryColor: null, tags: ["short sleeve"], boundingBox: { x: 100, y: 100, width: 800, height: 800 } }];
   let isCleanProductShot = false;
   t.mock.method(globalThis, "fetch", async (url, options) => {
@@ -72,7 +80,7 @@ async function harness(t, env = {}) {
     Object.assign(req, { method, url, headers: payload ? { 'content-type': 'application/json' } : {} });
     let result;
     const res = { statusCode: 200, setHeader() {}, end(value) { result = Buffer.isBuffer(value) ? value : JSON.parse(value); } };
-    await handler(req, res, () => assert.fail("Unexpected middleware fallthrough"));
+    await withStorage(storage, () => handler(req, res, () => assert.fail("Unexpected middleware fallthrough")));
     if (expectedStatus) assert.equal(res.statusCode, expectedStatus, JSON.stringify(result));
     else assert.ok(res.statusCode < 300, JSON.stringify(result));
     return result;
@@ -86,7 +94,7 @@ async function harness(t, env = {}) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, request, waitForStage, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
+  return { root, source, identity, requests, imageReads, request, waitForStage, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
@@ -149,6 +157,24 @@ test("clean product shots can still choose extraction", async (t) => {
   const extracted = await h.waitForStage(job.id, "garment");
   assert.equal(extracted.stages.garment.source, "generated");
   assert.equal(h.requests.filter((entry) => entry.type === "edit").length, 1);
+});
+
+test("modeled generation reads only its garment and reference inputs, without downloading the unused source", async (t) => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  const extracted = await h.waitForStage(job.id, "garment");
+  const garmentName = path.basename(extracted.stages.garment.assetUrl);
+  const garment = await readFile(path.join(h.root, "data", "jobs", job.id, garmentName));
+  h.imageReads.length = 0;
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`);
+  await h.waitForStage(job.id, "modeled");
+  assert.equal(h.imageReads.filter(({ file }) => path.basename(file) === extracted.internal.originalFile).length, 0, "modeled attempts do not read original upload bodies");
+  assert.deepEqual(h.imageReads.map(({ file }) => path.basename(file)).sort(), [garmentName, "identity.png"].sort());
+  const edit = h.requests.filter((entry) => entry.type === "edit").at(-1);
+  assert.deepEqual(edit.images, [{ name: "model.png", data: h.identity }, { name: "garment.png", data: garment }], "provider input images and order are unchanged");
+  assert.equal(edit.form.get("quality"), "high");
+  assert.equal(edit.form.get("size"), "1536x1024");
 });
 
 test("ordinary photos, multiple items and uncertain classification cannot bypass extraction", async (t) => {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { link, lstat, readFile, readdir, rename, rm, writeFile } from "./storage-fs.mjs";
+import { currentStorage, link, lstat, readFile, readdir, rename, rm, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -38,6 +38,24 @@ export async function publishImage(file, bytes) {
       if (!(await lstat(file)).isFile() || !Buffer.from(bytes).equals(await readFile(file))) throw Object.assign(new Error(`The outfit image ${path.basename(file)} already exists with different contents. Preserve it and use a new image filename.`), { status: 409 });
     }
   } finally { await rm(temporary, { force: true }); }
+}
+
+// Approval has already decoded these candidate bytes under the writer lease.
+// Cloud links retain the same immutable Blob and its display variants; link()
+// fences publication against lease expiry and never clobbers a destination.
+// Local files remain independent copies because a local candidate is mutable.
+export async function publishCandidateImage(source, file, validatedBytes) {
+  const store = currentStorage();
+  if (!store?.imageIdentity) return publishImage(file, validatedBytes);
+  await store.assertLease();
+  await store.imageIdentity(source);
+  try { await link(source, file); }
+  catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    if (!(await lstat(file)).isFile() || !Buffer.from(validatedBytes).equals(await readFile(file))) {
+      throw Object.assign(new Error(`The outfit image ${path.basename(file)} already exists with different contents. Preserve it and use a new image filename.`), { status: 409 });
+    }
+  }
 }
 
 export function acceptedFilename(image) {

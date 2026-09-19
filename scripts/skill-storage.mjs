@@ -25,7 +25,7 @@ export function parseSkillArgs(args, { positional = false } = {}) {
   for (let index = 0; index < args.length; index++) {
     const key = args[index];
     if (key === '--dry-run') { options.dryRun = true; continue; }
-    if (['--target', '--data-dir', '--out', '--items', '--modeled', '--manifest', '--repo'].includes(key)) {
+    if (['--target', '--data-dir', '--out', '--reuse', '--items', '--modeled', '--manifest', '--repo'].includes(key)) {
       const value = args[++index];
       if (!value || value.startsWith('--')) throw new Error(`${key} requires a value`);
       options[key.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;

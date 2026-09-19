@@ -16,6 +16,8 @@ Run from the repository root with Node 22 or newer. The ignored `.env.cloud` nee
 
 The snapshot command reads cloud storage without changing it. It refuses an existing output directory and checks for changes while copying. A successful snapshot has a final `snapshot.json` containing its target, capture time, reference IDs and file hashes. On failure, retain any partial files for diagnosis but do not treat them as a complete inventory; retry into a fresh directory. It is a task snapshot, not a backup: it omits jobs, modeled garment photos and outfit image files.
 
+For another cloud task, add `--reuse /path/to/previous/snapshot` while keeping `--out` a new directory. Metadata and image identities are always fetched fresh. Unchanged originals are copied from the earlier snapshot only after checking their SHA-256 and current immutable Blob identity; changed, missing or corrupt cached files are downloaded again. Deleted or hidden items are omitted. Older snapshots without identity metadata and local mutable files safely fall back to reading the source. Reuse neither changes the earlier snapshot nor skips the final consistency checks. Keep reusable snapshots private, just like other original-image working copies.
+
 | Snapshot content | Use |
 | --- | --- |
 | `library.json` | Current saved owned items and stable IDs |

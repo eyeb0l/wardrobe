@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import * as fileSystem from "node:fs/promises";
 import { createServer, request as httpRequest } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import sharp from "sharp";
 import { wardrobeShoppingApi } from "./shopping-api.mjs";
+import { withStorage } from "./storage-fs.mjs";
 
 const API = "/api/shopping";
 const assessment = (overrides = {}) => ({
@@ -38,6 +40,12 @@ async function harness(t, { env = {}, timeoutMs, response } = {}) {
   await writeFile(path.join(dataDir, "library.json"), JSON.stringify(items));
   const candidate = await sharp(await image("#667755", 120, 180)).jpeg().toBuffer();
   const requests = [];
+  const imageReads = [];
+  const storage = { ...fileSystem, async readFile(filename, ...args) {
+    const bytes = await fileSystem.readFile(filename, ...args);
+    if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
+    return bytes;
+  } };
   let providerResponse = response;
   const settings = { OPENAI_API_KEY: "shopping-test-key", OPENAI_API_BASE_URL: "https://shopping-test.invalid/v1/", OPENAI_VISION_MODEL: "gpt-5.6-luna", WARDROBE_DATA_DIR: "custom-data", WARDROBE_MODEL_REFERENCE: "identity.png", ...env };
   const fetchMock = async (url, options) => {
@@ -64,7 +72,7 @@ async function harness(t, { env = {}, timeoutMs, response } = {}) {
     Object.assign(req, { method, url, headers: { host: "localhost:5173", ...(method === "POST" ? { "content-type": "application/json" } : {}), ...headers } });
     let result;
     const res = { statusCode: 200, setHeader() {}, end(value) { result = JSON.parse(value); } };
-    await handler(req, res, () => { res.statusCode = 404; result = { error: "Not found" }; });
+    await withStorage(storage, () => handler(req, res, () => { res.statusCode = 404; result = { error: "Not found" }; }));
     assert.equal(res.statusCode, expected, JSON.stringify(result));
     return result;
   }
@@ -75,7 +83,7 @@ async function harness(t, { env = {}, timeoutMs, response } = {}) {
     t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
     return `http://127.0.0.1:${server.address().port}`;
   }
-  return { root, dataDir, identity, numberedIdentity, items, candidate, settings, requests, request, body,
+  return { root, dataDir, identity, numberedIdentity, items, candidate, settings, requests, imageReads, request, body,
     serve,
     analyze: (overrides, expected = 200, headers) => request("POST", `${API}/analyze`, body(overrides), expected, headers),
     setResponse(value) { providerResponse = value; }, close() { plugin.closeBundle(); },
@@ -91,6 +99,28 @@ test("configuration includes all categories and only public setup details", asyn
   assert.ok(!JSON.stringify(config).includes(h.root));
   assert.ok(!JSON.stringify(config).includes("shopping-test-key"));
   assert.equal(h.requests.length, 0);
+  assert.deepEqual(h.imageReads, [], "settings do not read any original image body");
+  assert.deepEqual(await h.request("GET", `${API}/config`), config, "repeat settings reads have the same response");
+  assert.deepEqual(h.imageReads, [], "repeat settings reads also avoid all original image bodies");
+});
+
+test("metadata-only settings retain path checks and analysis rejects corrupt selected assets before a provider call", async (t) => {
+  const h = await harness(t);
+  const missing = { ...h.items[0], id: "missing-1", image: "/api/import/library/missing.png" };
+  await writeFile(path.join(h.dataDir, "library.json"), JSON.stringify([...h.items, missing]));
+  assert.equal((await h.request("GET", `${API}/config`)).wardrobeCount, 14, "missing originals remain excluded");
+  assert.equal(h.imageReads.length, 0);
+
+  await writeFile(path.join(h.root, "identity.png"), "not an image");
+  assert.equal((await h.request("GET", `${API}/config`)).ready, true, "readiness defers image decoding to analysis");
+  assert.equal(h.imageReads.length, 0);
+  await h.analyze({}, 400);
+  assert.equal(h.requests.length, 0, "a corrupt selected reference never reaches the provider");
+
+  await writeFile(path.join(h.root, "identity.png"), h.identity);
+  await writeFile(path.join(h.dataDir, "imported", "top-1.png"), "not an image");
+  await h.analyze({ wardrobeItems: [h.items[0]] }, 503);
+  assert.equal(h.requests.length, 0, "an exclusively corrupt selected inventory never reaches the provider");
 });
 
 test("analysis sends the real candidate, selected person and labeled contact sheets with dresses", async (t) => {

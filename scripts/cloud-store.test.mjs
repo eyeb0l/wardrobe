@@ -6,6 +6,7 @@ import os from "node:os";
 import { PGlite } from "@electric-sql/pglite";
 import { createCloudStore, CLOUD_ROOT } from "./cloud-store.mjs";
 import { withStorage, currentStorage, mkdir, readFile, writeFile } from "./storage-fs.mjs";
+import { publishCandidateImage } from "./outfit-storage.mjs";
 
 async function harness(t) {
   const pg = new PGlite();
@@ -83,6 +84,41 @@ test("cloud directories, exact bytes, atomic publication and immutable links", a
   }));
   assert.equal((await store.stat(`${CLOUD_ROOT}/renamed/image.png`)).size, 7);
   assert.ok(h.reads.every(({ options }) => options.access === "private" && options.useCache === true));
+});
+
+test("accepted candidates share immutable originals and display variants with no upload", async (t) => {
+  const h = await harness(t);
+  const sharp = (await import('sharp')).default;
+  const bytes = await sharp({ create: { width: 80, height: 80, channels: 4, background: 'red' } }).png().toBuffer();
+  const candidate = `${CLOUD_ROOT}/outfit-jobs/candidate.png`, accepted = `${CLOUD_ROOT}/outfit-images/accepted.png`;
+  await h.store.withLease(async () => {
+    await h.store.mkdir(`${CLOUD_ROOT}/outfit-jobs`);
+    await h.store.mkdir(`${CLOUD_ROOT}/outfit-images`);
+    await h.store.writeFile(candidate, bytes);
+  });
+  const identity = await h.store.imageIdentity(candidate);
+  assert.match(identity, /^blob-sha256:[a-f0-9]{64}$/);
+  assert.equal(h.reads.length, 0, 'fresh identity lookup does not download a body');
+  const variant = await h.store.displayImage(candidate, 320);
+  const uploads = h.blobs.size;
+  await assert.rejects(withStorage(h.store, () => publishCandidateImage(candidate, accepted, bytes)), { code: 'ESTALE' });
+  await h.store.withLease(() => withStorage(h.store, async () => {
+    await publishCandidateImage(candidate, accepted, bytes);
+    await publishCandidateImage(candidate, accepted, bytes);
+    assert.equal(h.blobs.size, uploads, 'first publication and recovery upload nothing');
+    assert.equal(await h.store.imageIdentity(accepted), identity);
+    await assert.rejects(publishCandidateImage(candidate, accepted, Buffer.from('conflicting bytes')), { status: 409 });
+    await h.store.rm(candidate);
+  }));
+  const cold = h.other(), reads = h.reads.length;
+  const saved = await cold.displayImage(accepted, 320);
+  assert.equal(saved.etag, variant.etag);
+  assert.deepEqual(saved.bytes, variant.bytes);
+  assert.equal(h.reads.length - reads, 1, 'cold accepted display downloads only existing derivative');
+  assert.equal(h.blobs.size, uploads, 'accepted display creates no duplicate variant');
+  await assert.rejects(cold.imageIdentity(candidate), { code: 'ENOENT' });
+  await h.store.withLease(() => h.store.writeFile(accepted, Buffer.from('replacement')));
+  assert.notEqual(await cold.imageIdentity(accepted), identity, 'replacement is observed without a warm identity cache');
 });
 
 test("cloud fs rejects path escape, missing parents, type collisions, and exclusive overwrites", async (t) => {

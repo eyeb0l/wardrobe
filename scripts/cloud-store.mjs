@@ -259,6 +259,10 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
   };
   store = {
     root: CLOUD_ROOT,
+    async imageIdentity(file) {
+      const row = await imageRow(file);
+      return `blob-sha256:${createHash("sha256").update(row.blob_url).digest("hex")}`;
+    },
     async initializeGarbageCollection() { await db.transaction(GC_SCHEMA_SQL.map(text => ({ text }))); },
     async collectGarbage(options = {}) {
       return store.withLease(async () => collectBlobs({ ...options, store, db, blob: await getBlob(),
