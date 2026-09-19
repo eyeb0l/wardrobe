@@ -604,12 +604,14 @@ export function wardrobeImportApi(options = {}) {
         if (chromaKeyUsed) fresh.stages[stageName].chromaKey = chromaKeyUsed;
         fresh.stages[stageName].updatedAt = new Date().toISOString();
         await saveJob(fresh);
+        return publicJob(fresh);
       } catch (error) {
         const fresh = await loadJob(current.id);
         fresh.stages[stageName].status = "failed"; fresh.stages[stageName].error = error.message; fresh.stages[stageName].updatedAt = new Date().toISOString();
         if (typeof failedAssetUrl === "string") fresh.stages[stageName].failedAssetUrl = failedAssetUrl;
         if (chromaKeyUsed) fresh.stages[stageName].chromaKey = chromaKeyUsed;
         await saveJob(fresh);
+        return publicJob(fresh);
       }
     })().finally(() => running.delete(lock));
     running.set(lock, task);
@@ -668,8 +670,7 @@ export function wardrobeImportApi(options = {}) {
       || task.generationId !== (job.generationId || null)) {
       return { skipped: true };
     }
-    await generate(job, task.stageName);
-    return { skipped: false, job: publicJob(await loadJob(job.id)) };
+    return { skipped: false, job: await generate(job, task.stageName) };
   }
 
   async function failTask(task, message = "Generation was interrupted. Please retry this stage.") {

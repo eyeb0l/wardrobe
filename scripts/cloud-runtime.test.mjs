@@ -94,7 +94,7 @@ test("durable task completion exposes persisted bytes and duplicate delivery mak
     await mkdir(`${CLOUD_ROOT}/results`, { recursive: true });
     await writeFile(`${CLOUD_ROOT}/results/image.png`, bytes);
     await writeFile(`${CLOUD_ROOT}/results/result.json`, JSON.stringify({ image: "image.png", accepted: false }));
-    return { skipped: false };
+    return { skipped: false, job: { stages: { garment: { status: "review" } } } };
   } });
   assert.deepEqual(await executeCloudTask(task.id, 0, runtime.options), { more: false });
   const stored = await h.storedTask(task.id);
@@ -108,7 +108,7 @@ test("durable task completion exposes persisted bytes and duplicate delivery mak
   assert.equal(runtime.calls.run.length, 1);
   assert.equal(runtime.calls.close, 1);
   assert.deepEqual(runtime.calls.factory, ["import"]);
-  assert.equal(runtime.calls.fail.length, 1, "completion reconciles any unfinished job state once");
+  assert.equal(runtime.calls.fail.length, 0, "settled import does not reload the job for redundant reconciliation");
   assert.equal(h.blobs.size, 1);
   assert.equal(h.blobReads.length, 1);
 });

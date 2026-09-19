@@ -189,3 +189,85 @@ test("failed directory rename leaves both trees intact", async (t) => {
     assert.equal(await store.readFile(`${CLOUD_ROOT}/destination/state.json`, "utf8"), '"destination"');
   });
 });
+
+test("interactive acquisition waits for finalization and runs its mutation exactly once", async (t) => {
+  const h = await harness(t);
+  let published, release;
+  const visible = new Promise((resolve) => { published = resolve; });
+  const finalize = new Promise((resolve) => { release = resolve; });
+  const worker = h.store.withLease(async () => {
+    await h.store.writeFile(`${CLOUD_ROOT}/stage.json`, '"review"');
+    published();
+    await finalize;
+  });
+  await visible;
+  const next = h.other();
+  let callbacks = 0;
+  const action = next.withLease(async () => {
+    callbacks++;
+    assert.equal(await next.readFile(`${CLOUD_ROOT}/stage.json`, "utf8"), '"review"');
+    await next.writeFile(`${CLOUD_ROOT}/stage.json`, '"modeled-queued"');
+  }, { waitMs: 2_000 });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(callbacks, 0, "visible result does not bypass the finishing worker's lease");
+  } finally { release(); }
+  await Promise.all([worker, action]);
+  assert.equal(callbacks, 1);
+  assert.equal(await h.store.readFile(`${CLOUD_ROOT}/stage.json`, "utf8"), '"modeled-queued"');
+});
+
+test("busy acquisition has a bounded wait and never starts the action", async (t) => {
+  const h = await harness(t);
+  await h.store.withLease(async () => {
+    let callbacks = 0;
+    const start = performance.now();
+    await assert.rejects(h.other().withLease(() => { callbacks++; }, { waitMs: 40 }), { code: "EBUSY", status: 409 });
+    assert.ok(performance.now() - start < 1_000);
+    assert.equal(callbacks, 0);
+    await h.store.assertLease();
+  });
+});
+
+test("abandoned waiting actions are cancelled without modifying or stealing ownership", async (t) => {
+  const h = await harness(t);
+  let callbacks = 0;
+  const controller = new AbortController();
+  await h.store.withLease(async () => {
+    const waiting = h.other().withLease(() => { callbacks++; }, { waitMs: 2_000, signal: controller.signal });
+    const rejected = assert.rejects(waiting, { name: "AbortError" });
+    controller.abort();
+    await rejected;
+    await h.store.assertLease();
+  });
+  assert.equal(callbacks, 0);
+  await assert.rejects(h.other().withLease(() => { callbacks++; }, { signal: controller.signal }), { name: "AbortError" });
+  assert.equal(callbacks, 0);
+});
+
+test("cancellation during acquisition releases the newly acquired lease before any action", async (t) => {
+  const h = await harness(t);
+  const controller = new AbortController();
+  const store = createCloudStore({ blob: h.blob, database: { ...h.database,
+    async query(sql, values) {
+      const rows = await h.database.query(sql, values);
+      if (sql.includes("RETURNING token") && rows.length) controller.abort();
+      return rows;
+    },
+  } });
+  await assert.rejects(store.withLease(() => assert.fail("An abandoned action must not run"), { waitMs: 2_000, signal: controller.signal }), { name: "AbortError" });
+  await h.other().withLease(async () => {});
+});
+
+test("a callback failure after acquiring ownership never replays the action", async (t) => {
+  const h = await harness(t);
+  let callbacks = 0;
+  await assert.rejects(h.store.withLease(async () => {
+    callbacks++;
+    await h.store.writeFile(`${CLOUD_ROOT}/committed.json`, "true");
+    throw Object.assign(new Error("failure after side effect"), { code: "EBUSY" });
+  }, { waitMs: 2_000 }), /failure after side effect/);
+  assert.equal(callbacks, 1);
+  assert.equal(await h.store.readFile(`${CLOUD_ROOT}/committed.json`, "utf8"), "true");
+  await h.other().withLease(async () => {});
+});

@@ -35,7 +35,11 @@ export async function executeCloudTask(id, step, { store = createCloudStore(), p
       // processing. runTask deliberately skips that uncertain paid attempt.
       // Reconcile remaining unfinished work before completing delivery; each
       // hook checks the task identity and leaves review/accepted work intact.
-      if (!more) await plugin.failTask(task.payload, INTERRUPTED);
+      // An import that actually ran already persisted review/failed state.
+      // Avoid reloading it solely to discover there is nothing to reconcile.
+      const importSettled = task.payload.kind === "import" && result?.skipped === false
+        && ["review", "failed"].includes(result.job?.stages?.[task.payload.stageName]?.status);
+      if (!more && !importSettled) await plugin.failTask(task.payload, INTERRUPTED);
       await saveTask({ ...task, state: more ? "pending" : "done", step: step + 1, updatedAt: new Date().toISOString() });
       return { more };
     } catch (error) {

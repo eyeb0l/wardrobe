@@ -81,8 +81,20 @@ export default async function handler(req, res) {
     plugin.configureServer({ middlewares: { use(fn) { route = fn; } } });
     await route(req, res, () => json(res, 404, { error: "Not found" }));
   });
-  try { await (readOnly ? serve() : store.withLease(serve)); }
+  const waiting = new AbortController();
+  const disconnected = () => { if (!res.writableEnded) waiting.abort(); };
+  req.once("aborted", disconnected);
+  res.once("close", disconnected);
+  if (req.aborted || res.destroyed) waiting.abort();
+  // A finished image can be visible while its worker is recording completion.
+  // Keep this action pending through that short handoff instead of returning
+  // an error that forces the user to click again. Long-running work still wins.
+  try { await (readOnly ? serve() : store.withLease(serve, { waitMs: 8_000, signal: waiting.signal })); }
   catch (error) {
-    if (!res.writableEnded) json(res, error.status || 503, { error: error.status ? error.message : "The wardrobe is temporarily unavailable. Please try again." });
-  } finally { await plugin?.closeBundle?.(); }
+    if (!res.writableEnded && !waiting.signal.aborted) json(res, error.status || 503, { error: error.status ? error.message : "The wardrobe is temporarily unavailable. Please try again." });
+  } finally {
+    req.off("aborted", disconnected);
+    res.off("close", disconnected);
+    await plugin?.closeBundle?.();
+  }
 }

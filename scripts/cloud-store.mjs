@@ -1,6 +1,7 @@
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { DISPLAY_WIDTHS, DISPLAY_RECIPE } from "../shared/image-variants.mjs";
 import { displayKey, displayETag, encodeDisplayImage, matchesETag } from "./display-image.mjs";
 import { GC_SCHEMA_SQL, collectBlobs } from "./blob-gc.mjs";
@@ -349,14 +350,24 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     },
     async initialize() { await db.transaction(CLOUD_SCHEMA_SQL.map((text) => ({ text }))); },
     async assertLease() { await mutate("assert", {}); },
-    async withLease(callback) {
+    async withLease(callback, { waitMs = 0, signal } = {}) {
+      signal?.throwIfAborted();
       const inherited = leaseContext.getStore();
       if (inherited?.store === store) { await store.assertLease(); return callback(); }
       const token = randomUUID();
-      const acquired = await db.query(`UPDATE wardrobe_storage_lease SET token = $1::uuid,
-        expires_at = clock_timestamp() + interval '${LEASE_SECONDS} seconds'
-        WHERE id = 1 AND expires_at <= clock_timestamp() RETURNING token`, [token]);
-      if (!acquired.length) throw error("EBUSY", CLOUD_ROOT, "Another wardrobe operation is still running");
+      const deadline = performance.now() + waitMs;
+      // Only acquisition is retried. Once the callback starts, errors must
+      // propagate without replaying mutations or paid API requests.
+      for (;;) {
+        signal?.throwIfAborted();
+        const acquired = await db.query(`UPDATE wardrobe_storage_lease SET token = $1::uuid,
+          expires_at = clock_timestamp() + interval '${LEASE_SECONDS} seconds'
+          WHERE id = 1 AND expires_at <= clock_timestamp() RETURNING token`, [token]);
+        if (acquired.length) break;
+        const remaining = deadline - performance.now();
+        if (remaining <= 0) throw error("EBUSY", CLOUD_ROOT, "Another wardrobe operation is still running");
+        await delay(Math.min(200, remaining), undefined, { signal });
+      }
       const owner = { store, token, lost: false, closed: false };
       let heartbeat;
       let renewing;
@@ -369,6 +380,7 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
           .finally(() => { renewing = undefined; });
       };
       try {
+        signal?.throwIfAborted();
         heartbeat = setInterval(renew, heartbeatMs);
         heartbeat.unref?.();
         return await leaseContext.run(owner, async () => {
