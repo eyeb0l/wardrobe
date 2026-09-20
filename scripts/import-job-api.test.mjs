@@ -37,10 +37,17 @@ async function harness(t, env = {}, beforePaidCall) {
   await writeFile(path.join(root, "identity.png"), identity);
   const requests = [];
   const imageReads = [];
+  let failCandidateSave = false;
   const storage = { ...fileSystem, async readFile(filename, ...args) {
     const bytes = await fileSystem.readFile(filename, ...args);
     if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
     return bytes;
+  }, async writeFile(filename, data, ...args) {
+    if (failCandidateSave && String(filename).includes("job.json") && String(data).includes('"detectionRetry":')) {
+      failCandidateSave = false;
+      throw Object.assign(new Error("Simulated candidate persistence failure"), { code: "EIO" });
+    }
+    return fileSystem.writeFile(filename, data, ...args);
   } };
   let analysisResult = [{ name: "Grey top", part: "upperbody", color: "#777777", secondaryColor: null, tags: ["short sleeve"], boundingBox: { x: 100, y: 100, width: 800, height: 800 } }];
   let isCleanProductShot = false;
@@ -94,7 +101,7 @@ async function harness(t, env = {}, beforePaidCall) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, imageReads, request, waitForStage, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
+  return { root, source, identity, requests, imageReads, request, waitForStage, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
@@ -500,4 +507,157 @@ test("import analysis and scene planning reserve text separately from each gener
   await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`, {});
   await h.waitForStage(job.id, "modeled");
   assert.deepEqual(reservations, ["text", "image", "text", "image"]);
+});
+
+test("Terra retry reviews full-source candidates without replacing the current crop or spending twice", async t => {
+  const reservations = [];
+  const h = await harness(t, {}, async kind => reservations.push(kind));
+  const originalImage = await productImage(true);
+  const created = await h.request("POST", "/api/import/jobs", { imageBase64: originalImage.toString("base64") });
+  const job = created.jobs[0];
+  const initialCrop = await h.request("GET", job.stages.crop.assetUrl);
+  h.setAnalysis([dress], true);
+  const base = `/api/import/jobs/${job.id}`;
+  const requestId = "00000000-0000-4000-8000-000000000001";
+  const [review, duplicate] = await Promise.all([
+    h.request("POST", `${base}/detection/retry`, { requestId }),
+    h.request("POST", `${base}/detection/retry`, { requestId }),
+  ]);
+  assert.deepEqual(duplicate, review);
+  assert.equal(review.detectionRetry.candidates.length, 1);
+  assert.equal(review.detectionRetry.candidates[0].metadata.name, dress.name);
+  assert.equal(review.detectionRetry.candidates[0].canUseOriginal, true);
+  assert.deepEqual(review.metadata, job.metadata);
+  assert.deepEqual(review.stages, job.stages);
+  assert.deepEqual(await h.request("GET", job.stages.crop.assetUrl), initialCrop);
+  assert.equal(h.requests.length, 2);
+  assert.deepEqual(reservations, ["text", "text"]);
+  const [normal, retry] = h.requests.map(entry => entry.request);
+  assert.equal(normal.model, "gpt-5.6-luna");
+  assert.equal(normal.reasoning, undefined);
+  assert.equal(retry.model, "gpt-5.6-terra");
+  assert.deepEqual(retry.reasoning, { effort: "medium" });
+  assert.equal(retry.max_output_tokens, 16384);
+  assert.deepEqual(retry.input, normal.input, "same full original, prompt and image bytes");
+  assert.deepEqual(retry.text, normal.text);
+  await h.restart();
+  assert.deepEqual((await h.request("GET", base)).detectionRetry, review.detectionRetry);
+  assert.equal(h.requests.length, 2, "restart must not repeat detection");
+  await h.request("POST", `${base}/stages/crop/approve`, {}, 409);
+  await h.request("POST", `${base}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000002" }, 409);
+  const selection = { retryId: requestId, candidateId: review.detectionRetry.candidates[0].id };
+  await h.request("POST", `${base}/detection/accept`, { ...selection, candidateId: "missing" }, 400);
+  const accepted = await h.request("POST", `${base}/detection/accept`, selection);
+  assert.equal(accepted.metadata.name, dress.name);
+  assert.equal(accepted.canUseOriginal, true);
+  assert.equal(accepted.detectionRetry, undefined);
+  assert.equal(accepted.stages.crop.status, "review");
+  assert.equal(accepted.stages.garment.status, "pending");
+  assert.deepEqual(await h.request("POST", `${base}/detection/accept`, selection), accepted);
+  assert.equal(h.requests.length, 2, "accepting a candidate never generates an image");
+  await h.request("POST", `${base}/stages/crop/use-original`);
+  await h.request("POST", `${base}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000003" }, 409);
+  assert.equal(h.requests.length, 2);
+});
+
+test("keeping the current detection and empty Terra results preserve all existing items", async t => {
+  const h = await harness(t);
+  h.setAnalysis([dress, { ...dress, name: "Second item", part: "accessories_up" }]);
+  const { jobs } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const base = `/api/import/jobs/${jobs[0].id}`;
+  h.setAnalysis([]);
+  const requestId = "00000000-0000-4000-8000-000000000004";
+  const review = await h.request("POST", `${base}/detection/retry`, { requestId });
+  assert.deepEqual(review.detectionRetry.candidates, []);
+  assert.deepEqual((await h.request("GET", `/api/import/jobs/${jobs[1].id}`)), jobs[1]);
+  await h.request("POST", `${base}/detection/accept`, { retryId: requestId, candidateId: "missing" }, 400);
+  await h.request("POST", `${base}/detection/discard`, { retryId: "stale" }, 409);
+  const kept = await h.request("POST", `${base}/detection/discard`, { retryId: requestId });
+  assert.deepEqual(kept.metadata, jobs[0].metadata);
+  assert.deepEqual(kept.stages, jobs[0].stages);
+  assert.equal(kept.detectionRetry, undefined);
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 409);
+  assert.equal(h.requests.length, 2, "discarded request cannot be replayed for a second charge");
+});
+
+test("malformed Terra responses fail without replacing the crop and never retry automatically", async t => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const base = `/api/import/jobs/${job.id}`;
+  const requestId = "00000000-0000-4000-8000-000000000005";
+  h.setAnalysis([{ ...dress, boundingBox: { x: 950, y: 0, width: 200, height: 100 } }]);
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 502);
+  const failed = await h.request("GET", base);
+  assert.deepEqual(failed.metadata, job.metadata);
+  assert.deepEqual(failed.stages, job.stages);
+  assert.equal(failed.detectionRetry, undefined);
+  assert.equal(failed.detectionRetryAttempt.status, "failed");
+  await h.restart();
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 409);
+  assert.equal(h.requests.length, 2);
+  h.setAnalysis([dress]);
+  const retried = await h.request("POST", `${base}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000006" });
+  assert.equal(retried.detectionRetry.candidates.length, 1);
+});
+
+test("quota denial and invalid retry IDs prevent Terra dispatch", async t => {
+  let calls = 0;
+  const h = await harness(t, {}, async () => {
+    if (++calls > 1) throw Object.assign(new Error("Daily quota reached"), { status: 429 });
+  });
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const base = `/api/import/jobs/${job.id}`;
+  await h.request("POST", `${base}/detection/retry`, {}, 400);
+  await h.request("POST", `${base}/detection/retry`, { requestId: "../bad" }, 400);
+  await h.request("POST", `${base}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000007" }, 429);
+  assert.equal(h.requests.length, 1);
+  assert.deepEqual((await h.request("GET", base)).stages, job.stages);
+});
+
+test("empty initial detection can explicitly use fixed Terra medium, while model injection is rejected", async t => {
+  const h = await harness(t, { OPENAI_VISION_MODEL: "custom-default-model" });
+  h.setAnalysis([]);
+  const imageBase64 = h.source.toString("base64");
+  const empty = await h.request("POST", "/api/import/jobs", { imageBase64 });
+  assert.equal(empty.noClothingDetected, true);
+  assert.equal(h.requests[0].request.model, "custom-default-model");
+  await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "gpt-5.6-sol" }, 400);
+  h.setAnalysis([dress]);
+  const retry = await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "terra" });
+  assert.equal(retry.jobs.length, 1);
+  assert.equal(retry.jobs[0].detectionModel, "gpt-5.6-terra");
+  assert.equal(retry.jobs[0].detectionEffort, "medium");
+  assert.equal(h.requests[1].request.model, "gpt-5.6-terra");
+  assert.deepEqual(h.requests[1].request.reasoning, { effort: "medium" });
+});
+
+test("older detection request IDs remain spent after subsequent retries and restart", async t => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const base = `/api/import/jobs/${job.id}`;
+  const ids = ["00000000-0000-4000-8000-000000000020", "00000000-0000-4000-8000-000000000021"];
+  for (const requestId of ids) {
+    await h.request("POST", `${base}/detection/retry`, { requestId });
+    await h.request("POST", `${base}/detection/discard`, { retryId: requestId });
+  }
+  await h.restart();
+  for (const requestId of ids) await h.request("POST", `${base}/detection/retry`, { requestId }, 409);
+  assert.equal(h.requests.length, 3);
+});
+
+test("candidate persistence failure leaves original review recoverable and reserves the retry identity", async t => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const base = `/api/import/jobs/${job.id}`;
+  const requestId = "00000000-0000-4000-8000-000000000022";
+  h.setAnalysis([dress]);
+  h.failNextCandidateSave();
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 502);
+  await h.restart();
+  const after = await h.request("GET", base);
+  assert.deepEqual(after.metadata, job.metadata);
+  assert.deepEqual(after.stages, job.stages);
+  assert.equal(after.detectionRetry, undefined);
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 409);
+  assert.equal(h.requests.length, 2);
 });

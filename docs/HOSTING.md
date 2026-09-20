@@ -1,139 +1,150 @@
 # Private hosting on Vercel
 
-This project can run on Vercel Hobby for personal use. Vercel handles sign-in; Neon stores wardrobe records and job state, and a **private** Vercel Blob store holds images. OpenAI usage is billed separately. Check each service's current allowance before assuming the whole setup will remain free.
-
-Current production site: [Wardrobe](https://wardrobe-snowy-rho.vercel.app).
+[Wardrobe](https://wardrobe-snowy-rho.vercel.app) uses Vercel Authentication for access, Neon for records and job state, and a **private** Vercel Blob store for images. This personal-use setup can run on Vercel Hobby; check current service allowances before assuming it will remain free. OpenAI usage is billed separately.
 
 ## Set up the project
 
-1. Create a Vercel project from this repository, using your personal Hobby account. Keep project access limited to yourself. The checked-in configuration uses Node 22, `npm run build:vercel`, and `.vercel/output`. Select **Other** if Vercel asks for a framework; a plain Vite deployment would omit the API and durable jobs.
-2. Under **Settings → Deployment Protection**, enable **Vercel Authentication → All Deployments**. This protects production domains, generated deployment URLs, and previews. Standard Protection leaves production domains accessible. All Deployments is available on all plans. Keep shareable bypass links and protection exceptions disabled. [Vercel's protection documentation](https://vercel.com/docs/deployment-protection#all-deployments)
-3. Connect a Neon database through the Vercel Marketplace and create a Vercel Blob store with **Private** access. Connect both to **Production only**. The server needs `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN`; check the environment scopes when integrations populate them.
-4. Add `OPENAI_API_KEY` to **Production only**. Preserve any model overrides you use locally. Leave `WARDROBE_HOSTED_ENABLED` unset until storage has been imported and deployment protection has been checked.
+1. Create a Vercel project from this repository in your personal account and limit access to yourself. The checked-in configuration uses Node 22.x, `npm run build:vercel`, and `.vercel/output`. Select **Other** if asked for a framework; a plain Vite deployment omits the API and durable jobs.
+2. Under **Settings → Deployment Protection**, select **Vercel Authentication → All Deployments**. This protects production domains, generated deployment URLs, and previews; Standard Protection leaves production domains public. All Deployments is available on all plans. Keep shareable bypass links and protection exceptions disabled. [Protection documentation](https://vercel.com/docs/deployment-protection#all-deployments)
+3. Connect Neon through the Vercel Marketplace and create a Blob store with **Private** access. Connect both to **Production only** and verify that `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` have that scope.
+4. Add `OPENAI_API_KEY` and any model overrides to **Production only**. Leave `WARDROBE_HOSTED_ENABLED` unset until the data import and access checks below are complete.
 
-The application deliberately disables its hosted API outside the production environment. Authentication is enforced by Vercel before requests reach the app; there is no separate in-app login. Protect the Vercel account with a passkey or two-factor authentication.
+The hosted API requires both `WARDROBE_HOSTED_ENABLED=1` and `VERCEL_ENV=production`. Vercel supplies `VERCEL_ENV`; do not set it yourself. Vercel enforces authentication before requests reach the app; there is no in-app login. Protect the Vercel account with a passkey or two-factor authentication.
 
 ## Copy the existing wardrobe
 
-Stop the local Wardrobe server and finish or cancel active generation. Back up the whole local data directory and any separately configured reference photos before migrating.
+Stop the local server, finish or cancel generation, and back up the entire local data directory plus any separately configured reference photos. See [local storage and recovery](LOCAL_STORAGE.md).
 
-Put the production database connection and Blob read-write token into an ignored `.env.cloud` file in the repository root. The migration does not need the OpenAI key. Never commit this file. Both Git and source deployments exclude `.env*` secrets; only `.env.example` is tracked as a template.
+Put the production `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` in an ignored `.env.cloud` file in the repository root. The migration needs no OpenAI key. Git ignores `.env*` except the tracked `.env.example` template; Vercel source uploads exclude all `.env*` files. Never commit credentials.
 
-Run from the repository root with Node 22 or newer:
+Run from the repository root with Node 22.x and dependencies installed:
 
 ```sh
-# Inspect the local snapshot; this performs no cloud writes.
+# Inspect the local snapshot; no cloud writes.
 node --env-file=.env.cloud scripts/migrate-to-cloud.mjs data
 
 # Initialize cloud storage, copy files, and verify their bytes.
 node --env-file=.env.cloud scripts/migrate-to-cloud.mjs data --apply
 ```
 
-Replace `data` with your configured local data directory if needed. The copy includes the library, outfits, accessory cache, saved prompts, imported images, jobs, outfit images, and `model-reference*.png` files inside that directory. A reference configured outside it is not copied automatically; the hosted app expects its default reference at `model-reference.png` in the imported directory. Transient locks and other dotfiles are excluded.
+Replace `data` with your configured directory. The import includes:
 
-The script leaves local originals unchanged, skips cloud files with identical contents, and stops if an existing cloud file differs. It never overwrites a differing file. A stopped import may have copied earlier files; rerunning skips verified matches. Active generation, symbolic links, and a missing library are rejected. This is an initial copy, not an ongoing synchronization command.
+- `library.json`, `outfits.json`, `outfit-accessories.json`, and `outfit-prompts.json`;
+- `imported/`, `jobs/`, `outfit-images/`, and `outfit-jobs/`;
+- `model-reference.png` and `model-reference-N.png`, where `N` is a positive integer.
 
-After the import succeeds, set `WARDROBE_HOSTED_ENABLED=1` in **Production only** and create a new production source deployment. Vercel supplies `VERCEL_ENV`; do not set it yourself. Hosted data paths are configured by the server, so local `WARDROBE_DATA_DIR` and `WARDROBE_MODEL_REFERENCE` values do not need to be copied into Vercel.
+Dotfiles and transient locks are excluded. References outside the directory are not copied; place the intended hosted default at `model-reference.png` inside it. The hosted server configures its own paths, so do not copy local `WARDROBE_DATA_DIR` or `WARDROBE_MODEL_REFERENCE` overrides into Vercel.
 
-## Check access and use
+This is an initial copy, not synchronization. It leaves local originals unchanged, skips identical cloud files, and stops at a differing cloud file without overwriting it. Earlier files may already have copied; rerunning verifies and skips matches. It rejects active generation, symbolic links within the selected data, and a missing library.
 
-Open the production domain and its generated deployment URL in a signed-out/private browser. Both the page and a direct API URL such as `/api/import/jobs` must require Vercel sign-in. Then sign in with your own account and check the wardrobe, model references, and existing photographs before starting generation.
+After the import succeeds and deployment protection is verified, set `WARDROBE_HOSTED_ENABLED=1` in **Production only** and create a new production source deployment.
 
-The app permits one cloud writer at a time. A concurrent edit or generation can report that another operation is running; wait for it to finish before retrying. Reading existing wardrobe data remains available. Job state survives deployments, and polling the jobs list can recover work saved before dispatch.
+## Verify access and generation
 
-If generation was interrupted after a paid request started, the app marks it for review instead of automatically repeating the uncertain request. Check provider usage before choosing **Retry**: retrying creates a new paid request.
+In a signed-out/private browser, open both the production domain and its generated deployment URL. The page and a direct API URL such as `/api/import/jobs` must require Vercel sign-in. Then sign in with your account and inspect the wardrobe, references, and existing photos before generating anything.
 
-Hosted API requests have two independent allowances per UTC calendar day:
+Only one operation can hold the cloud writer lease. Concurrent edits or generation may report that another operation is running; wait and retry. Reads remain available. Job state survives deployments, and polling the jobs list can recover work saved before dispatch.
 
-- `WARDROBE_DAILY_IMAGE_API_LIMIT` defaults to **40** image generation requests.
-- `WARDROBE_DAILY_TEXT_API_LIMIT` defaults to **1,000** text/vision requests, including shopping checks, accessory suggestions, clothing analysis, outfit planning, and modeled-photo scene planning.
+An interrupted, uncertain paid request is marked for review rather than repeated automatically. Check provider usage before choosing **Retry**, which starts a new paid request.
 
-Set positive integers in Production to change these limits, then redeploy. The legacy `WARDROBE_DAILY_API_LIMIT` remains an image-only fallback when the new image setting is unset. Existing aggregate usage is conservatively retained against images until the next UTC day; text starts with its own allowance. Backups preserve both counters.
+### Daily API limits
 
-Each actual provider request reserves its own allowance immediately before dispatch, under the cloud writer lease. Cached suggestions and skipped tasks consume no allowance. Failed or uncertain requests still count. A modeled garment attempt uses one text request for scene planning and one image request; batches can use several calls. These limits control request count, **not currency spend**. Use provider-side controls alongside them.
+Hosted requests have separate allowances per UTC calendar day:
 
-## Updates and retained data
+| Production variable | Default | Requests counted |
+| --- | --- | --- |
+| `WARDROBE_DAILY_IMAGE_API_LIMIT` | 40 | Image generation |
+| `WARDROBE_DAILY_TEXT_API_LIMIT` | 1,000 | Text/vision, including shopping, accessories, clothing analysis, outfit planning, and modeled-photo scene planning |
 
-### Display images
+Set positive integers and redeploy to change them. `WARDROBE_DAILY_API_LIMIT` remains an image-only fallback when the image-specific setting is unset. Legacy aggregate usage counts against images until the next UTC day; text has its own allowance. Backups preserve both counters.
 
-The app retains original PNGs for generation, downloads, and precise colour sampling. Galleries, outfit photos, references, and import previews request responsive WebP copies at 320, 640, or 1280 pixels wide. Quality is set to 85 with lossless alpha, preserving transparent edges. Browser requests use private caching with ETag revalidation; replacing an original changes its cache identity.
+Each provider request reserves allowance immediately before dispatch under the writer lease. Cached suggestions and skipped work use none; failed or uncertain requests still count. A successful modeled-garment attempt uses one text request for scene planning followed by one image request; planning must succeed before image generation starts. Batches may make several calls. These are **request-count limits, not currency budgets**; use provider-side controls too.
 
-Copies are stored in the private Blob store, indexed by the separate `wardrobe_image_variants` table. New images create and retain the requested size on first display. They use the same authenticated API routes as originals. No paid image API is called for compression.
+## Release code and retain data
 
-Before upgrading an existing cloud installation, initialize the additive cache table and prepare existing images:
+Run `npm test` and `npm run build:vercel` before release. Push reviewed code to the connected production branch, or make a Vercel CLI source deployment from the project checkout. `build:vercel` builds the frontend, hosted API, and workflows together.
+
+Source deployments preserve Neon and Blob data when storage connections and production environment variables remain unchanged. A deployment rollback changes code, not data. Local `npm run dev` uses its own filesystem; hosted edits and new photos do not appear in local `data/` automatically.
+
+Project skills default to the live cloud wardrobe. Use [skill storage](SKILL_STORAGE.md) for private task snapshots and additive publication of reviewed imports/outfits; do not rerun the initial migration to publish new work. The same helpers support an explicitly selected local store.
+
+Retain the original local backup and set up [encrypted cloud backups](BACKUPS.md). Those commands verify recovery points, restore into a new local directory, and support a reviewed full cloud replacement. Install any daily backup schedule separately on the chosen always-on host.
+
+### Shared wardrobe edits
+
+Names, categories, colours, tags, hidden items, and deletion tombstones live in the shared library. The gallery refreshes on page load, on return to the tab, and every 30 seconds while visible. Stale saves are rejected; close and reopen an item to edit its latest values. Refreshes preserve unfinished text in an open editor. Hidden items are excluded from outfit and shopping inventories.
+
+Older browser-only edits and hidden items migrate on that browser's first opening of the upgraded app. Existing shared edits take precedence. The browser retains a copy under `open-wardrobe-legacy-backup-v1`; failed migrations keep the original keys and retry on refresh. Deletion tombstones prevent delayed imports or migrations from resurrecting items. Sync applies to devices using the same store; local development remains separate.
+
+### Modeled-photo prompts
+
+Modeled garment generation plans a fresh setting using the configured vision model, reviewed cutout, user direction, and known previous settings. There is no backdrop catalog. The app and import-clothes skill share planning and image prompts through `scripts/modeled-photo-prompts.mjs`; the prompt CLI renders them without API calls. Approved app and skill imports retain `modeledSetting` for later planning, while older photos without it remain usable. See [modeled photos](MODELED_PHOTOS.md) for the review and manual-upload workflow.
+
+## Display images and transfer usage
+
+Original PNGs are retained for generation, downloads, and precise colour sampling. Gallery images, outfit photos, references, and import previews use responsive WebP copies at widths of 320, 640, or 1280 pixels, without enlarging smaller originals. Encoding uses quality 85 and alpha quality 100. Originals are never recompressed or made public.
+
+Private Blob stores the copies; `wardrobe_image_variants` indexes them separately. A missing size is generated on first display through the same authenticated API route. Compression makes no paid model calls. To initialize this additive cache table and prepare existing images:
 
 ```sh
-# Read-only inventory; omit --apply to inspect first.
+# Read-only inventory.
 node --env-file=.env.cloud scripts/warm-display-images.mjs
+
+# Create the cache table and prepare all display sizes; resumable.
 node --env-file=.env.cloud scripts/warm-display-images.mjs --apply
 ```
 
-The command is resumable and leaves originals unchanged. Fresh cloud migrations create the table automatically. Unreferenced originals and display copies are collected by the daily storage cleanup described below.
+Fresh migrations create the table automatically. Warmup leaves originals unchanged; unused originals and derivatives are eligible for the cleanup below.
 
-### Keeping transfer usage low
+### Caching and read behavior
 
-Ordinary original-image reads use the private Blob CDN because uploads always receive new immutable URLs. The hosted request handler also retains at most 64 MiB / 256 image entries per warm instance (at most 8 MiB per entry), coalescing simultaneous reads of the same object. Every request still resolves the current database file reference and passes the existing access checks; replacement and deletion take effect immediately. A cold instance can still download a file again. Backup reads and restored-upload integrity checks explicitly bypass both byte caches.
+- **Private image responses:** originals and WebP use `private, no-cache` and an ETag derived from immutable object identity. A matching revalidation returns 304 without downloading image bytes. Routes still check current file references and any required manifest membership first. No private response enters the public CDN cache.
+- **Blob reads:** immutable upload URLs permit private Blob CDN caching. Each warm storage client also retains at most 64 MiB / 256 image entries, with an 8 MiB maximum per entry, and coalesces concurrent reads of the same object. Database path lookups remain fresh, so replacement/deletion takes effect immediately. Backup downloads and restored-upload integrity checks bypass both caches.
+- **Workers:** a warm worker reuses its bounded storage client, but each step acquires a fresh fenced lease and reads current task/file metadata. Separate instances and explicitly supplied stores do not share caches. Allow for repeated downloads on cold starts; there is no durable worker cache.
+- **Metadata reads:** outfit/Shopping settings check file existence instead of downloading originals for dimensions. Cloud garment paths resolve in one fresh metadata query; local paths retain symlink checks. Accepted outfit reads omit generation history, and a single-job read loads only that job. Settings, history, and recovery still load state needed for reservations and pending work.
+- **Image processing:** modeled import generation reads the cutout and identity reference without the unused source upload. Shopping resolves the submitted inventory, validates the selected reference, and decodes each usable cutout once per contact-sheet tile. Published display variants serve the just-encoded bytes; if another request won publication, its stored copy is used. These optimizations preserve originals, contact-sheet recipes, and provider inputs.
+- **Outfit generation:** planning validates originals while preparing contact sheets, then rechecks selected garments and current combination reservations before committing. Rendering, retries, and approval validate only selected images. Hosted approval publishes a validated candidate with a fenced, exclusive metadata link, retaining its immutable original and existing WebP copies. Removing a candidate reference cannot delete a Blob still referenced by an accepted outfit. Local approval publishes independent image bytes.
+- **Browser reads:** the Outfits view treats successful collection, settings, and history results as fresh for 30 seconds during in-app navigation; each loads independently. Returning to the tab/window refreshes them, and edits/generation invalidate affected resources. Hidden views cancel reads and pause polling. Import polling requests only jobs that can advance on the server, without overlapping polls. Small outfit thumbnails use smaller derivatives than detail views. This is browser-view state, not a shared server cache.
 
-Task workers reuse the same bounded storage client across steps when the platform keeps their process warm. Each step still acquires a fresh fenced lease and reads current task/file metadata. Separate instances and explicitly supplied stores do not share this cache; capacity estimates must allow for cold workers. There is no durable worker cache or change to direct backup verification.
+### Accessory-suggestion cache upgrade
 
-Original-image responses, like WebP responses, use `private, no-cache` with an ETag derived from the immutable object identity. An unchanged browser revalidation returns 304 without downloading either the PNG or WebP. No private response is put into the public CDN cache and no original is made public or recompressed.
+New entries retain both an opaque immutable image identity and a portable content hash. Hosted hits verify identity plus styling/model/recipe context without reading the photo. Legacy entries and restored images with new Blob identities fall back to content hashing. Empty caches never download the photo, and read-only checks never rewrite metadata.
 
-Reading outfit and Shopping settings checks wardrobe metadata and file existence rather than downloading originals to inspect their dimensions. Actual generation and Shopping analysis still validate their inputs. Modeled import generation reads the cutout and identity reference without downloading the unused source upload. Small outfit thumbnails request an appropriate display size; detail views retain their larger derivatives. Import polling fetches only jobs that can advance on the server, with no overlapping polls.
-
-Cloud settings resolve garment paths in one fresh metadata query, retaining local symlink checks when running on disk. Accepted outfit reads do not load generation history, and individual job reads load only their requested job. Settings, history and recovery still load the job state they need for reservations and pending work. Conditional image responses continue checking current manifest membership and file existence before returning 304.
-
-Shopping resolves the submitted inventory first, validates only the selected reference, and decodes each usable cutout into its contact-sheet tile once. The original images, contact-sheet recipe and provider inputs are unchanged. Newly encoded display variants serve their existing bytes after publication instead of downloading them again; if another request wins publication, the stored winner is used.
-
-The Outfits view retains successful data for 30 seconds while navigating within the app. Collection, settings and history load independently. Returning to the browser tab or window refreshes current data; edits and generation actions invalidate affected resources. Hidden views cancel reads and pause polling. This is a per-browser-view optimization, not a shared server cache or a change to private access.
-
-Outfit planning validates originals while preparing the same contact sheets, then rechecks selected garments and current combination reservations before committing the plan. Rendering, retries and approval validate only selected garment images. Hosted approval publishes the validated candidate through a fenced, exclusive metadata link, retaining its immutable original and any existing WebP variants. Removing a candidate reference cannot remove an accepted image that still refers to that Blob. Local approval continues to publish independent image bytes.
-
-New accessory-suggestion cache entries include an opaque immutable image identity plus the portable content hash. Hosted cache hits verify the current identity and styling/model/recipe context without reading the photo. Legacy entries or entries restored under a different Blob identity retain the content-hash fallback. Empty-cache checks never download the photo. Read-only checks do not silently rewrite saved metadata.
-
-To give existing suggestions the same fast path, use the optional one-time upgrade below. The default dry run reports candidate counts and estimated original bytes without downloading images or writing data. Review that estimate against the remaining transfer allowance before applying. `--apply` takes the normal writer lease, verifies original hashes, and adds identity metadata only to matching entries. It preserves suggestions and other fields, makes no model calls, and is idempotent. A restored store may need it again because restored images receive new Blob identities.
+To add identity metadata to existing suggestions:
 
 ```sh
+# Report candidates and estimatedOriginalBytes without image downloads or writes.
 node --env-file=.env.cloud scripts/upgrade-accessory-cache.mjs --target cloud
+
+# Apply only after reviewing the estimated transfer against the available budget.
 node --env-file=.env.cloud scripts/upgrade-accessory-cache.mjs --target cloud --apply
 ```
 
-Blob cache misses consume simple operations and Fast Origin Transfer. Blob downloads still consume Blob Data Transfer even on CDN hits, so avoiding downloads is more effective than CDN caching alone. See [Vercel Blob usage](https://vercel.com/docs/vercel-blob/usage-and-pricing) and [private Blob caching](https://vercel.com/docs/vercel-blob/private-storage). Usage already recorded does not decrease after a release. Initial migration, derivative preparation, originals needed for paid generation, skill snapshots, and first full backups also contribute to usage; later encrypted backups reuse unchanged images locally.
+Apply takes the writer lease, verifies original hashes, and updates only matching entries. It preserves suggestions and other fields, makes no model calls, and is idempotent. A restored store may need another upgrade because uploads receive new identities.
 
-### Releasing code
-
-Modeled garment generation plans a fresh setting with the configured vision model before making the image request. Each attempt therefore includes one scene-planning request and one image request. It uses the reviewed cutout, user direction and known previous settings; it has no backdrop catalog. Planning and image prompts share `scripts/modeled-photo-prompts.mjs` with the import-clothes skill, whose prompt CLI renders the same text without API calls. Approved app and skill imports retain `modeledSetting` for future planning; existing photographs without it remain usable.
-
-For a connected repository, push reviewed code to the configured production branch. Alternatively, use a Vercel CLI source deployment from the project checkout. Vercel runs `npm run build:vercel`, which builds the frontend and hosted API/workflows together. Run `npm test` and `npm run build:vercel` before releasing changes.
-
-Deploying new source preserves the existing Neon and Blob data. Keep the same storage connections and production environment variables. Local `npm run dev` continues to use the local filesystem independently; hosted edits and newly generated photos do not appear in local `data/` automatically.
-
-Project skills use the live cloud wardrobe by default. See [the skill storage workflow](SKILL_STORAGE.md) for private task snapshots and publishing reviewed imports/outfits without rerunning the initial migration. These helpers also support an explicitly selected local store.
-
-Gallery edits to names, categories, colours and tags, plus hidden/deleted items, are stored in the shared wardrobe library. They sync on page load, when returning to the tab, and every 30 seconds while the tab is visible. A stale save is rejected rather than overwriting a change from another device; close and reopen the item to use its latest values. Refreshing the gallery preserves unfinished text in an open editor.
-
-On first opening the upgraded app in each browser, older browser-only edits and hidden items migrate automatically. Existing shared edits take precedence over an older browser's copy. A local backup remains under `open-wardrobe-legacy-backup-v1`; failed migrations retain the original browser keys and retry on the next refresh. Deleted items retain a small metadata tombstone so a delayed import or migration cannot resurrect them. Hidden items are excluded from outfit and shopping inventories. Local development still uses its own data directory; this sync is between devices accessing the same hosted app.
-
-Retain the original local backup. The [encrypted backup and recovery commands](BACKUPS.md) export complete cloud recovery points, verify image bytes, restore into a new local directory, and support an explicitly reviewed cloud replacement. A portable daily-backup entry point and macOS schedule helper support an always-on backup host; a schedule must be installed on that host separately. Rolling back a deployment rolls back code, not wardrobe data.
+Blob cache misses consume Simple Operations and Fast Origin Transfer; downloads consume Blob Data Transfer even on cache hits. Avoiding downloads therefore saves more than CDN caching alone. See [Blob usage](https://vercel.com/docs/vercel-blob/usage-and-pricing) and [private Blob caching](https://vercel.com/docs/vercel-blob/using-blob-sdk#get). Recorded usage does not decrease after a release. Migration, display warmup, generation inputs, skill snapshots, and first full backups all contribute; later backups reuse unchanged encrypted image objects locally.
 
 ## Automatic storage cleanup
 
-A daily Vercel Cron Job calls `/api/maintenance/storage` at `0 20 * * *` (20:00 UTC; 03:00 Bangkok). Hobby schedules run within that hour. The endpoint requires a separate, random **production-only** `CRON_SECRET` in its Authorization header; Vercel supplies that header for scheduled invocations. The app's deployment protection remains enabled. [Vercel cron documentation](https://vercel.com/docs/cron-jobs/manage-cron-jobs)
+The cron in `vercel.json` calls `/api/maintenance/storage` daily at `0 20 * * *` (20:00 UTC; 03:00 Bangkok the following day). Hobby invokes it within that hour. Configure a separate random **Production-only** `CRON_SECRET`; Vercel sends it as `Authorization: Bearer …`. Keep deployment protection enabled. See [cron authentication](https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs) and [Hobby schedule precision](https://vercel.com/docs/cron-jobs/usage-and-pricing).
 
-Before deploying this feature to an existing store, configure `CRON_SECRET` and apply the additive database schema:
+For an existing store, initialize the display cache table above if needed, then apply the additive cleanup schema before deploying this feature:
 
 ```sh
-# Initialize collection tables and publication guards, then inspect without deleting.
+# Initialize collection tables/publication guards, then inspect; no deletions.
 node --env-file=.env.cloud scripts/collect-cloud-garbage.mjs --initialize
 
-# Read-only inventory (apart from acquiring/releasing the normal writer lease).
+# Inspect only, apart from acquiring/releasing the normal writer lease.
 node --env-file=.env.cloud scripts/collect-cloud-garbage.mjs
 
 # Run the same bounded collection as the scheduled job.
 node --env-file=.env.cloud scripts/collect-cloud-garbage.mjs --apply
 ```
 
-The collector only considers immutable uploads in the application's `wardrobe/` namespace. Every file reference in the database, including saved items, model references, jobs, and copied/linked images, protects its Blob. Display copies remain protected while their source has any file reference. Objects must remain unreferenced for **seven days after first observation** before deletion; upload age alone never qualifies an object. Restoring a reference resets that grace period.
+Only the application's immutable uploads in `wardrobe/` are eligible. Every database file reference protects its Blob, including saved items, references, jobs, and copied/linked images. Display copies remain protected while their source has any file reference.
 
-Immediately before deletion, the collector checks references again under the global writer lease and records a durable deletion marker. Database publication guards prevent delayed writers from reintroducing a retired URL, including after lease loss. Failed deletions retry on a later run. Concurrent generation causes cleanup to skip that run. Listings are paginated with a saved cursor, and each run deletes at most 100 objects within a bounded time budget. Status counts are logged and saved in `.blob-gc-state.json` in the cloud store.
+An object must stay unreferenced for **seven days after first observation**, not merely seven days after upload. Restoring a reference resets the grace period. Before deletion, the collector rechecks references under the global writer lease and records a durable deletion marker. Publication guards prevent delayed writers from restoring a retired URL, even after lease loss.
 
-Cleanup permanently deletes eligible Blob objects; it is not a backup or a restore feature. It does not remove saved wardrobe originals, active or historical job files still referenced by the database, or files hidden from the gallery but still retained in storage. Historical job retention and removal of the small deletion records are separate from Blob cleanup. Do not manually delete objects still referenced by the database.
+The collector saves its listing cursor, deletes at most 100 objects per run, and observes a bounded time budget. Failed deletions retry later; a busy writer causes the scheduled run to skip. Counts are logged and saved in `.blob-gc-state.json` in the cloud store.
+
+Cleanup permanently deletes eligible Blobs. It neither backs up data nor removes referenced originals, retained historical-job files, or hidden items still in storage. Historical-job retention and removal of deletion records are separate concerns. Never manually delete an object still referenced by the database.

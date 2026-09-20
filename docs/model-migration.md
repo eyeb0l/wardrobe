@@ -1,33 +1,47 @@
 # Image and vision model migration
 
-The importer defaults to `gpt-image-2.5-sunburst` for both image stages and `gpt-5.6-luna` for garment detection. Model overrides remain available in `.env`; restart Vite after changing them. Existing library images are not regenerated automatically.
+The importer defaults to `gpt-image-2.5-sunburst` for cutouts and modeled photos, and `gpt-5.6-luna` for garment detection and modeled-scene planning. Existing library images are never regenerated automatically.
+
+## Configuration
+
+Set overrides in local `.env` and restart Vite. Hosted configuration uses production environment variables; follow [HOSTING.md](HOSTING.md) when changing a deployment.
+
+| Variable | Default / precedence |
+| --- | --- |
+| `OPENAI_VISION_MODEL` | `gpt-5.6-luna`; detection and scene planning |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst`; fallback for both image stages |
+| `OPENAI_GARMENT_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for cutouts |
+| `OPENAI_MODELED_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for modeled photos |
+| `OPENAI_IMAGE_QUALITY` | `high` for both image stages |
 
 ## API compatibility
 
-The existing multipart `/images/edits` requests, PNG output, `high` quality, and 1024×1024 cutout / 1536×1024 modeled dimensions are supported by Sunburst. The app continues generating a solid chroma background and removing it locally. Changing to native transparent generation would also require changing the cleanup stage; it is a separate change. No `input_fidelity` or SDK change is needed for the current request shape.
+The [importer](../scripts/import-job-api.mjs) sends multipart `/images/edits` requests with PNG references and output, 1024×1024 cutouts, and 1536×1024 modeled photos. It uses direct `fetch`, with no SDK or `input_fidelity` parameter. Cutouts are generated against a solid chroma background, then made transparent by the app's cleanup stage. Native transparent generation would require changing that stage as well.
 
-Luna supports image input and structured output through `/responses`. The importer uses a strict clothing JSON schema, including the Dresses category and a clean-product-photo classification used to offer original-image import. OpenAI describes Luna as roughly the earlier nano tier, so a newer name alone does not establish better recognition than 5.4 mini. Image quality remains `high`; higher settings are not automatically enabled.
+Detection sends image input to `/responses` with a strict clothing JSON schema, including Dresses and `isCleanProductShot`. Original-image import requires one detected item, this classification and the app's background checks to pass.
 
-Sources checked September 13, 2026: [Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst), [Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna), [image generation](https://developers.openai.com/api/docs/guides/image-generation), [image prompting](https://developers.openai.com/api/docs/guides/image-prompting).
+Each modeled attempt first makes a separate `/responses` scene-planning request using the approved cutout, garment metadata, recent settings and user direction. Planning must return a nonempty `setting` of at most 600 characters; invalid planning stops before the image request. The planned setting and exact image prompt are saved with the job, and the accepted setting is saved with the garment. Account for this text request when measuring latency and cost.
 
-## Prompt changes
+## Prompt behavior
 
-- Detection defines the existing categories, paired items, visible-only evidence, record ordering, the eight-item limit, and bounding-box extents. Estimated colors and uncertain fabric, brand, or closure details must not become invented facts.
-- Extraction treats the source image as authoritative over metadata. It preserves asymmetry and the visible side, allows matching pairs, and avoids inventing an unseen front. It no longer asks the model to recolor a garment to avoid the chroma key. Key selection now considers both recorded colors; this cannot guarantee a safe key for every multicolored item.
-- Modeled images explicitly assign identity to Image 1 and garment appearance to Image 2. Identity-reference clothing must not leak into the result. Identity, garment design, and visibility take priority over scenery. Existing printed text is preserved while added captions are excluded.
+- Detection defines categories, paired items, visible-only evidence, record ordering, the eight-item limit and bounding-box extents. Estimated colors and uncertain fabric, brand or closure details must not become invented facts.
+- Extraction prioritizes the source image over metadata, preserving asymmetry, the visible side and matching pairs without inventing an unseen front. The garment must not be recolored to avoid the chroma key. Key selection considers both recorded colors but cannot guarantee safety for every multicolored item.
+- Modeled images use Image 1 for identity and Image 2 for the garment; reference clothing must not leak through. Identity, garment fidelity and visibility outrank scenery. Preserve garment lettering without added captions. Supporting clothes are limited to necessary plain neutral pieces and permitted basics, including unpatterned black/brown tights.
 
-The bundled Codex import and outfit skills run through the Imagegen tool rather than the web API. Their reference-fidelity and visual-review requirements still apply. When filling the outfit template, renumber optional references to match the actual attachment order.
+Scene and image prompts share [modeled-photo-prompts.mjs](../scripts/modeled-photo-prompts.mjs). Settings follow the garment and recent scenes, with no fixed backdrop list. The import skill renders these prompts through [modeled-photo-prompt.mjs](../scripts/modeled-photo-prompt.mjs); keep creative direction in the shared module.
+
+The bundled import and outfit skills generate through Imagegen, independently of the app's API model configuration. Their reference-fidelity and visual-review requirements still apply. In the outfit template, renumber optional references to match the actual attachment order. See [SKILL_STORAGE.md](SKILL_STORAGE.md) for storage and publication rules.
 
 ## Compare real results
 
-The automated tests mock OpenAI: they verify request formats, model defaults/overrides, image-reference order, the review flow, and local output processing. They do not measure model access, latency, cost, recognition accuracy, or visual consistency.
+The automated tests mock OpenAI: they verify request formats, model defaults/overrides, reference order, shared prompts, scene-planning failures, review flow and output processing. They do not establish provider access, comparative model quality, latency, cost, recognition accuracy or visual consistency.
 
-For a visual evaluation, use a separate `WARDROBE_DATA_DIR` and the same source photos and identity reference across runs. Keep photos and results out of Git.
+For an authorized visual evaluation, use a separate `WARDROBE_DATA_DIR` and explicitly set `WARDROBE_MODEL_REFERENCE` to the intended reference; changing the data directory does not move that default. Keep sources, references and results out of Git, and use the same inputs across runs.
 
 1. Include a simple top, asymmetric garment, printed text/logo, layered outfit, shoes, and a multicolored garment. Repeat each case at least three times.
 2. Compare 5.4 mini and Luna detection on the same sources: correct item count, categories, useful crops, paired footwear, and no fabricated details. An invalid or tight crop can harm extraction regardless of the image model.
-3. For image comparisons, reuse identical approved crops and cutouts so vision differences do not confound the result. Start with identical prompts, `high` quality, dimensions, and reference order on GPT Image 2 and Sunburst. Preserve a copy of the pre-migration prompts from Git for the baseline, then compare the revised prompts separately.
+3. For image comparisons, reuse identical approved crops and cutouts so vision differences do not confound the result. Start with identical prompts, planned settings, `high` quality, dimensions and reference order on GPT Image 2 and Sunburst. Preserve pre-migration prompts from Git for the baseline, then compare prompt changes and scene variety separately.
 4. Inspect cutout silhouette, original colors, asymmetry, markings, transparent edges, and missing pieces. Compare modeled identity, exact garment construction, unobstructed details, anatomy, and framing against both references.
 5. Record accepted/rejected results, reasons, latency, retries, and API usage. Compare cost per accepted image rather than assuming identical quality labels imply identical cost or consistency.
 
-The web UI's regenerate action starts again from the source references plus the correction text; it does not attach the previous output. Describe the desired result explicitly rather than referring to an unseen previous image.
+Regenerate starts from the source references and correction text, without attaching the previous output. Modeled regeneration also replans the scene. Describe the desired result explicitly and request the previous setting if it should be retained. Saved modeled photos remain unchanged until the replacement is approved; manually uploaded replacements also require approval.

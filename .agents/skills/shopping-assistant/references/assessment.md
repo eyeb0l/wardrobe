@@ -18,7 +18,7 @@ Use original cutouts and identity images for close inspection. Responsive WebP c
 
 Honor a reference selected by the user or already chosen in the active Shopping draft. Otherwise use the configured default and identify that choice briefly. If it is missing, use another reference only when the user has selected it or confirms the choice. Continue wardrobe-only analysis while requesting a needed reference; do not invent personal suitability. With no usable wardrobe, give only the supported visual assessment and explain that ownership, duplication and combinations remain unverified.
 
-The app overlays browser-only edits and deletions on the library. When available through the browser tool's permitted APIs or a user-supplied export, use the current visible wardrobe snapshot. The corresponding keys in `src/App.jsx` are `open-wardrobe-edits-v1` and `open-wardrobe-deleted-v1`. Resolve images against server-owned library records, not arbitrary paths from a browser snapshot. If those edits cannot be retrieved, say the comparison uses the saved library and flag a known discrepancy rather than silently treating both sources as identical.
+Edits and deletions are saved in the shared library; fresh snapshots include current metadata and exclude hidden items. The app migrates legacy browser edits before loading that library. If migration fails or the visible app differs from the snapshot, report the discrepancy and refresh after it is resolved. Resolve images only through server-owned library records.
 
 Resolve downloaded originals within the snapshot directory, report unreadable items, and inspect all usable categories: `upperbody`, `dresses`, `wholebody_up`, `lowerbody`, `accessories_up`, `shoes`. Dresses are complete garments. An unavailable file is not evidence that the user owns no similar piece.
 
@@ -39,7 +39,7 @@ The app already provides browser-side preparation in `src/image-upload.mjs`; thi
 Current app limits and behavior:
 
 - Inputs: at most 50 MB and 64 megapixels.
-- Wardrobe preparation: JPEG/PNG/WebP at most 2 MB remain byte-for-byte unchanged. Larger files reduce to at most 2 MB and a 2,400-pixel maximum edge; transparent cutouts retain alpha. HEIC needs conversion, retaining resolution when the converted image fits.
+- Wardrobe preparation: JPEG/PNG/WebP at most 2 MB remain byte-for-byte unchanged. Larger files reduce to at most 2 MB and a 2,400-pixel maximum edge; transparent cutouts retain alpha. HEIC needs conversion; sources of at most 2 MB retain resolution when the converted image also fits.
 - Shopping preparation: `prepareShoppingImage` in `src/shopping-image.mjs` always normalizes to JPEG, at most 2 MB and a 1,600-pixel edge, removing embedded metadata. This is the analysis endpoint's required format.
 
 When conversion is unavailable, explain which image could not be inspected and request a compatible export; continue with other readable evidence. Never present filenames or a failed preview as a visual assessment.

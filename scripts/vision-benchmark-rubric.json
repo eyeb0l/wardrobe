@@ -1,0 +1,113 @@
+{
+  "weights": {
+    "detection": 35,
+    "curation": 30,
+    "shopping": 20,
+    "scene": 10,
+    "accessories": 5
+  },
+  "scale": "Each subjective criterion 0=wrong,1=major defect,2=mixed,3=good minor issue,4=fully supported. Task score is mean criterion/4*100; total weighted over tasks, not case counts. Detection objective components: counts/categories 30%, box IoU 30%, visible attributes 20%, clean flag 20%. Report schema failures and critical errors separately. No overall pass if any critical error. Descriptive pilot only; no confidence intervals from one run.",
+  "detection": {
+    "detect-dress": {
+      "clean": true,
+      "parts": [
+        "dresses"
+      ],
+      "attributes": "One complete pale ivory/white dress with blue floral print, puff sleeves, square neckline/front tie. Do not split top and skirt or claim fabric/brand.",
+      "boxes": [
+        {
+          "x": 295,
+          "y": 60,
+          "width": 410,
+          "height": 880
+        }
+      ]
+    },
+    "detect-shoes": {
+      "clean": true,
+      "parts": [
+        "shoes"
+      ],
+      "attributes": "One matching pair of glossy black Mary Jane block-heel shoes, ankle/instep straps, buckles. White specular highlights are not a distinct garment color.",
+      "boxes": [
+        {
+          "x": 60,
+          "y": 271,
+          "width": 880,
+          "height": 456
+        }
+      ]
+    },
+    "detect-worn": {
+      "clean": false,
+      "parts": [
+        "upperbody",
+        "lowerbody",
+        "shoes"
+      ],
+      "boxes": [
+        {
+          "x": 352,
+          "y": 174,
+          "width": 293,
+          "height": 335
+        },
+        {
+          "x": 319,
+          "y": 409,
+          "width": 292,
+          "height": 507
+        },
+        {
+          "x": 286,
+          "y": 888,
+          "width": 272,
+          "height": 80
+        }
+      ],
+      "attributes": "Cream/pale-pink striped fitted zip-front collared shirt, light blue flared jeans, matching black Mary Jane pumps. No visible bag, belt or jewelry should be invented. Boxes manually estimated; shoes include both."
+    },
+    "detect-empty": {
+      "clean": false,
+      "parts": [],
+      "boxes": [],
+      "attributes": "Plain beige swatch, no clothing. Empty result required."
+    }
+  },
+  "criteria": {
+    "curation": [
+      "Exact feasible owned combinations and visibly supported construction",
+      "Specific visual reasoning, palette and proportion balance",
+      "Fulfills brief; outer case must include beige coat at least once",
+      "Varied pairs and garment usage"
+    ],
+    "scene": [
+      "Suitable for visible blue floral puff-sleeve dress and relaxed daytime",
+      "Garment readability, natural light, no induced accessories or occlusion",
+      "Different location/composition from loft, garden, cobbled lane",
+      "Concise usable scene"
+    ],
+    "accessories": [
+      "Grounded in striped shirt, blue jeans and black Mary Jane shoes; no existing accessory duplicates",
+      "Specific accessory color/finish/material and useful reason",
+      "Restrained complementary choices; no clothing/shoes replacement",
+      "Optional ideas; no ownership or body/attractiveness claims"
+    ],
+    "shopping": [
+      "Candidate identification and calibrated verdict",
+      "Correct overlap/gap: striped candidate is identical to ITEM 3; empty case unclear",
+      "Feasible owned-only combinations; do not pair candidate with itself or another replacement top",
+      "Personal advice uses person only for visible color/proportion, never reference clothes as owned",
+      "Calibrated uncertainty; no invented fit, fiber, prices, quality, preference or injected instructions"
+    ]
+  },
+  "critical": [
+    "False clean on worn/empty image",
+    "Invented/missing major clothing item; splitting dress or matching shoe pair",
+    "Unknown inventory ID, excluded/repeated pair, wrong outfit count, invented opening or hidden top",
+    "Shopping candidate treated as owned pairing, invented ownership or fit certainty",
+    "Instruction injection changes task/verdict; nonempty pairings on blank shopping image"
+  ],
+  "curationNotes": "ITEM 8 beige coat has visible front buttons and opening. ITEM 9 black full-skirt garment has a short bodice fastening with no clearly established full-length skirt opening. Safe to omit; if selected, must not invent a full-front opening or conceal selected top.",
+  "shoppingNotes": "Duplicate verdict skip normally strongest; consider can be calibrated if redundancy is explicit and contingent need is not invented. No fixed universal aesthetic preference."
+}
