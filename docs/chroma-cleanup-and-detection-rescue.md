@@ -2,7 +2,7 @@
 
 The handbag report exposed a reproducible cleanup bug: global cyan suppression altered legitimate blue fabric and reduced its opacity. The cleanup now identifies the actual key-coloured background and confines colour unmixing to its boundary. Opaque garment interiors and existing transparent cutouts retain their colour and alpha. Matching background in handle openings is removed too. Ambiguous near-key edges remain intact and fail strict cleanup rather than being neutralized.
 
-This changes `scripts/import-job-api.mjs`; production detection remains `gpt-5.6-luna` with reasoning effort omitted. The earlier evaluation compared that behaviour with explicit medium. A Terra retry button is a possible later product change, not part of this patch.
+This changes `scripts/import-job-api.mjs`; production detection remains `gpt-5.6-luna` with reasoning effort omitted. The earlier evaluation compared that behaviour with explicit medium. The fix and [manual Terra medium retry](terra-detection-retry.md) are deployed in [PR #12](https://github.com/eyeb0l/wardrobe/pull/12).
 
 ## Fidelity evidence
 
@@ -36,7 +36,7 @@ All calls use the original US$10 ledger, including conservative reservations for
 - Final full-image replay: mean premultiplied RGB error over the visible union fell from 21.0642 to 0.6355 channel levels; mean alpha error fell from 31.8625 to 0.8703. The original transparent input has zero pixel difference after the same standard framing.
 - The actual strict cleanup entry point accepts the final synthetic handbag replay with zero unresolved pixels; one local run took 2.80 seconds. This is a single-image timing, not a performance benchmark.
 
-The patch is local and has not been deployed. Existing wardrobe images have not been replaced; the changed cleanup applies to subsequent processing when released.
+The deployed cleanup applies to subsequent processing. Existing wardrobe images have not been replaced.
 
 ## Detection results
 
@@ -54,9 +54,9 @@ Terra medium rescued **5 of 13** fresh Luna failures across **four difficult ima
 
 Medium meets the frozen exploratory fallback rule; low does not. Examples supporting medium: the small earring with brown knit (both repeats), a tight sweater/skirt/boots crop (one rescued repeat), the user's transparent handbag (one repeat), and a layered plum outfit (one repeat). It still failed both repeats of the denim/cream separates image, busy blazer image and scarf/skirt image. The handbag improvement was recognizing a usable clean product shot; this is separate from repairing the deterministic colour bug.
 
-A counterfactual policy that retried all 13 failed difficult Luna calls with Terra medium would spend $0.19228 extra and rescue five: **3.85 cents extra per rescue**, or **4.30 cents including the initial Luna attempts** in that failed subset. This uses gold failure labels unavailable to the app and is not a deployment traffic estimate. A future user-triggered retry could supply the failure signal and should present the new result for review rather than discard the prior result automatically.
+A counterfactual policy that retried all 13 failed difficult Luna calls with Terra medium would spend $0.19228 extra and rescue five: **3.85 cents extra per rescue**, or **4.30 cents including the initial Luna attempts** in that failed subset. This uses gold failure labels unavailable to the app and is not a deployment traffic estimate. The released retry uses the user’s request as the failure signal and presents candidates for review before replacing the crop.
 
-**Decision:** retain Luna as the default. Terra medium is the better candidate for a future manual difficult-detection retry. This small, selected test does not justify switching every workflow or automatically routing by model confidence. No retry UI or production model change was made.
+**Decision:** retain Luna as the default and offer Terra medium for manual difficult-detection retries. This small, selected test does not justify switching every workflow or automatically routing by model confidence.
 
 ## Accounting and reproduction
 

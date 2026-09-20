@@ -47,6 +47,10 @@ Use the [backup guide](docs/BACKUPS.md) for cloud backups and recovery, and the 
 
 The importer detects up to eight visible clothing items per photo with the Responses API, then creates product cutouts and modeled previews with the Images API. Review each stage before approval. It supports drag-and-drop, paste, metadata editing, regeneration and manual modeled-photo uploads.
 
+For difficult detections, choose **Retry with Terra** in crop review or after a no-clothing result. This paid retry uses Terra at medium effort; review its candidates before replacing the crop. Luna remains the default. See [retry behaviour and limits](docs/terra-detection-retry.md).
+
+Cutout cleanup preserves garment colours by limiting background-colour removal to detected background boundaries. The fix applies to subsequent processing; it does not replace saved images.
+
 For a likely single-item product shot on white or transparent background, **Use original image** skips generative extraction and retains that background for review. **Extract garment** remains available and is the default for ordinary photos.
 
 The gallery filters Tops, Dresses, Jackets, Bottoms, Accessories and Shoes. Reclassify existing dresses in the item editor. Open a saved item and choose **Update modelled shot** or **Create modelled shot** to select a reference and optional direction. A replacement remains a review candidate until **Approve**; **Reject** keeps the existing photo.

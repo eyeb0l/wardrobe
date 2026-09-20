@@ -1,6 +1,6 @@
 # Handbag fidelity diagnostic — 2026-09-20
 
-**Keep Luna medium for now. Fix the chroma cleanup defect before relying on a larger-model retry to solve color fidelity.** Terra low had better raw handle localization in this example, but was less consistent at rejecting its incorrect color.
+**Historical diagnostic.** The [colour fix and Terra medium retry](chroma-cleanup-and-detection-rescue.md) are now deployed. The findings below describe the earlier Luna medium/Terra low comparison. Terra low had better raw handle localization in this example, but was less consistent at rejecting its incorrect color.
 
 The user supplied an original navy/slate-blue tote with brown trim and an imported version whose fabric looks dark purple. This is a focused diagnostic of one known failure, not a representative benchmark. Nothing was regenerated, replaced in the wardrobe or deployed.
 
@@ -52,7 +52,7 @@ Relevant code:
 3. Trial source-versus-result fidelity review with Luna medium on a broader set of real accepted/rejected imports. This small test supports that workflow, but is not enough to ship an automatic acceptance gate.
 4. Evaluate a Terra retry for difficult detection/localization separately. Switching the vision model does not repair downstream channel suppression.
 
-The retry UI, cleanup implementation and saved wardrobe image remain unchanged in this diagnostic.
+This diagnostic itself changed no code or saved images; implementation and release are covered in the linked follow-up.
 
 ## Cost and evidence
 
