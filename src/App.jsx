@@ -513,6 +513,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
 export function App() {
   const [route, setRoute] = useState(() => window.location.pathname.replace(/\/$/, "") || "/");
   const [shoppingOpened, setShoppingOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/shopping");
+  const [outfitsOpened, setOutfitsOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/outfits");
   const [items, setItems] = useState([]);
   const [regenerationRequest, setRegenerationRequest] = useState(null);
   const [activeType, setActiveType] = useState("all");
@@ -525,6 +526,7 @@ export function App() {
   const refreshing = useRef(false);
 
   useEffect(() => { if (route === "/shopping") setShoppingOpened(true); }, [route]);
+  useEffect(() => { if (route === "/outfits") setOutfitsOpened(true); }, [route]);
 
   useEffect(() => {
     const onPopState = () => { setRoute(window.location.pathname.replace(/\/$/, "") || "/"); setSelectedId(null); };
@@ -625,7 +627,8 @@ export function App() {
         <a href="/shopping" onClick={(event) => navigate(event, "/shopping")} aria-current={route === "/shopping" ? "page" : undefined}>Shopping</a>
       </nav>
       {(shoppingOpened || route === "/shopping") ? <div hidden={route !== "/shopping"}><ShoppingView items={items} loading={loading} wardrobeError={error} active={route === "/shopping"} /></div> : null}
-      {route === "/shopping" ? null : route === "/outfits" ? <OutfitView items={items} /> : <>
+      {(outfitsOpened || route === "/outfits") ? <div hidden={route !== "/outfits"}><OutfitView items={items} active={route === "/outfits"} /></div> : null}
+      {["/shopping", "/outfits"].includes(route) ? null : <>
       <main className="gallery-pane">
         <header className="gallery-header">
           <div className="gallery-meta-row">

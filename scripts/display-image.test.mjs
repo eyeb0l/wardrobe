@@ -66,6 +66,46 @@ test('stored derivatives survive fresh instances and original replacement invali
   await assert.rejects(h.store.displayImage(h.file,320,changed.etag),{code:'ENOENT'});
 });
 
+test('new derivatives are served from encoded bytes and concurrent requests share one publication', async t => {
+  const h = await fixture(t);
+  const results = await Promise.all(Array.from({ length: 4 }, () => h.store.displayImage(h.file, 320)));
+  assert.equal(h.puts.length, 2, 'one original and one derivative upload');
+  assert.deepEqual(h.gets, [h.puts[0]], 'only the original is downloaded; the new WebP is not read back');
+  const expected = await encodeDisplayImage(h.original, 320);
+  for (const result of results) assert.deepEqual(result.bytes, expected);
+  results[0].bytes.fill(0);
+  assert.deepEqual(results[1].bytes, expected, 'concurrent consumers cannot mutate each other');
+  assert.deepEqual((await h.store.displayImage(h.file, 320)).bytes, expected);
+  assert.equal(h.gets.length, 1, 'a later warm request reuses the bounded immutable cache');
+  assert.deepEqual((await h.other().displayImage(h.file, 320)).bytes, expected);
+  assert.deepEqual(h.gets, [h.puts[0], h.puts[1]], 'a fresh process downloads the persisted derivative only');
+});
+
+test('a losing derivative publication serves the database winner rather than its own upload', async t => {
+  const h = await fixture(t);
+  const otherOriginal = await sharp({create:{width:800,height:960,channels:4,background:'blue'}}).png().toBuffer();
+  const winnerBytes = await encodeDisplayImage(otherOriginal, 320);
+  const winner = await h.blob.put('competing.webp', winnerBytes, { access: 'private', allowOverwrite: false });
+  const query = h.database.query;
+  let competed = false;
+  h.database.query = async (sql, values) => {
+    if (!competed && sql.startsWith('INSERT INTO wardrobe_image_variants')) {
+      competed = true;
+      // Replay another process publishing between this worker's upload and its
+      // insert. Distinct valid bytes make using the losing upload observable.
+      const competing = [...values]; competing[4] = winner.url; competing[5] = winnerBytes.length;
+      await query(sql, competing);
+    }
+    return query(sql, values);
+  };
+  const result = await h.store.displayImage(h.file, 320);
+  assert.equal(competed, true);
+  assert.deepEqual(result.bytes, winnerBytes);
+  assert.deepEqual(h.gets, [h.puts[0], winner.url], 'winner bytes are downloaded once after losing publication');
+  assert.deepEqual((await h.store.displayImage(h.file, 320)).bytes, winnerBytes);
+  assert.equal(h.gets.length, 2, 'the losing upload never replaces the winner in the immutable cache');
+});
+
 test('derivatives remain tied to immutable source bytes during replacement and need no writer lease',async t=>{
   const h=await fixture(t), originalUrl=h.puts[0]; const get=h.blob.get;
   let replaced=false;
@@ -97,6 +137,7 @@ test('warmup reads each original once and HTTP delivery revalidates privately', 
     return {headers,bytes,status:res.statusCode};
   };
   const first=await request(); assert.equal(first.headers['Content-Type'],'image/webp'); assert.equal(first.headers['Cache-Control'],'private, no-cache');
+  assert.equal(h.gets.length, 1, 'warmup seeds the bounded derivative cache without reading back uploads');
   const second=await request(first.headers.ETag);assert.equal(second.status,304);assert.equal(second.bytes,undefined);
 });
 
