@@ -209,80 +209,204 @@ function cleanupTolerance(value) {
   return Number.isFinite(parsed) ? Math.max(18, Math.min(110, Math.round(parsed))) : 46;
 }
 
-function removeKeyedSpill(data, index, keyedChannels, neutralLevel) {
-  let remaining = Math.ceil(keyedChannels.reduce((total, channel) => total + data[index + channel], 0) - (neutralLevel * keyedChannels.length));
-  let active = keyedChannels.filter((channel) => data[index + channel] > 0);
-  while (remaining > 0 && active.length) {
-    const share = Math.ceil(remaining / active.length);
-    const next = [];
-    for (const channel of active) {
-      const reduction = Math.min(data[index + channel], share, remaining);
-      data[index + channel] -= reduction;
-      remaining -= reduction;
-      if (data[index + channel] > 0) next.push(channel);
-    }
-    active = next;
+function colorDistance(data, index, color) {
+  return Math.hypot(data[index] - color[0], data[index + 1] - color[1], data[index + 2] - color[2]);
+}
+
+const CHROMA_NEIGHBORS = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+
+function chromaMatte(data, info, target, tolerance) {
+  const { width, height } = info;
+  const count = width * height;
+  const background = new Uint8Array(count);
+  const edgeBand = Math.max(2, Math.min(12, Math.ceil(Math.max(width, height) / 200)));
+  const layers = new Uint8Array(count).fill(edgeBand + 1);
+  // An existing alpha cutout, or an image without an actual key-colored border,
+  // is not evidence of chroma spill. In particular, channel dominance is never
+  // evidence that an opaque garment interior needs recoloring.
+  const border = [];
+  for (let x = 0; x < width; x += 1) {
+    border.push(x);
+    if (height > 1) border.push((height - 1) * width + x);
   }
+  for (let y = 1; y < height - 1; y += 1) {
+    border.push(y * width);
+    if (width > 1) border.push(y * width + width - 1);
+  }
+  // An already transparent exterior is stronger evidence than key-colored
+  // garment pixels touching the canvas. Do not remat an existing cutout.
+  // Partial alpha inside a solid keyed exterior still follows the key path.
+  if (border.some((pixel) => data[pixel * 4 + 3] === 0)) {
+    return { background, layers, edgeBand, keyColor: target, hasBackground: false };
+  }
+  const candidates = border.filter((pixel) => data[pixel * 4 + 3] === 255 && colorDistance(data, pixel * 4, target) <= tolerance);
+  if (candidates.length < Math.max(1, Math.ceil(border.length * 0.05))) return { background, layers, edgeBand, ambiguityRadius: tolerance + 40, keyColor: target, hasBackground: false };
+  candidates.sort((a, b) => colorDistance(data, a * 4, target) - colorDistance(data, b * 4, target));
+  const keyColor = [...data.subarray(candidates[0] * 4, candidates[0] * 4 + 3)];
+  // Use a tight match to the observed background, not the much broader spill
+  // threshold. Near-key garment colors remain foreground. Matching enclosed
+  // regions are included so handle openings are removed too. Exact key-colored
+  // fabric and a key-colored hole are indistinguishable in a single image.
+  const matchRadius = Math.max(3, Math.min(18, tolerance / 6));
+  for (let pixel = 0; pixel < count; pixel += 1) {
+    if (data[pixel * 4 + 3] === 255 && colorDistance(data, pixel * 4, keyColor) <= matchRadius) {
+      background[pixel] = 1;
+      layers[pixel] = 0;
+    }
+  }
+  // Feather width scales with source resolution, but stays bounded. Pixels
+  // beyond this band are never edited.
+  for (let layer = 1; layer <= edgeBand; layer += 1) {
+    for (let pixel = 0; pixel < count; pixel += 1) {
+      if (layers[pixel] !== edgeBand + 1) continue;
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      for (const [dx, dy] of CHROMA_NEIGHBORS) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < width && ny < height && layers[ny * width + nx] === layer - 1) {
+          layers[pixel] = layer;
+          break;
+        }
+      }
+    }
+  }
+  return { background, layers, edgeBand, ambiguityRadius: tolerance + 40, keyColor, hasBackground: true };
+}
+
+function fitChromaBlend(source, anchor, observed, keyColor, best) {
+  const foreground = [...source.subarray(anchor * 4, anchor * 4 + 3)];
+  const vector = foreground.map((value, channel) => value - keyColor[channel]);
+  const denominator = vector.reduce((sum, value) => sum + value * value, 0);
+  const coverage = vector.reduce((sum, value, channel) => sum + value * (observed[channel] - keyColor[channel]), 0) / denominator;
+  if (coverage <= 0 || coverage >= 0.98) return best;
+  const residual = Math.hypot(...observed.map((value, channel) => value - (keyColor[channel] + coverage * vector[channel])));
+  if (residual > 4 + 18 * coverage || (best && residual >= best.residual)) return best;
+  // Unmix the observed pixel, retaining its local texture rather than
+  // copying the anchor's RGB. The anchor estimates coverage only.
+  const unmixed = observed.map((value, channel) => Math.round(Math.max(0, Math.min(255, (value - (1 - coverage) * keyColor[channel]) / coverage))));
+  return { foreground: unmixed, coverage, residual };
+}
+
+function unmixChromaEdge(source, pixel, info, matte) {
+  const { width, height } = info;
+  const index = pixel * 4;
+  const x = pixel % width;
+  const y = Math.floor(pixel / width);
+  const observed = [...source.subarray(index, index + 3)];
+  let best = null;
+  for (const [dx, dy] of CHROMA_NEIGHBORS) {
+    const bx = x + dx;
+    const by = y + dy;
+    if (bx < 0 || by < 0 || bx >= width || by >= height) continue;
+    // Look inward for the least key-like samples along this ray. This avoids
+    // mistaking another feather pixel for opaque foreground, and also works
+    // on thin handles where no wide constant-color interior exists.
+    const anchors = [];
+    let furthestColor = 0;
+    for (let step = 1; step <= Math.max(6, matte.edgeBand * 3); step += 1) {
+      const ax = x - dx * step;
+      const ay = y - dy * step;
+      if (ax < 0 || ay < 0 || ax >= width || ay >= height) break;
+      const anchor = ay * width + ax;
+      if (matte.background[anchor]) break;
+      if (matte.layers[anchor] < 3 || source[anchor * 4 + 3] !== 255) continue;
+      const distance = colorDistance(source, anchor * 4, matte.keyColor);
+      if (distance < 40) continue;
+      furthestColor = Math.max(furthestColor, distance);
+      anchors.push({ anchor, distance });
+    }
+    for (const { anchor, distance } of anchors) {
+      if (distance < furthestColor * 0.65) continue;
+      best = fitChromaBlend(source, anchor, observed, matte.keyColor, best);
+    }
+  }
+  if (!best && colorDistance(source, index, matte.keyColor) < matte.ambiguityRadius) {
+    // Corners, fine hardware and curved handles need samples along the same
+    // connected foreground, not just eight straight rays. Restrict this more
+    // expensive search to unresolved background-dominated boundary pixels.
+    const reach = Math.max(6, matte.edgeBand * 3);
+    const visited = new Set([pixel]);
+    const queue = [pixel];
+    const anchors = [];
+    let furthestColor = 0;
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const current = queue[cursor];
+      const qx = current % width;
+      const qy = Math.floor(current / width);
+      if (matte.layers[current] >= 3 && source[current * 4 + 3] === 255) {
+        const distance = colorDistance(source, current * 4, matte.keyColor);
+        if (distance >= 40) {
+          anchors.push({ anchor: current, distance });
+          furthestColor = Math.max(furthestColor, distance);
+        }
+      }
+      for (const [dx, dy] of CHROMA_NEIGHBORS) {
+        const nx = qx + dx;
+        const ny = qy + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height || Math.abs(nx - x) > reach || Math.abs(ny - y) > reach) continue;
+        const next = ny * width + nx;
+        if (visited.has(next) || matte.background[next]) continue;
+        visited.add(next);
+        queue.push(next);
+      }
+    }
+    for (const { anchor, distance } of anchors) {
+      if (distance < furthestColor * 0.65) continue;
+      best = fitChromaBlend(source, anchor, observed, matte.keyColor, best);
+    }
+  }
+  if (best && best.coverage > 0.65) {
+    // An opaque color gradient can accidentally fit the same line as a key
+    // blend. Do not weaken that edge unless a more background-dominated
+    // transition is also visible on the path toward confirmed background.
+    const foregroundDistance = Math.hypot(...best.foreground.map((value, channel) => value - matte.keyColor[channel]));
+    let hasTransition = false;
+    for (const [dx, dy] of CHROMA_NEIGHBORS) {
+      for (let step = 1; step <= matte.edgeBand + 1; step += 1) {
+        const nx = x + dx * step;
+        const ny = y + dy * step;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) break;
+        const next = ny * width + nx;
+        if (matte.background[next]) break;
+        if (matte.layers[next] < matte.layers[pixel] && colorDistance(source, next * 4, matte.keyColor) < foregroundDistance * 0.65) {
+          hasTransition = true;
+          break;
+        }
+      }
+      if (hasTransition) break;
+    }
+    if (!hasTransition) return null;
+  }
+  return best;
 }
 
 export async function processChromaBackground(bytes, key, options = {}) {
   const tolerance = cleanupTolerance(options.tolerance);
-  const feather = 80;
   const target = [1, 3, 5].map((offset) => Number.parseInt(key.slice(offset, offset + 2), 16));
-  const keyedChannels = target.map((channel, index) => channel > 200 ? index : null).filter((index) => index !== null);
-  const neutralChannels = target.map((channel, index) => channel < 55 ? index : null).filter((index) => index !== null);
   const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  for (let index = 0; index < data.length; index += 4) {
-    const distance = Math.sqrt(
-      ((data[index] - target[0]) ** 2)
-      + ((data[index + 1] - target[1]) ** 2)
-      + ((data[index + 2] - target[2]) ** 2),
-    );
-    if (distance <= tolerance) {
-      data[index] = 0;
-      data[index + 1] = 0;
-      data[index + 2] = 0;
-      data[index + 3] = 0;
-    } else {
-      if (distance < tolerance + feather) data[index + 3] = Math.round(data[index + 3] * ((distance - tolerance) / feather));
-      const keyedLevel = keyedChannels.reduce((total, channel) => total + data[index + channel], 0) / keyedChannels.length;
-      const neutralLevel = neutralChannels.reduce((total, channel) => total + data[index + channel], 0) / neutralChannels.length;
-      const spill = Math.max(0, keyedLevel - neutralLevel);
-      if (spill > 0) {
-        const spillAlpha = Math.max(0, 1 - (Math.max(0, spill - 4) / 150));
-        data[index + 3] = Math.round(data[index + 3] * spillAlpha);
-        removeKeyedSpill(data, index, keyedChannels, neutralLevel);
-      }
-      if (data[index + 3] <= 8) {
-        data[index] = 0;
-        data[index + 1] = 0;
-        data[index + 2] = 0;
-        data[index + 3] = 0;
+  const source = Buffer.from(data);
+  const matte = chromaMatte(source, info, target, tolerance);
+  const corrected = new Uint8Array(info.width * info.height);
+  if (matte.hasBackground) {
+    for (let pixel = 0; pixel < matte.background.length; pixel += 1) {
+      const index = pixel * 4;
+      if (matte.background[pixel]) {
+        data.fill(0, index, index + 4);
+      } else if (matte.layers[pixel] <= matte.edgeBand && source[index + 3] === 255) {
+        const edge = unmixChromaEdge(source, pixel, info, matte);
+        if (!edge) continue;
+        for (let channel = 0; channel < 3; channel += 1) data[index + channel] = edge.foreground[channel];
+        data[index + 3] = Math.round(edge.coverage * 255);
+        corrected[pixel] = 1;
       }
     }
   }
-  for (let index = 0; index < data.length; index += 4) {
-    if (data[index + 3] === 0) continue;
-    const keyedLevel = keyedChannels.reduce((total, channel) => total + data[index + channel], 0) / keyedChannels.length;
-    const neutralLevel = neutralChannels.reduce((total, channel) => total + data[index + channel], 0) / neutralChannels.length;
-    const residualSpill = Math.max(0, keyedLevel - neutralLevel);
-    if (residualSpill > 0) {
-      removeKeyedSpill(data, index, keyedChannels, neutralLevel);
-    }
-  }
+  const verification = verifyNoChromaSpill(source, matte, corrected, tolerance);
   const keyedOutput = await sharp(data, { raw: info }).png().toBuffer();
-  const framedOutput = await frameTransparentGarment(keyedOutput);
-  const { data: framedData, info: framedInfo } = await sharp(framedOutput).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  for (let index = 0; index < framedData.length; index += 4) {
-    if (framedData[index + 3] === 0) continue;
-    const keyedLevel = keyedChannels.reduce((total, channel) => total + framedData[index + channel], 0) / keyedChannels.length;
-    const neutralLevel = neutralChannels.reduce((total, channel) => total + framedData[index + channel], 0) / neutralChannels.length;
-    const residualSpill = Math.max(0, keyedLevel - neutralLevel);
-    if (residualSpill <= 0) continue;
-    removeKeyedSpill(framedData, index, keyedChannels, neutralLevel);
-  }
-  const output = await sharp(framedData, { raw: framedInfo }).png().toBuffer();
-  const verification = await verifyNoChromaSpill(output, key);
+  // Framing resamples the established alpha matte. Do not despill again after
+  // resizing: that would change legitimate garment colors a second time.
+  const output = await frameTransparentGarment(keyedOutput);
   return { bytes: output, verification, tolerance };
 }
 
@@ -328,20 +452,20 @@ export async function frameTransparentGarment(bytes, canvasSize = 1024, occupanc
     .toBuffer();
 }
 
-async function verifyNoChromaSpill(bytes, key) {
-  const target = [1, 3, 5].map((offset) => Number.parseInt(key.slice(offset, offset + 2), 16));
-  const keyedChannels = target.map((channel, index) => channel > 200 ? index : null).filter((index) => index !== null);
-  const neutralChannels = target.map((channel, index) => channel < 55 ? index : null).filter((index) => index !== null);
-  const { data } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+function verifyNoChromaSpill(source, matte, corrected, tolerance) {
   let contaminatedPixels = 0;
   let maxSpill = 0;
-  for (let index = 0; index < data.length; index += 4) {
-    if (data[index + 3] === 0) continue;
-    const keyedLevel = keyedChannels.reduce((total, channel) => total + data[index + channel], 0) / keyedChannels.length;
-    const neutralLevel = neutralChannels.reduce((total, channel) => total + data[index + channel], 0) / neutralChannels.length;
-    const spill = Math.max(0, keyedLevel - neutralLevel);
-    maxSpill = Math.max(maxSpill, spill);
-    if (spill > 1.5) contaminatedPixels += 1;
+  if (!matte.hasBackground) return { contaminatedPixels, maxSpill };
+  for (let pixel = 0; pixel < matte.background.length; pixel += 1) {
+    if (matte.background[pixel] || corrected[pixel] || matte.layers[pixel] > matte.edgeBand || source[pixel * 4 + 3] !== 255) continue;
+    // A near-key boundary without a reliable foreground anchor is ambiguous.
+    // Preserve its pixels but require review in strict mode. Interior color
+    // dominance and existing semitransparency are not contamination tests.
+    const proximity = Math.max(0, tolerance + 40 - colorDistance(source, pixel * 4, matte.keyColor));
+    if (proximity > 0) {
+      contaminatedPixels += 1;
+      maxSpill = Math.max(maxSpill, proximity);
+    }
   }
   return { contaminatedPixels, maxSpill };
 }
