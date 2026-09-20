@@ -2,12 +2,12 @@
 
 # Wardrobe
 
-Your clothes, extracted and organized with gpt-image.
+Import your clothes, create modeled outfits, and assess potential purchases against what you own.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-191919?style=flat-square)](LICENSE)
-[![Node 22+](https://img.shields.io/badge/node-22%2B-191919?style=flat-square)](package.json)
+[![Node 22](https://img.shields.io/badge/node-22.x-191919?style=flat-square)](package.json)
 
-[See the original post →](https://x.com/cdngdev/status/2076812846793650485)
+[Original project post →](https://x.com/cdngdev/status/2076812846793650485)
 
 </div>
 
@@ -15,134 +15,112 @@ Your clothes, extracted and organized with gpt-image.
 
 ![Modeled wardrobe editor](docs/screenshots/editor.png)
 
-## Quick start
+## Run locally
+
+Requires Node.js 22.x and npm.
 
 ```bash
-git clone https://github.com/tandpfun/wardrobe.git
+git clone https://github.com/eyeb0l/wardrobe.git
 cd wardrobe
-npm install
+npm ci
 cp .env.example .env
 npm run dev
 ```
 
-⚠️ The importer stays disabled until you add `OPENAI_API_KEY` to `.env` and place a PNG reference photo of yourself at `data/model-reference.png`.
+Open [localhost:5173](http://localhost:5173). Browsing saved clothes and outfits needs no API key. To enable the web importer, add `OPENAI_API_KEY` to `.env`, place a PNG identity reference at `data/model-reference.png`, and restart.
 
-Open [localhost:5173](http://localhost:5173).
+Local development uses the configured data directory; it does not sync with the hosted wardrobe. For private access across devices, follow the [Vercel hosting guide](docs/HOSTING.md), including authentication, cloud storage and the initial data copy.
 
-For personal access from other devices, see the [private Vercel hosting guide](docs/HOSTING.md). It covers account-only authentication, durable cloud storage, the initial data copy, and safe updates.
+## Storage and privacy
+
+| Mode | Persistent storage |
+| --- | --- |
+| Local app | `data/`, or `WARDROBE_DATA_DIR`: library, jobs, originals, generated images and accessory suggestions |
+| Hosted app | Neon Postgres for records and jobs; private Vercel Blob for images, behind Vercel Authentication |
+| Codex skills | The hosted wardrobe by default; local storage only when explicitly requested |
+
+Generating or analyzing sends the relevant images and context to the configured API. Keys stay on the server. Keep credentials, identity photos, snapshots and generated assets out of Git. Shopping drafts and results remain in browser memory and disappear on reload in either mode.
+
+Use the [backup guide](docs/BACKUPS.md) for cloud backups and recovery, and the [local storage guide](docs/LOCAL_STORAGE.md) for local writer locks, consistent backups and damaged-file recovery.
+
+## Import and edit clothes
+
+The importer detects up to eight visible clothing items per photo with the Responses API, then creates product cutouts and modeled previews with the Images API. Review each stage before approval. It supports drag-and-drop, paste, metadata editing, regeneration and manual modeled-photo uploads.
+
+For a likely single-item product shot on white or transparent background, **Use original image** skips generative extraction and retains that background for review. **Extract garment** remains available and is the default for ordinary photos.
+
+The gallery filters Tops, Dresses, Jackets, Bottoms, Accessories and Shoes. Reclassify existing dresses in the item editor. Open a saved item and choose **Update modelled shot** or **Create modelled shot** to select a reference and optional direction. A replacement remains a review candidate until **Approve**; **Reject** keeps the existing photo.
+
+### Upload preparation
+
+The file picker, drop and paste accept JPEG, PNG, WebP and HEIC/HEIF sources up to 50 MB and 64 megapixels. Import uploads preserve JPEG/PNG/WebP files of at most 2 MB byte-for-byte, including resolution, transparency and metadata. Larger files are compressed locally to at most 2 MB and a 2,400-pixel edge; PNG/WebP compression preserves transparency. HEIC converts locally to JPEG; a source of at most 2 MB keeps its resolution if the converted result also fits. The server normalizes import images to PNG before review.
+
+Modeled-photo and Shopping uploads use their own preparation rules below.
+
+## Outfit collections
+
+Open **Outfits** or `/outfits` to browse photographs, styling notes and the exact wardrobe pieces used. Choose **Generate outfits**, request 1–12 looks, add optional styling direction, and select a model reference. Planning uses garment images and metadata; each combination gets a square modeled photograph.
+
+The web generator requires exactly one top and one bottom per look, with at most one outer layer, one pair of shoes and one accessory. It currently excludes dresses. Top-and-bottom pairs must differ from saved looks and active candidates; changing optional pieces does not make a pair new. Generation requires an API key, a reference and enough unused pairs.
+
+Jobs and review candidates persist in the selected store. Accept each reviewed look into the collection, reject it, or retry with a correction. Acceptance preserves existing looks. In local mode, interrupted generation becomes retryable after server restart. Hosted jobs run through durable workflows; an uncertain started API call is failed for review, never automatically repeated. Check API usage before explicitly retrying an interrupted paid request.
+
+In a saved look, **Suggest accessories** sends its photograph and styling context to `OPENAI_VISION_MODEL` for text-only suggestions. They are saved and reused in the selected store. A changed photograph, vision model, styling context or accessory recipe makes fresh suggestions available. This does not alter photographs or wardrobe records.
+
+## Manual modeled photos
+
+After failed generation, **Copy prompt** copies the recorded attempt, including its correction, without an API call. Supply the referenced images separately to your chosen image tool, then use **Upload modeled photo** to crop and review the result. Wardrobe pieces use horizontal 3:2 crops; outfits use square crops. Uploading creates a candidate; **Approve** or **Accept into collection** saves it.
+
+See [manual modeled photos](docs/MODELED_PHOTOS.md) for prompt availability, reference order, crop controls, image limits and contributor API details.
+
+## Shopping assistant
+
+Open **Shopping** or `/shopping`, choose/drop/paste a listing screenshot or garment photo, select a model reference, and optionally add the occasion, price or fit you have in mind. **Check this piece** returns a recommendation, styling considerations, overlap and combinations with owned pieces. Unclear evidence may produce **A closer look is needed**; photographs alone cannot establish exact sizing, fabric quality or value.
+
+Shopping accepts the source formats and limits above, but always prepares a JPEG locally at a maximum 1,600-pixel edge and under 2 MB, removing embedded metadata such as EXIF location. HEIC uses native decoding when available and a lazily loaded local decoder otherwise. The server validates and normalizes the image again.
+
+Analysis uses `OPENAI_VISION_MODEL`, the prepared photo, selected reference, notes and labeled wardrobe image sheets. It includes current wardrobe edits and deletions from the selected store. An API key, reference and readable wardrobe images are required. Requests are never automatically retried. Shopping does not import purchases or persist its drafts/results; they survive tab switches within the app but not page reloads.
 
 ## Use with Codex
 
-This repo includes three Codex skills for importing clothes, creating modeled outfits, and assessing potential purchases against your wardrobe.
+Open this repository in Codex and use a bundled skill:
 
 ```text
 $import-clothes Import the clothes from ~/Pictures/outfits, create modeled photos, and add them to this wardrobe.
-$generate-outfits Create modeled outfit ideas from my wardrobe.
+$generate-outfits Create 8 modeled outfit ideas from my wardrobe.
 $shopping-assistant Would the piece in this screenshot be a good addition to my wardrobe?
 $shopping-assistant Review my wishlist in the browser and shortlist the pieces that add the most to my wardrobe.
 $shopping-assistant Find a navy wool cardigan under £100 on my preferred sites and compare it with what I own.
 ```
 
-Open the cloned repo in Codex and use the relevant prompt. The import skill asks for a local model-reference PNG when needed, reviews every cutout and modeled photo, then writes to `data/library.json` and `data/imported/`. The outfit skill asks how many looks to create, then curates, generates, verifies, and saves the complete collection under `data/`.
+- [Import Clothes](.agents/skills/import-clothes/SKILL.md) inventories source photos, reviews cutouts and modeled photos, then imports approved results. Cutout-only delivery skips modeled generation and database writes.
+- [Generate Outfits](.agents/skills/generate-outfits/SKILL.md) uses the requested count, or asks if it is missing, then curates, generates, reviews and saves the complete batch.
+- [Shopping Assistant](.agents/skills/shopping-assistant/SKILL.md) compares candidates with the selected reference and owned clothes. When requested, it reviews live wishlists or retailer listings. Advice does not import purchases or save a Shopping-tab result.
 
-The [Shopping Assistant skill](.agents/skills/shopping-assistant/SKILL.md) compares supplied photos or screenshots with your selected model reference and owned pieces, then gives advice directly in Codex. When requested, it uses available browser or computer tools to review a live wishlist or search retailer sites, checking product details and comparing candidates with each other. It reuses the app's local wardrobe and reference conventions; advice does not automatically import purchases or save a result to the Shopping tab.
+Skills follow the [shared storage workflow](docs/SKILL_STORAGE.md): take a fresh private snapshot, stage results outside the live store, dry-run, then publish with the storage helpers. Cloud is the default; explicitly request local mode for a local-only setup. Cloud access failures must not silently fall back to the local migration copy.
 
-### For agents
-
-If you are setting up Wardrobe for a user, ask how they want to import their clothes:
-
-- **Codex:** Ask for a folder or camera-roll location and a model-reference PNG, then extract, model, and import the individual pieces by following [the bundled import skill](.agents/skills/import-clothes/SKILL.md). Afterward, offer to create a requested number of modeled looks with [the outfit-generation skill](.agents/skills/generate-outfits/SKILL.md).
-- **Web UI:** Help the user configure their own `OPENAI_API_KEY` and `data/model-reference.png`, then let them import through the app.
-
-## What it does
-
-- Detects every garment in a photo with the OpenAI Responses API
-- Extracts clean product cutouts with the OpenAI Images API
-- Offers **Use original image** for a likely single-item product shot on white or transparent background; this skips generative extraction and preserves the uploaded image for review. **Extract garment** remains available and is the default for ordinary photos.
-- Generates an optional modeled editorial preview, or accepts a manually uploaded modeled photo for review
-- Shows saved outfit collections with their styling notes and exact wardrobe pieces
-- Curates and generates new outfits through the configured API, with progress, retries, and review before saving
-- Keeps originals, jobs, generated images, and the JSON database local in `data/`
-- Checks potential purchases against your model reference and wardrobe in **Shopping**
-- Supports drag, drop, paste, editing, review, regeneration, and approval
-- Filters Tops, Dresses, Jackets, Bottoms, Accessories, and Shoes. Existing dresses filed under Tops can be moved to Dresses in the item editor.
-
-## Manual modeled photos
-
-If image generation refuses a request or otherwise fails, choose **Copy prompt** beside **Retry** to copy the full prompt from that attempt, including its submitted correction. Copying makes no API call. For imports created before prompt recording was added, that button appears after a new generation attempt. If clipboard access is unavailable, the app shows selectable prompt text.
-
-You can create the photo yourself with another image model, supplying the same identity and garment images in the order described in the prompt. The copied text does not include image attachments; outfit correction prompts may also reference the previous attempt. Review the output for your likeness, exact garment details and complete framing before uploading it. Wardrobe does not automatically switch models or call another provider.
-
-- **Wardrobe piece:** open **Update modelled shot** (or **Create modelled shot**), then **Upload modeled photo**. This is also available while reviewing a failed or completed modeled generation. The crop is locked to horizontal 3:2. Choose a source at least 768 pixels wide and 512 pixels tall; 1536 × 1024 or larger is recommended.
-- **Outfit:** open its generation review and choose **Upload modeled photo** beneath the retry controls. The crop is locked to square. Choose a source at least 512 × 512 pixels; 1024 × 1024 or larger is recommended. Wait for the collection's active generation to finish first.
-
-After choosing a photo, drag it inside the crop preview, adjust zoom and position, or use the arrow keys on the preview. **Reset crop** restores the widest centered framing; **Cancel crop** leaves the current image untouched. **Use crop** prepares and uploads the selected area for review. Choosing a file alone uploads nothing. Both slightly off-ratio images and portrait/landscape sources are supported; the output always has exact 3:2 or square pixel dimensions. Zoom stops before the crop becomes too small, and the app never upscales or stretches a crop.
-
-Modeled uploads accept JPEG/PNG/WebP/HEIC sources up to 50 MB and 64 megapixels. Cropping uses the decoded original with its orientation applied; its preview is separate from the full-resolution source. The crop is compressed locally to at most 2 MB with a maximum 2400-pixel edge, preserving the exact ratio. The server independently verifies the prepared file, decodes it fully, checks its displayed dimensions (including EXIF orientation), and rejects animated, malformed, oversized or incorrectly shaped images. The server does not further crop or stretch the prepared image. The prepared image is stored as a metadata-free PNG at its prepared resolution, with responsive compressed WebP versions served through the same image pipeline as generated photos.
-
-Uploading only creates a review candidate. **Approve** / **Accept into collection** saves it; rejecting a replacement preserves the existing wardrobe photo. Opening the review, copying a prompt and uploading a photo do not generate images or require another model call.
-
-For contributors: use `POST /api/import/jobs/:id/stages/modeled/upload` or `POST /api/outfits/jobs/:jobId/outfits/:outfitId/upload` with `{ "imageDataUrl": "data:image/png;base64,..." }` (JPEG and WebP also accepted). Prepared bytes are capped at 2 MB and the JSON body at 3 MB. Keep these routes inside the existing mutation locks, storage adapter and approval flow; never write straight to the saved library or collection. Keep originals and use the existing display-image routes for compressed delivery. Prompt copying must use the recorded attempt prompt rather than just the editable correction field.
+Agents setting up Wardrobe should establish whether the user wants Codex-assisted imports or the web UI, obtain the source folder and identity reference if missing, and follow the relevant setup above. Honor any supplied destination, count and generation scope.
 
 ## Configuration
 
-Wardrobe uploads support JPEG, PNG, WebP and HEIC/HEIF through the file picker, drag-and-drop and paste. JPEG, PNG and WebP files up to 2 MB are uploaded byte-for-byte unchanged, including their resolution, transparency and metadata. Larger files are compressed locally to at most 2 MB, with a maximum 2,400-pixel edge; PNG/WebP compression preserves transparency. HEIC is converted locally to JPEG for compatibility, keeping its resolution when the converted file fits the limit. Inputs are limited to 50 MB and 64 megapixels. The importer then uses its existing lossless PNG normalization and review workflow.
-
-| Variable | Default |
+| Variable | Default / purpose |
 | --- | --- |
-| `OPENAI_API_KEY` | Required |
-| `OPENAI_VISION_MODEL` | `gpt-5.6-luna` |
-| `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst` |
+| `OPENAI_API_KEY` | Required for web API generation and analysis |
+| `OPENAI_VISION_MODEL` | `gpt-5.6-luna`; detection, planning, Shopping and accessory advice |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst`; default image model |
+| `OPENAI_GARMENT_MODEL` | Overrides the image model for cutouts |
+| `OPENAI_MODELED_MODEL` | Overrides the image model for modeled pieces and outfits |
 | `OPENAI_IMAGE_QUALITY` | `high` |
-| `WARDROBE_MODEL_REFERENCE` | `data/model-reference.png` |
-| `WARDROBE_DATA_DIR` | `data` |
+| `OPENAI_API_BASE_URL` | `https://api.openai.com/v1` |
+| `WARDROBE_DATA_DIR` | `data`; local storage directory |
+| `WARDROBE_MODEL_REFERENCE` | `data/model-reference.png`; local default identity reference |
 
-The web importer and outfit generator use these values from `.env` when Vite starts; restart after changing them. `OPENAI_GARMENT_MODEL` and `OPENAI_MODELED_MODEL` can override the image model for each stage. Outfit planning uses `OPENAI_VISION_MODEL`; outfit photographs use `OPENAI_MODELED_MODEL`, falling back to `OPENAI_IMAGE_MODEL`. `OPENAI_API_BASE_URL` optionally overrides the API base URL (default `https://api.openai.com/v1`). Keys remain on the server. The import and outfit Codex skills use Codex's Imagegen tool, whose model is selected by Codex rather than this app's `.env`. The Shopping Assistant skill normally gives advice directly in Codex without a separate app API call.
+Local Vite reads `.env` at startup; restart after changes. Hosted configuration uses deployment environment variables; see [Hosting](docs/HOSTING.md). Codex import/outfit skills use Codex Imagegen, whose model is selected by Codex, not these variables. Shopping advice in Codex normally makes no separate app API call.
 
-To offer additional model reference photos, add `data/model-reference-2.png`, `data/model-reference-3.png`, and so on (or place them in `WARDROBE_DATA_DIR` if configured). The photo set by `WARDROBE_MODEL_REFERENCE` stays the default. Choose a thumbnail in the importer's **Model reference** picker before approving a garment or regenerating its modeled image. One reference is used per generation; the choice is saved with the import and reused on retries. Use **Refresh photos** to discover newly added files without restarting. Photos stay local and must not be committed to Git.
+For additional local references, add `model-reference-2.png`, `model-reference-3.png`, etc. under `WARDROBE_DATA_DIR`. The default remains the path in `WARDROBE_MODEL_REFERENCE`; changing the data directory does not move that default automatically. Choose a thumbnail in **Model reference** before approving a garment or regenerating its modeled image. Each generation uses one reference; imports save the selection for retries. **Refresh photos** discovers added references without restarting. Local reference files do not update hosted references.
 
-See [model migration and prompt checks](docs/model-migration.md) for compatibility notes and a repeatable visual comparison. Run `npm test` for local API contract tests and `npm run check` for the production build.
-
-## Outfit collections
-
-Open **Outfits** or visit `/outfits` to browse the saved collection. Open a look to see its full photograph, styling notes, and the wardrobe pieces it uses. Collections written by the Codex outfit skill are loaded from `data/outfits.json`; their images are served from `data/outfit-images/`.
-
-Below the pieces in a saved look, choose **Suggest accessories** for a short list of optional finishing touches. This sends the existing outfit photo to `OPENAI_VISION_MODEL` (default `gpt-5.6-luna`) through the configured API and returns text only. Suggestions are stored locally in `data/outfit-accessories.json` and reused when you reopen the look; changing the photo, configured vision model, styling context, or accessory recipe makes fresh suggestions available. Outfit photographs and wardrobe records are not modified.
-
-Choose **Generate outfits**, enter a count from 1 to 12, add optional styling direction, and choose a model reference. Planning uses the actual garment images and metadata, then creates one square modeled photograph per combination. Each outfit contains one top and one bottom, with optional outerwear, shoes, and an accessory. New combinations avoid the existing collection and active candidates.
-
-Generation progress and review candidates persist in `data/outfit-jobs/`. Review each image against its wardrobe references, then accept it into the collection, reject it, or retry with a specific correction. Accepting adds the new look while preserving existing outfits. An interrupted request becomes a retryable failure on server restart; restarting never automatically repeats paid API calls. Use the retry control to continue failed work.
-
-All collection data, source images, references, and generated photographs stay in the ignored local `data/` directory. Generating sends the selected reference and garment images to the configured API. The gallery works without an API key; generation needs a configured key, a model reference, and enough unused top-and-bottom combinations.
-
-### Saving Codex collections and recovering local data
-
-The app permits one outfit writer process per configured data directory. Stop its Wardrobe server before saving a reviewed Codex batch, then run this command from the repository root:
-
-```sh
-node scripts/save-outfit-collection.mjs /path/to/staged/outfits.json
-```
-
-The staged version-1 manifest must contain accepted records whose PNGs are under its sibling `outfit-images/` directory; keep the entire staging directory outside live data. The helper reads `WARDROBE_DATA_DIR` from the environment or `.env` (or accepts `--data-dir PATH`), adds records to the existing collection, and uses immutable image filenames. Identical retries succeed; conflicting IDs or image contents are rejected. Restart the server after saving. Use this helper instead of editing the live manifest or replacing images directly.
-
-Writer ownership is recorded in `.outfit-store.lock`. A provably dead process on the same host can be recovered automatically; unreadable locks, locks from another host, and interrupted `.outfit-store.recovery` guards require inspection with all writers stopped. Never delete a live process's lock or run two app copies against the same directory.
-
-Back up the **whole configured data directory together**, with the server stopped: `outfits.json`, `outfit-jobs/` (including candidates and job state), `outfit-images/`, `outfit-accessories.json`, the wardrobe library, imported images, and local references. Back up separately configured model-reference files too. Atomic file replacement helps interrupted writes, but does not replace backups or guarantee survival after power loss. Restore a consistent backup together and exclude transient `.outfit-store.lock`, `.outfit-store.recovery`, and `.outfit-store-owner-*.tmp` files from restores; acquire fresh ownership when the app starts.
-
-Damaged collection or job files are reported and preserved for repair or restoration. A missing manifest with surviving outfit images or jobs is treated as missing data, not a new empty wardrobe. Unsupported future versions must remain untouched; use a compatible app version. Any future migration should back up the original first, validate records before and after conversion, and preserve unknown fields.
-
-Invalid individual accessory suggestions become cache misses. If the entire `outfit-accessories.json` is corrupt, stop the server, preserve a copy, and inspect it. For malformed JSON or a damaged version-1 cache, move the file aside under a distinct backup name, then restart and request suggestions explicitly; this only rebuilds optional suggestions. Leave a readable unsupported-version cache untouched and use a compatible app version. Do not reset collection or job files as part of accessory-cache recovery.
-
-## Shopping assistant
-
-Open **Shopping** or visit `/shopping`. Choose, drop or paste a listing screenshot or an in-store garment photo, select a model reference, and optionally describe the occasion, price or fit you have in mind. Choose **Check this piece** for a recommendation, visual styling considerations, possible wardrobe overlap, and combinations using your existing pieces. Unclear images can produce **A closer look is needed** rather than a purchase recommendation. Advice cannot establish exact sizing, fabric quality or value from a photograph alone.
-
-Photos are prepared on your device before upload. JPEG, PNG, WebP and HEIC/HEIF inputs up to 50 MB are accepted; decoded images are limited to 64 megapixels. The browser resizes to a maximum 1,600-pixel edge, re-encodes to JPEG under 2 MB, and drops embedded metadata such as EXIF location. HEIC conversion uses native browser decoding when available, with the lazily loaded [heic-to decoder](https://github.com/hoppergee/heic-to) as a local fallback. The server validates and normalizes the image again before analysis.
-
-Analysis uses `OPENAI_VISION_MODEL` and the same API key and reference settings as Outfits. Pressing the check button sends the prepared image, chosen model reference, notes, and labeled wardrobe image sheets to the configured API. Browser edits and deletions are reflected in the comparison; item images are resolved from the local library. Shopping does not add purchases to the wardrobe. Drafts and results remain in memory while switching tabs, and are cleared on page reload; shopping uploads and results are not saved to `data/`. An API key, a model reference and readable wardrobe images are required. Requests are never automatically retried.
+See [model compatibility and prompt checks](docs/model-migration.md) for API contracts and visual comparisons, and [Contributing](CONTRIBUTING.md) for development checks.
 
 ## License
 
 [MIT](LICENSE)
-
-Open a saved wardrobe item and choose **Regenerate modelled shot** to choose a model reference and optional direction. The existing shot stays in place while a replacement is generated and reviewed; **Approve** replaces it and **Reject** keeps the original. Items without a shot offer **Create modelled shot**.

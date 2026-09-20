@@ -1,20 +1,20 @@
 # Encrypted cloud backups and recovery
 
-The cloud wardrobe is authoritative. These commands keep independent, dated recovery points outside the repository and outside the working `data/` directory. They never call an image-generation API. A backup contains the actual image bytes, so cloud garbage collection cannot make an existing backup unusable.
+The cloud wardrobe is authoritative. These tools create independent, dated recovery points outside Git and the working `data/` directory. Backups contain actual image bytes, so later cloud garbage collection cannot invalidate them. No backup command calls a model API.
 
-## What is included
+## Contents and consistency
 
-The export captures all persistent files in the cloud store: wardrobe records (including edits and hidden-item tombstones), original and modeled images, outfit collections, references, prompts, import/outfit jobs and their source images, task history, and the daily dispatch counter. Transient dotfiles, locks, interrupted `.tmp` files and garbage-collection progress are excluded. Display WebP caches and provider workflow executions are not backed up; WebP images regenerate from originals.
+Exports include persistent cloud files: the library (edits, hidden items, and deletion tombstones), original/modeled images, outfits, references, prompts, import/outfit jobs and source images, task history, and both daily API counters. Transient dotfiles, locks, `.tmp` files, and garbage-collection progress are excluded. Display WebP caches regenerate from originals; provider workflow executions are not backed up.
 
-Files and snapshot manifests use authenticated AES-256-GCM encryption. Image objects are stored once by checksum, shared across snapshots. Repeated exports identify immutable cloud images and reuse their locally verified encrypted bytes without downloading them again. A failed or interrupted export never publishes its snapshot manifest; previously completed backups remain usable.
+File contents and snapshot manifests use authenticated AES-256-GCM encryption. Objects are deduplicated by checksum across snapshots. Later exports reuse locally verified encrypted bytes for unchanged immutable cloud images. The manifest is published last, so an interrupted export leaves completed recovery points usable.
 
-Export holds the same renewable writer lease as editing, generation and cleanup. Reads remain available; writes can temporarily report busy, especially during the first full download. If another operation owns the lease, backup fails and the scheduler retries later. No database migration or website deployment is required for these tools.
+Export holds the same renewable writer lease as editing, generation, and cleanup. Reads remain available; writes may report busy, especially during the first full download. A busy lease makes export fail so a scheduler can retry. Existing installations with the standard application schema need no migration or deployment for these tools.
 
-## Initialize and take a backup
+## Initialize and export
 
-Use Node 22 or newer with the project's installed dependencies. Run from a stable project checkout. Keep a private credentials file containing the production `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN`. No OpenAI key is needed. The Blob token can write/delete, so protect it like the existing production credentials; the exporter only reads image data and acquires/releases the database lease.
+Use Node 22.x, installed project dependencies, and a stable checkout. Keep production `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` in a private credentials file such as the ignored `.env.cloud`. No OpenAI key is needed. The Blob token permits writes/deletions, so protect it as a production secret; export only reads cloud files and acquires/releases the database lease.
 
-Create a private key directory, then initialize a **new** backup directory and key file:
+Create a private key directory, then initialize a **new** backup repository and key:
 
 ```sh
 mkdir -p "$HOME/Library/Application Support/Wardrobe Backup Keys"
@@ -24,9 +24,9 @@ node scripts/wardrobe-backup.mjs init \
   --key-file "$HOME/Library/Application Support/Wardrobe Backup Keys/primary.key"
 ```
 
-The key file must remain outside the backup repository. Both paths' parent directories must already exist. Initialization refuses to overwrite either path. Save a separate secure copy of the key, such as in your password manager; **losing the key makes the backups unrecoverable**. Do not commit backups, restored data, credentials or keys. An encrypted external/off-device copy of the complete backup repository provides protection if the backup Mac is lost; keep the recovery key separate from that copy.
+Both parent directories must exist. Initialization refuses existing destinations; the key must be outside the backup repository, and both must be outside Git. Save a separate secure copy of the key: **losing it makes backups unrecoverable**. Keep an off-device copy of the complete encrypted repository, with its recovery key stored separately. Never commit backups, restored data, credentials, or keys.
 
-For subsequent commands, optional environment variables shorten the arguments:
+Environment variables can replace repeated `--repo` and `--key-file` arguments:
 
 ```sh
 export WARDROBE_BACKUP_DIR="$HOME/Library/Application Support/Wardrobe Backups"
@@ -37,9 +37,9 @@ node scripts/wardrobe-backup.mjs list
 node scripts/wardrobe-backup.mjs status
 ```
 
-`verify` authenticates the manifest, decrypts every referenced object and checks its size and SHA-256. `status` verifies the latest snapshot and exits 2 if no completed backup exists or it is over 48 hours old. Errors exit 1. Success exits 0. `--snapshot ID` selects a particular recovery point for verify or restore; the default is the latest.
+`verify` authenticates the manifest, decrypts every referenced object, and checks size and SHA-256. `list` returns snapshot IDs. `status` verifies the latest snapshot and exits **2** when none exists or it is over 48 hours old, **1** on error, and **0** when healthy. `verify` and `restore` accept `--snapshot ID`; otherwise they use the latest snapshot. Only cloud operations need cloud credentials.
 
-Do not edit the encrypted repository by hand. Copy the entire repository while no backup operation is running. A `.lock` directory prevents simultaneous backup/restore/prune commands. After a crash, inspect `.lock/owner.json`, confirm the recorded process and every backup process have stopped, then remove only that stale lock. Locks are never automatically stolen.
+Do not edit the encrypted repository by hand, and copy it only while no backup command is running. All commands after initialization use a `.lock` directory. After a crash, inspect `.lock/owner.json` and confirm the recorded process and all backup processes have stopped before removing only that stale lock. Locks are never automatically stolen.
 
 ## Restore locally first
 
@@ -48,38 +48,38 @@ node scripts/wardrobe-backup.mjs restore \
   --snapshot SNAPSHOT_ID --out "$HOME/Wardrobe Recovery Test"
 ```
 
-The output directory must not exist, must be outside a Git checkout, and must not be inside the backup repository. All files are verified before restoration and read back afterward. `.restore-complete.json` marks a successful restore; an incomplete directory must not be used as a recovered wardrobe.
+The output must be new, outside Git and the backup repository, with an existing parent directory. Files are verified before restoration and read back afterward. `.restore-complete.json` marks success; never use an incomplete restore as a recovered wardrobe.
 
-Backup contents remain exact. The separate restored copy pauses unfinished generation, removes dispatch authorization, and retains terminal task records. Opening that copy cannot automatically restart paid work. Approved images and completed outcomes are preserved. A later explicit retry is a new paid request. The restore result reports how many jobs were paused.
+The encrypted backup stays exact. The restored copy pauses unfinished generation, removes dispatch authorization, and retains terminal task records. Opening it cannot automatically resume paid work. Approved images and completed outcomes remain; an explicit retry starts a new paid request. The result reports the number of paused jobs.
 
-Inspect with a separate local server, pointing `WARDROBE_DATA_DIR` and `WARDROBE_MODEL_REFERENCE` to that recovered directory. Keep the original backup unchanged. For a recovery drill, use a checkout without development secrets and leave `OPENAI_API_KEY` empty. The app can perform normal housekeeping on its working recovery copy.
+Inspect through a separate local server with `WARDROBE_DATA_DIR` set to the recovery directory and `WARDROBE_MODEL_REFERENCE` to its `model-reference.png`. For a drill, use a checkout without development secrets and leave `OPENAI_API_KEY` empty. The app may perform normal housekeeping on this working copy. See [local storage and recovery](LOCAL_STORAGE.md) for local-server storage behavior.
 
 ## Restore to cloud
 
-Cloud recovery is an explicit full replacement, not a merge. First restore locally and inspect the recovered data. Stop active generation before attempting replacement.
+Cloud recovery is a **full replacement**, not a merge. Restore locally and inspect first, then stop active generation at the destination.
 
 ```sh
-# Verify backup bytes and show the current destination fingerprint; no content writes.
+# Verify backup bytes and inspect the destination fingerprint; no content writes.
 node --env-file=.env.cloud scripts/wardrobe-backup.mjs restore \
   --target cloud --snapshot SNAPSHOT_ID
 
-# Use the fingerprint returned by the reviewed dry run.
+# Apply using the fingerprint from that reviewed dry run.
 node --env-file=.env.cloud scripts/wardrobe-backup.mjs restore \
   --target cloud --snapshot SNAPSHOT_ID --apply --replace \
   --expect-destination FINGERPRINT_FROM_DRY_RUN
 ```
 
-Changing cloud data invalidates the fingerprint and requires a new dry run. The command first creates a complete safety backup of the current destination; if that fails, replacement does not begin. Binary files upload under new private immutable Blob URLs. All file metadata then switches in one fenced database transaction, so readers cannot observe a partly replaced manifest. Failed uploads/publication leave the old metadata intact; unpublished uploads become eligible for normal garbage collection.
+The dry run acquires/releases the writer lease. Changed destination data invalidates its fingerprint and requires a fresh dry run. Before replacing a nonempty destination, the command makes a complete safety backup; failure stops replacement. Binary files receive new private immutable Blob URLs and are read back for verification. A single fenced database transaction switches all file metadata. Failed uploads/publication leave old metadata intact; unpublished uploads become eligible for normal cleanup.
 
-The current day's higher dispatch count is retained. Existing task IDs are preserved as terminal records so delayed old workflow deliveries cannot restart generation. The restore does not copy old writer leases, garbage-collection decisions or cached WebP URLs. Old unreferenced cloud objects remain subject to the normal seven-day cleanup grace period.
+Today's destination API counters are preserved; a backup from the same UTC day can raise either counter but cannot lower it. Existing destination task IDs are retained as terminal records, preventing delayed workflow deliveries from restarting generation. Old writer leases, cleanup decisions, and cached WebP URLs are not restored. Newly unreferenced Blobs follow the normal seven-day cleanup grace period.
 
-A new cloud destination must already have the standard application schema initialized. It still requires a reviewed fingerprint and `--apply`; `--replace` is only necessary when files already exist. The command does not create providers, databases or credentials.
+A new destination must already have the application schema. It still needs a reviewed fingerprint and `--apply`; `--replace` is required only when files exist. The command does not provision services or credentials.
 
-## Daily backups on the always-on Mac
+## Daily backups on an always-on host
 
-Do not install a schedule on the temporary verification Mac. On the always-on Mac, put a stable checkout, dependencies, credentials and backup key in private locations. Either initialize a new backup repository/key there or securely transfer the complete encrypted repository **and separately transfer its key**. Use the same paths consistently; do not schedule a temporary Codex worktree.
+Use a stable checkout, installed dependencies, private credentials, and the backup key on the chosen always-on host. Initialize a new repository/key there, or transfer the complete encrypted repository and its key separately. Use permanent paths rather than a temporary verification machine or Codex worktree.
 
-The portable scheduler entry point is:
+The portable scheduler command is:
 
 ```sh
 node --env-file=/absolute/path/to/private/cloud.env \
@@ -87,9 +87,13 @@ node --env-file=/absolute/path/to/private/cloud.env \
   --repo /absolute/path/to/backups --key-file /absolute/path/to/backup.key
 ```
 
-It verifies and skips when the newest successful backup is less than 24 hours old. Otherwise it exports, verifies, and applies retention. An hourly scheduler therefore retries busy/offline/failed runs without making hourly snapshots. `run` always performs this full sequence immediately. Backups retain the latest snapshot from 7 distinct days, 4 distinct weeks and 6 distinct months, taking the union of those sets. This preserves older recovery points across long outages. No pruning happens after an export failure. Standalone `prune` previews removals; `prune --apply` authenticates and verifies every snapshot before removing anything. Objects still used by retained snapshots survive.
+`run-due` verifies and skips a successful backup less than 24 hours old. Otherwise it exports, verifies, and applies retention. Running it hourly retries busy/offline/failed attempts without producing hourly snapshots. `run` performs the full sequence immediately.
 
-On the always-on Mac, generate a reviewable LaunchAgent first:
+Retention keeps the newest snapshot from each of 7 distinct days, 4 distinct weeks, and 6 distinct months, taking their union. This preserves older points across long outages. Pruning runs only after a successful export and verification. Standalone `prune` previews removals; `prune --apply` removes them. Both authenticate and verify every snapshot first, and retained snapshots' shared objects survive.
+
+### macOS LaunchAgent
+
+On the always-on Mac, generate and inspect a plist first:
 
 ```sh
 node scripts/install-backup-schedule.mjs \
@@ -100,10 +104,18 @@ node scripts/install-backup-schedule.mjs \
 plutil -lint "$HOME/wardrobe-backup.plist"
 ```
 
-After reviewing it and completing the first recovery drill, repeat the helper with `--install` in place of `--out ...`, on the always-on Mac only. Use `--node /absolute/path/to/node` if the current Node executable is not in a permanent location. Check the registered job with `launchctl print "gui/$(id -u)/com.iris.wardrobe-backup"`; to disable it, use `launchctl bootout "gui/$(id -u)/com.iris.wardrobe-backup"`. The installed plist remains in `~/Library/LaunchAgents` until deliberately removed.
+After reviewing it and completing a first backup/recovery drill on that host, repeat with `--install` instead of `--out ...`. Run as the signed-in user, without `sudo`. Use `--node /absolute/path/to/node` if the current executable is not permanent. Existing plists/schedules are never overwritten.
 
-The agent runs at login and hourly, uses absolute paths, and stores counts/errors in private log files. Generation alone does not enable the job; installation is a separate explicit action. This is a per-user agent: the backup user must remain logged in, and the Mac needs power/network access. Run a first backup and recovery drill on that host before relying on it.
+The agent runs at login and hourly, with absolute paths and private logs in `<backup-repository>.logs/backup.log` and `backup-error.log`. Generating the plist does not enable it; installation does. The user must remain logged in and the Mac needs power and network access.
 
-Use `status` for a 48-hour stale-backup health check, or connect its exit status to your monitoring. A failed job is recorded in its error log; no email/push alert is configured automatically. Preserve a separate copy of the encryption key and periodically repeat a local restore drill.
+```sh
+# Inspect the registered job.
+launchctl print "gui/$(id -u)/com.iris.wardrobe-backup"
 
-The same `run-due` entry point can later run on a Linux VM using its native scheduler; no Vercel cron or publicly accessible backup endpoint is needed.
+# Stop/unregister it for the current login session.
+launchctl bootout "gui/$(id -u)/com.iris.wardrobe-backup"
+```
+
+To prevent loading at a later login, deliberately remove the installed `~/Library/LaunchAgents/com.iris.wardrobe-backup.plist` after unloading it. The helper retains the plist if registration fails; inspect the session/job before retrying.
+
+Use `status` for a 48-hour stale-backup check or connect its exit status to monitoring. Errors are logged; no email/push alerts are configured. Keep the separate key copy and repeat restore drills periodically. Linux can run the same `run-due` command through its native scheduler; no Vercel cron or public backup endpoint is needed.

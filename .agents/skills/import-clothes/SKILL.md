@@ -68,6 +68,7 @@ Write `$WORK/manifest.json` using this final shape:
       "file": "navy-fair-isle-cardigan.png",
       "modeledFile": "navy-fair-isle-cardigan.png",
       "modelReferenceId": "default",
+      "modeledSetting": "a quiet warm-stone courtyard with restrained greenery",
       "name": "Navy Fair Isle Cardigan",
       "part": "wholebody_up",
       "color": "#172033",
@@ -90,7 +91,7 @@ Use only these `part` values:
 - `accessories_up` — accessories
 - `shoes` — shoes
 
-Use lowercase hyphenated slugs, six-digit hex colors, at most 12 short lowercase tags, and `null` when there is no genuinely distinct secondary color. Keep working records as `status: "generate"` or `status: "hold"`; change a record to `accepted` only after final QA. The import script ignores every non-accepted record. Set `modelReferenceId` to the reference actually used. Omit both modeled fields for cutout-only delivery.
+Use lowercase hyphenated slugs, six-digit hex colors, at most 12 short lowercase tags, and `null` when there is no genuinely distinct secondary color. Keep records as `generate` or `hold` until final QA, then mark them `accepted`. Only accepted records are imported, but every record needs a valid slug. For modeled photos, record `modeledFile`, the actual `modelReferenceId`, and the chosen `modeledSetting`; omit all three for cutout-only delivery.
 
 ### 3. Prepare focused references
 
@@ -154,7 +155,7 @@ node --env-file=.env.cloud .agents/skills/import-clothes/scripts/import-to-wardr
   --manifest "$WORK/manifest.json"
 ```
 
-The entrypoint uses `scripts/import-reviewed-clothes.mjs`. It fully validates accepted PNGs, derives stable item IDs from cutout content, reads the latest live library under the cloud writer lease, and publishes originals privately before updating that library. Reimporting an identical cutout updates its metadata and supplied modeled photo without duplicating the item. It preserves unrelated items and fields, uses immutable modeled filenames, and leaves WebP display-copy creation to the app. This does not replace physical-item deduplication or visual QA. `--dry-run` performs no destination writes.
+The entrypoint uses `scripts/import-reviewed-clothes.mjs`. It decodes accepted PNGs, requires transparent and visible pixels in each cutout, and derives stable item IDs from cutout content. It reads the latest live library under the cloud writer lease and publishes originals privately before updating that library. Reimporting an identical cutout updates its metadata and supplied modeled photo without duplicating the item. It preserves unrelated items and fields, uses immutable modeled filenames, and leaves WebP display-copy creation to the app. This does not replace physical-item deduplication or visual QA. `--dry-run` performs no destination writes.
 
 Verify the returned IDs and item count against the live `/api/import/wardrobe` through authenticated access, then inspect the production gallery and modeled images. Do not restart a local server or rerun the migration to make cloud changes appear. For an explicit local import, omit `--env-file=.env.cloud`, pass `--target local`, and follow the shared local writer-lock instructions; optional `--data-dir PATH` selects that local store.
 

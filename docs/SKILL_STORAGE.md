@@ -1,10 +1,10 @@
 # Storage for Wardrobe project skills
 
-Read this before obtaining wardrobe context or saving a skill's results. The migrated wardrobe at https://wardrobe-snowy-rho.vercel.app is the default target. Local `data/` is an independent snapshot, not a mirror of production. Use local mode only when the user asks to work locally. A failed cloud connection is not a reason to substitute local data.
+Read this before obtaining wardrobe context or saving a skill's results. The [hosted wardrobe](https://wardrobe-snowy-rho.vercel.app) is the default target. Local `data/` is an independent snapshot, not a production mirror. Use local mode only when the user requests it; never substitute local data after a cloud connection fails.
 
 ## Read the current wardrobe
 
-Use a signed-in browser for the current app state. For native image review and Imagegen references, take a task snapshot of the original cutouts, available identity references, and saved outfit metadata:
+Use a signed-in browser for the current app state. For image review and Imagegen references, snapshot the original cutouts, available identity references, and saved outfit metadata:
 
 ```sh
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/wardrobe-skill.XXXXXX")"
@@ -12,51 +12,53 @@ node --env-file=.env.cloud scripts/skill-snapshot.mjs \
   --target cloud --out "$WORK/snapshot"
 ```
 
-Run from the repository root with Node 22 or newer. The ignored `.env.cloud` needs the existing production `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN`; do not print values, put them in commands, or commit the file. These helpers do not need the OpenAI key. If credentials are unavailable, use the authenticated app and its supported tools, or obtain the missing access. Do not initialize another database, weaken Vercel protection, or copy a stale library into production.
+Run from the repository root with Node 22.x. The ignored `.env.cloud` needs the existing production `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN`; never print their values, put them in commands, or commit the file. The helpers need no OpenAI key. If credentials are unavailable, use the authenticated app or obtain the missing access. Do not initialize another database, weaken Vercel protection, or copy a stale library into production.
 
-The snapshot command reads cloud storage without changing it. It refuses an existing output directory and checks for changes while copying. A successful snapshot has a final `snapshot.json` containing its target, capture time, reference IDs and file hashes. On failure, retain any partial files for diagnosis but do not treat them as a complete inventory; retry into a fresh directory. It is a task snapshot, not a backup: it omits jobs, modeled garment photos and outfit image files.
+The command leaves cloud storage unchanged and acquires no lease. `--out` must be a new directory whose parent already exists. It checks for source changes while copying and writes `snapshot.json` last, recording the target, capture time, reference IDs and file hashes. On failure, retain partial files for diagnosis and retry into a fresh directory; only a directory with the completion marker is a usable snapshot. Snapshots omit jobs, modeled garment photos and outfit images, so they are not backups.
 
-For another cloud task, add `--reuse /path/to/previous/snapshot` while keeping `--out` a new directory. Metadata and image identities are always fetched fresh. Unchanged originals are copied from the earlier snapshot only after checking their SHA-256 and current immutable Blob identity; changed, missing or corrupt cached files are downloaded again. Deleted or hidden items are omitted. Older snapshots without identity metadata and local mutable files safely fall back to reading the source. Reuse neither changes the earlier snapshot nor skips the final consistency checks. Keep reusable snapshots private, just like other original-image working copies.
+To reuse downloads, add `--reuse /path/to/previous/snapshot` and keep `--out` new. The earlier snapshot must be complete and use the same target. Metadata and image identities are fetched fresh; cached originals are copied only when their SHA-256, size and current immutable Blob identity match. Changed, missing or corrupt cached files are downloaded again. Snapshots without identity metadata and mutable local files fall back to source reads. Reuse leaves the earlier snapshot untouched and retains all consistency checks.
 
 | Snapshot content | Use |
 | --- | --- |
-| `library.json` | Current saved owned items and stable IDs |
+| `library.json` | Current visible owned items and stable IDs |
 | `imported/FILENAME` | Original for a library record's `/api/import/library/FILENAME` |
 | `outfits.json` | Saved outfits, reserved IDs and previous garment combinations |
 | `model-reference.png` | Original reference with ID `default`, if present |
 | `model-reference-N.png` | Additional original reference with ID `model-reference-N`, N ≥ 2 |
 | `snapshot.json` | Successful capture marker, target and available reference mapping |
 
-Honor the user's selected reference or the current app selection. Otherwise use `default` and identify the choice briefly. If it is unavailable, ask for the intended reference instead of silently substituting another person. Read references from the selected store; a laptop's `WARDROBE_MODEL_REFERENCE` does not configure the hosted app.
+Honor the user's selected reference or current app selection. Otherwise use `default` and briefly identify that choice. If it is unavailable, ask for the intended reference; never silently substitute another person. Read references from the selected store: the laptop's `WARDROBE_MODEL_REFERENCE` does not configure the hosted app.
 
-Name/category/colour/tag edits and hidden items are now shared in the stored library. The app migrates older browser-only edits when that browser next opens the upgraded app, retaining newer shared edits if they conflict. Task snapshots include the current shared metadata and exclude hidden/deleted records and their cutouts. Outfit publication rechecks that selected garments are still visible in the live library. Do not fabricate ownership from an image path or restore hidden items merely because they remain in storage.
+Name/category/colour/tag edits and hidden state are shared in the stored library. The app migrates older browser-only edits on opening, preserving records already edited in shared storage. Snapshots include shared metadata and omit hidden/deleted records and their cutouts. Cloud outfit saves recheck that selected garments remain visible in the live library. An image path alone does not establish ownership; do not restore hidden items because their files remain in storage.
 
 ## Images and privacy
 
-Keep original PNGs for generation, exact colour work, and final saves. WebP URLs with `format=webp&w=320`, `640`, or `1280` are display derivatives, not replacements for originals. The app creates private derivatives as needed and revalidates browser caches; skills must not rewrite originals as WebP or publish public Blob URLs. The model-reference HTTP route without display parameters is an existing small preview, so use the snapshot's original reference for Imagegen rather than that thumbnail.
+Keep original PNGs for generation, exact colour work and final saves. URLs with `format=webp&w=320`, `640` or `1280` return private display derivatives with browser cache revalidation. Do not replace originals with WebP or publish public Blob URLs. The model-reference HTTP route without display parameters returns a small preview; use the snapshot's original reference for Imagegen.
 
-Treat downloaded references and task snapshots as private working copies. Keep them outside the repository's tracked files and do not commit personal photos, generated results, snapshots or credentials. Identity/source images remain unchanged. Generation may send selected references to the authorized image provider; do not describe that as local-only processing.
+Keep snapshots, downloaded references, personal photos, generated results and credentials private and outside tracked files. Preserve identity/source images unchanged. Generation may send selected references to the authorized image provider; it is not local-only processing.
 
 ## Save reviewed results
 
-The project import and outfit-save commands support `--target cloud` and `--dry-run`. Dry runs validate input and read the destination, but do not publish files or acquire the cloud writer lease. A real cloud save acquires the same fenced writer lease as the hosted app, re-reads the latest destination, publishes immutable image files, then updates its manifest. It does not replace the destination with the curation snapshot.
+The [import](../scripts/import-reviewed-clothes.mjs) and [outfit-save](../scripts/save-outfit-collection.mjs) commands support `--target cloud --dry-run`. Dry runs validate inputs and read the destination without publishing files or acquiring its writer lease. A real cloud save acquires the hosted app's fenced writer lease, re-reads the destination, publishes immutable images, then updates the latest manifest. It never replaces the destination with the curation snapshot.
 
-Use the command in the relevant skill. Keep generation and visual QA outside the lease. If the store is busy, retain the staged results and retry after the active operation finishes; never delete a lease or lock. Do not stop Vercel or restart the laptop's dev server for a cloud save. Refresh the authenticated production app and verify returned IDs, new item counts, and original/display images after saving. No deployment is needed for data updates.
+Use the command in the relevant skill, keeping generation and visual QA outside the lease. If the store is busy, retain staged results and retry after the active operation finishes; never delete a lease or lock. Cloud saves need no server restart or deployment. After saving, refresh the authenticated production app and verify returned IDs, added item counts, and original/display images.
 
-An identical save can be retried without duplicate records. Check the latest records after an uncertain outcome before retrying. Conflicting outfit IDs fail; import IDs derive from cutout content, so reimporting identical cutouts intentionally updates their metadata and supplied modeled photos while retaining unrelated records and fields. Physical-item deduplication still requires source review.
+Check live records before retrying an uncertain save. Identical saves do not duplicate records. Conflicting outfit IDs fail; import IDs derive from cutout content, so reimporting an identical cutout updates its metadata and any supplied modeled photo while retaining unrelated records and fields. Physical-item deduplication still requires source review.
 
-Do not use `scripts/migrate-to-cloud.mjs` for ongoing sync or skill delivery. It is the initial migration tool, not a merge/publish helper. Do not issue ad hoc SQL, replace `library.json`/`outfits.json` from a downloaded snapshot, or garbage-collect originals/derivatives during a skill task.
+Use `scripts/migrate-to-cloud.mjs` only for initial migration, never ongoing sync or skill delivery. During a skill task, do not issue ad hoc SQL, replace `library.json`/`outfits.json` from a snapshot, or garbage-collect originals/derivatives.
 
 ## Using the app's generation workflow
 
-Native skill/Imagegen work and an app API generation are separate workflows. For an app request, use its authenticated UI, selected reference and configured models. The hosted app uses durable jobs; poll/reopen the same job after a disconnect rather than submitting the generation again. It requires review/acceptance before a result enters the saved collection. A timeout does not prove a paid request failed. The app's daily dispatch guard does not apply to native Imagegen calls.
+Native Imagegen and app API generation are separate workflows. App requests use the authenticated UI, selected reference and configured models. Hosted jobs are durable: after a disconnect, poll or reopen the same job instead of submitting again. Results require review/acceptance before entering the saved collection. A timeout does not prove a paid request failed, and the app's daily API limits do not cover native Imagegen calls.
 
-Read `scripts/import-job-api.mjs`, `scripts/outfit-api.mjs` or `scripts/shopping-api.mjs` for current request contracts when automating an API. API routes remain protected by Vercel Authentication; previews deliberately lack production API access. Prefer the signed-in browser. When using Vercel CLI access, follow the Vercel CLI skill, keep any temporary automation credential secret, and revoke only the credential created for the task afterward. Never make images public to make a tool fetch succeed.
+For API automation, read the current [import](../scripts/import-job-api.mjs), [outfit](../scripts/outfit-api.mjs) or [shopping](../scripts/shopping-api.mjs) contract. Routes use Vercel Authentication; previews deliberately lack production API access. Prefer the signed-in browser. For Vercel CLI access, follow its skill, protect temporary automation credentials, and afterward revoke only those created for the task. Never make images public to enable a tool fetch.
 
 ## Explicit local mode
 
-Replace `--target cloud` with `--target local` and omit `--env-file=.env.cloud`. Local helpers honor `WARDROBE_DATA_DIR` from the environment or repository Vite development env, defaulting to `data`; `--data-dir PATH` overrides it. The default local identity reference is separately resolved from `WARDROBE_MODEL_REFERENCE`, default `data/model-reference.png`, relative to the repository root. The snapshot records the resolved copy as `model-reference.png`.
+Use `--target local` and omit `--env-file=.env.cloud`. The data directory is selected in this order: `--data-dir PATH`, environment `WARDROBE_DATA_DIR`, repository Vite development env, then `data`. Relative paths resolve from the repository root. `--data-dir` is invalid with `--target cloud`.
 
-Stop the local Wardrobe server before a local save so the shared filesystem writer lock can be acquired; never bypass a live lock. Read-only snapshots and dry runs do not need a server restart. Local results remain local and must be described that way. Keeping a local copy does not back up or update the live site.
+The default identity reference is resolved separately from environment `WARDROBE_MODEL_REFERENCE`, repository Vite development env, then `data/model-reference.png`. Changing the data directory does not relocate this default; set both when isolating a local task. The snapshot names its copy `model-reference.png`.
+
+Stop the local Wardrobe server before saving so the helper can acquire its shared filesystem writer lock; never bypass a live lock. Snapshots and dry runs need no restart. Describe local results as local: they neither back up nor update the live site.
 
 See [HOSTING.md](HOSTING.md) for infrastructure, migration, retained data and release details. Those maintenance operations are outside an ordinary import, outfit or shopping task.
