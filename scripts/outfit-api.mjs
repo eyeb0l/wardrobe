@@ -436,6 +436,9 @@ export function wardrobeOutfitApi(options = {}) {
         controller.signal.addEventListener("abort", abortListener, { once: true });
       });
       const work = (async () => {
+        await options.beforePaidCall?.(endpoint === "/responses" ? "text" : "image");
+        ensureActive();
+        controller.signal.throwIfAborted();
         const response = await (options.fetch || fetch)(`${setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/+$/, "")}${endpoint}`, { ...init, headers: { ...init.headers, Authorization: `Bearer ${key}` }, signal: controller.signal });
         const result = await response.json().catch(() => ({}));
         return { response, result };

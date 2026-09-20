@@ -16,7 +16,7 @@ const plan = (number = 1, garmentIds = ["top-3", `bottom-${number}`]) => ({
   outerLayerNote: garmentIds.includes("outer-1") ? "A visible full button front." : "",
 });
 
-async function harness(t, { env = {}, timeoutMs, seed = true, edit, analysis } = {}) {
+async function harness(t, { env = {}, timeoutMs, seed = true, edit, analysis, beforePaidCall } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-outfits-test-"));
   t.after(async () => { await plugin?.closeBundle(); await rm(root, { recursive: true, force: true }); });
   for (const name of ["OPENAI_IMAGE_MODEL", "OPENAI_VISION_MODEL", "OPENAI_MODELED_MODEL", "OPENAI_IMAGE_QUALITY"]) {
@@ -82,7 +82,7 @@ async function harness(t, { env = {}, timeoutMs, seed = true, edit, analysis } =
   }
   async function makePlugin({ freshModule = false, dataDirectory = settings.WARDROBE_DATA_DIR } = {}) {
     const factory = freshModule ? (await import(`../outfit-api.mjs?test-reload=${Date.now()}-${Math.random()}`)).wardrobeOutfitApi : wardrobeOutfitApi;
-    return factory({ env: { ...settings, WARDROBE_DATA_DIR: dataDirectory }, fetch: fetchMock, timeoutMs });
+    return factory({ env: { ...settings, WARDROBE_DATA_DIR: dataDirectory }, fetch: fetchMock, timeoutMs, beforePaidCall });
   }
   async function restart({ viteOrder = false, ...options } = {}) {
     const previous = plugin;

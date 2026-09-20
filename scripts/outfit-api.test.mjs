@@ -563,3 +563,26 @@ test('empty accessory suggestions validate the saved image path without download
   await rm(path.join(h.dataDir,'outfit-images','original-1.png'));
   await withStorage(tracking,()=>h.request('GET',`${API}/original-1/accessories`,undefined,404));assert.equal(images,0);
 });
+
+
+test("outfit planning and cached accessories use text while photographs use images", async t => {
+  const reservations = [];
+  const h = await harness(t, { beforePaidCall: async kind => reservations.push(kind) });
+  const job = await h.create();
+  assert.equal((await h.settled(job.id)).status, "review");
+  assert.deepEqual(reservations, ["text", "image"]);
+  h.setAnalysis(() => Response.json({ output_text: JSON.stringify({ suggestions: accessoryIdeas }) }));
+  await h.request("POST", `${API}/original-1/accessories`, {});
+  await h.request("POST", `${API}/original-1/accessories`, {});
+  assert.deepEqual(reservations, ["text", "image", "text"], "cache hit consumes no allowance");
+});
+
+test("an exhausted image allowance stops the image dispatch after text planning", async t => {
+  const h = await harness(t, { beforePaidCall: async kind => {
+    if (kind === "image") throw Object.assign(new Error("Image allowance reached"), { status: 429 });
+  } });
+  const job = await h.settled((await h.create()).id);
+  assert.equal(job.outfits[0].status, "failed");
+  assert.equal(job.outfits[0].error, "Image allowance reached");
+  assert.equal(h.requests.length, 1);
+});

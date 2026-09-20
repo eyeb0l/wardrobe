@@ -198,6 +198,8 @@ export function wardrobeShoppingApi(options = {}) {
         controller.signal.addEventListener("abort", listener, { once: true });
       });
       const work = (async () => {
+        await options.beforePaidCall?.("text");
+        ensureRequest(controller);
         const response = await (options.fetch || fetch)(`${setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/+$/, "")}/responses`, {
           method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${setting("OPENAI_API_KEY").trim()}` }, body: JSON.stringify(request), signal: controller.signal,
         });

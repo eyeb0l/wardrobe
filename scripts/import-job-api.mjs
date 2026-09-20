@@ -365,7 +365,7 @@ function stageState() {
   return { status: "pending", decision: null, attempts: 0, assetUrl: null, failedAssetUrl: null, cleanupPreviewUrl: null, cleanupTolerance: 46, cleanupDiagnostics: null, error: null, prompt: null, updatedAt: null };
 }
 
-async function openAIEdit({ key, baseUrl, model, prompt, images, size, background, quality, timeoutMs }) {
+async function openAIEdit({ beforePaidCall, key, baseUrl, model, prompt, images, size, background, quality, timeoutMs }) {
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", prompt);
@@ -377,6 +377,7 @@ async function openAIEdit({ key, baseUrl, model, prompt, images, size, backgroun
     const normalized = await normalizeImage(image.data);
     form.append("image[]", new Blob([normalized], { type: "image/png" }), image.name?.replace(/\.[^.]+$/, ".png") || `image-${index + 1}.png`);
   }
+  await beforePaidCall?.("image");
   const response = await fetch(`${baseUrl}/images/edits`, {
     method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form,
     ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
@@ -388,8 +389,9 @@ async function openAIEdit({ key, baseUrl, model, prompt, images, size, backgroun
   return Buffer.from(encoded, "base64");
 }
 
-async function openAIPlanModeledSetting({ key, baseUrl, model, image, prompt, timeoutMs }) {
+async function openAIPlanModeledSetting({ beforePaidCall, key, baseUrl, model, image, prompt, timeoutMs }) {
   const normalized = await normalizeImage(image);
+  await beforePaidCall?.("text");
   const response = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -411,7 +413,8 @@ async function openAIPlanModeledSetting({ key, baseUrl, model, image, prompt, ti
   return normalizeModeledSetting(JSON.parse(output).setting);
 }
 
-async function openAIAnalyze({ key, baseUrl, model, image, mime, timeoutMs }) {
+async function openAIAnalyze({ beforePaidCall, key, baseUrl, model, image, mime, timeoutMs }) {
+  await beforePaidCall?.("text");
   const response = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -587,7 +590,7 @@ export function wardrobeImportApi(options = {}) {
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, chromaKeyUsed);
           stage.generationPrompt = current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt;
           await saveJob(current);
-          bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: stage.generationPrompt });
+          bytes = await openAIEdit({ beforePaidCall: options.beforePaidCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: stage.generationPrompt });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
           failedAssetUrl = `${ASSET_ROOT}/${current.id}/${rawName}`;
@@ -618,11 +621,11 @@ export function wardrobeImportApi(options = {}) {
           // the new scene before the image request so it survives failures.
           stage.generationPrompt = null;
           await saveJob(current);
-          stage.setting = await openAIPlanModeledSetting({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: garment.data, prompt: stage.settingPrompt });
+          stage.setting = await openAIPlanModeledSetting({ beforePaidCall: options.beforePaidCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: garment.data, prompt: stage.settingPrompt });
           stage.settingHistory = [...(stage.settingHistory || []), stage.setting].slice(-12);
           stage.generationPrompt = buildModeledPhotoPrompt({ setting: stage.setting, direction: stage.prompt });
           await saveJob(current);
-          bytes = await openAIEdit({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: stage.generationPrompt });
+          bytes = await openAIEdit({ beforePaidCall: options.beforePaidCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: stage.generationPrompt });
         }
         await writeFile(output, bytes);
         const fresh = await loadJob(current.id);
@@ -866,7 +869,7 @@ export function wardrobeImportApi(options = {}) {
         const image = decodeImage(input);
         const normalizedImage = await normalizeImage(image.data);
         const key = setting("OPENAI_API_KEY");
-        const analysis = await openAIAnalyze({ timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: normalizedImage, mime: "image/png" });
+        const analysis = await openAIAnalyze({ beforePaidCall: options.beforePaidCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: normalizedImage, mime: "image/png" });
         const detected = analysis.items.map(normalizeMetadata);
         const canUseOriginal = detected.length === 1 && analysis.isCleanProductShot && await hasCleanProductBackground(normalizedImage);
         const jobs = [];
