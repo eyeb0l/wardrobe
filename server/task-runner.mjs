@@ -18,7 +18,7 @@ export async function executeCloudTask(id, step, { store = defaultStore(), plugi
     if (["done", "failed"].includes(task.state)) return { more: false };
     if (task.step > step) return { more: true };
     if (task.step < step) throw new Error("Task steps arrived out of order");
-    const plugin = await pluginFactory(task.payload.kind);
+    const plugin = await pluginFactory(task.payload.kind, { beforePaidCall: reserve });
     try {
       if (!enabled()) {
         await plugin.failTask(task.payload, "Hosted generation is disabled.");
@@ -32,7 +32,6 @@ export async function executeCloudTask(id, step, { store = defaultStore(), plugi
         await saveTask({ ...task, state: "failed", error: INTERRUPTED });
         return { more: false };
       }
-      await reserve();
       await saveTask({ ...task, state: "running", startedAt: new Date().toISOString() });
       const result = await plugin.runTask(task.payload);
       const more = task.payload.kind === "outfit" && result === true;

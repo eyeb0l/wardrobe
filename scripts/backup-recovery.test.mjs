@@ -225,3 +225,14 @@ test('future-dated backup usage cannot erase the current UTC-day spending guard'
   assert.throws(() => prepareRestore([future]), /future UTC usage date/);
   assert.throws(() => prepareRestore([current], { currentFiles: [future] }), /future UTC usage date/);
 });
+
+
+test('restore preserves the maximum of each independent usage counter', () => {
+  const usage = (calls, textCalls) => jsonFile('.api-usage.json', { day, calls, textCalls });
+  for (const [backup, live] of [[usage(8, 2), usage(3, 100)], [usage(3, 100), usage(8, 2)]]) {
+    assert.deepEqual(parsed(prepareRestore([backup], { currentFiles: [live] }), '.api-usage.json'), { day, calls: 8, textCalls: 100 });
+  }
+  const legacy = jsonFile('.api-usage.json', { day, calls: 40 });
+  assert.deepEqual(parsed(prepareRestore([legacy], { currentFiles: [usage(3, 100)] }), '.api-usage.json'), { day, calls: 40, textCalls: 100 });
+  assert.throws(() => prepareRestore([usage(3, -1)]), /invalid daily text API usage/);
+});

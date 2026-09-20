@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       return;
     }
     plugin = await createPlugin(kind, {
-      readOnly,
+      readOnly, beforePaidCall: reservePaidCall,
       scheduleTask: async (payload) => {
         const task = await createTask(payload);
         try {
@@ -82,7 +82,6 @@ export default async function handler(req, res) {
         }
       },
     });
-    if (!readOnly && (pathname === "/api/import/jobs" || pathname === "/api/shopping/analyze" || pathname.endsWith("/accessories"))) await reservePaidCall();
     let route;
     plugin.configureServer({ middlewares: { use(fn) { route = fn; } } });
     await route(req, res, () => json(res, 404, { error: "Not found" }));

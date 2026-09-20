@@ -20,7 +20,7 @@ const assessment = (overrides = {}) => ({
   watchOuts: ["Check the shoulder fit in person."], pairings: [{ itemIds: ["bottom-1"], reason: "The lighter trousers balance the darker top." }], ...overrides,
 });
 
-async function harness(t, { env = {}, timeoutMs, response } = {}) {
+async function harness(t, { env = {}, timeoutMs, response, beforePaidCall } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-shopping-test-"));
   const dataDir = path.join(root, "custom-data");
   await mkdir(path.join(dataDir, "imported"), { recursive: true });
@@ -62,7 +62,7 @@ async function harness(t, { env = {}, timeoutMs, response } = {}) {
     if (providerResponse) return providerResponse(request, options);
     return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(assessment()) }] }] });
   };
-  const makePlugin = () => wardrobeShoppingApi({ env: settings, fetch: fetchMock, timeoutMs });
+  const makePlugin = () => wardrobeShoppingApi({ env: settings, fetch: fetchMock, timeoutMs, beforePaidCall });
   let plugin = makePlugin();
   await plugin.configResolved({ root });
   const middleware = (instance, preview = false) => {
@@ -493,4 +493,20 @@ test("disconnecting while uploading does not call the provider or strand the pen
   assert.equal(h.requests.length, 0);
   await h.analyze();
   assert.equal(h.requests.length, 1);
+});
+
+
+test("shopping reserves text before dispatch and reports an exhausted text allowance", async t => {
+  const reservations = [];
+  let blocked = false;
+  const h = await harness(t, { beforePaidCall: async kind => {
+    reservations.push(kind);
+    if (blocked) throw Object.assign(new Error("Text allowance reached"), { status: 429 });
+  } });
+  await h.analyze();
+  assert.deepEqual(reservations, ["text"]);
+  blocked = true;
+  const result = await h.analyze({}, 429);
+  assert.equal(result.error, "Text allowance reached");
+  assert.equal(h.requests.length, 1, "blocked request never reaches the provider");
 });

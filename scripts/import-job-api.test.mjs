@@ -23,7 +23,7 @@ test("chroma selection protects either recorded garment color", () => {
   assert.match(chooseChromaKey("invalid", null), /^#[0-9a-f]{6}$/);
 });
 
-async function harness(t, env = {}) {
+async function harness(t, env = {}, beforePaidCall) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-model-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   // Never read .env or allow a real network request in these tests.
@@ -68,7 +68,7 @@ async function harness(t, env = {}) {
     }
     return Response.json({ data: [{ b64_json: output.toString("base64") }] });
   });
-  const plugin = wardrobeImportApi({ env: {
+  const plugin = wardrobeImportApi({ beforePaidCall, env: {
     OPENAI_API_KEY: "test-key", OPENAI_API_BASE_URL: "https://wardrobe-test.invalid",
     WARDROBE_DATA_DIR: path.join(root, "data"), WARDROBE_MODEL_REFERENCE: "identity.png", ...env,
   } });
@@ -487,4 +487,17 @@ test("a refused modeled shot exposes the exact prompt and manual uploads require
   assert.equal((await sharp(saved).metadata()).width, 900);
   assert.deepEqual(await h.request("GET", original.modeledImage), originalBytes);
   assert.equal((await sharp(await h.request("GET", `${approved.libraryItem.modeledImage}?format=webp&w=640`)).metadata()).format, "webp");
+});
+
+
+test("import analysis and scene planning reserve text separately from each generated image", async t => {
+  const reservations = [];
+  const h = await harness(t, {}, async kind => reservations.push(kind));
+  const created = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const job = created.jobs[0];
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`, {});
+  await h.waitForStage(job.id, "garment");
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`, {});
+  await h.waitForStage(job.id, "modeled");
+  assert.deepEqual(reservations, ["text", "image", "text", "image"]);
 });

@@ -68,10 +68,11 @@ function fakeRuntime(h, behavior = {}) {
         if (behavior.reserve) return behavior.reserve();
         await writeFile(`${CLOUD_ROOT}/reserved.json`, JSON.stringify({ count: calls.reserve }));
       },
-      async pluginFactory(kind) {
+      async pluginFactory(kind, { beforePaidCall }) {
         calls.factory.push(kind);
         return {
           async runTask(payload) {
+            await beforePaidCall("image");
             calls.run.push(structuredClone(payload));
             return behavior.run ? behavior.run(payload, calls.run.length) : undefined;
           },
@@ -308,7 +309,7 @@ test("actual import reconciliation fails orphaned processing and preserves compl
     assert.equal((await h.storedTask(fixture.task.id)).state, "done");
     assert.deepEqual(await executeCloudTask(fixture.task.id, 0, options), { more: false });
   }
-  assert.equal(reservations, 3, "redelivery does not consume another reservation");
+  assert.equal(reservations, 0, "skipped work and redelivery consume no reservations");
   assert.equal(h.blobs.size, 0);
 });
 
@@ -361,7 +362,7 @@ test("actual outfit reconciliation fails only orphaned generating items and pres
     assert.equal((await h.storedTask(fixture.task.id)).state, "done");
     assert.deepEqual(await executeCloudTask(fixture.task.id, 0, options), { more: false });
   }
-  assert.equal(reservations, 2);
+  assert.equal(reservations, 0, "reconciliation dispatches no provider requests");
   assert.equal(await h.store.readFile(`${CLOUD_ROOT}/outfits.json`, "utf8"), manifestBefore);
   assert.equal(h.blobs.size, 0);
 });

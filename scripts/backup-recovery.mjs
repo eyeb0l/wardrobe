@@ -107,9 +107,16 @@ function usage(bytes, name = '.api-usage.json') {
   if (!bytes) return undefined;
   const value = json(bytes, name);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value.day || '') || !Number.isSafeInteger(value.calls) || value.calls < 0) throw invalid(name, 'invalid daily API usage.');
+  if (value.textCalls !== undefined && (!Number.isSafeInteger(value.textCalls) || value.textCalls < 0)) throw invalid(name, 'invalid daily text API usage.');
   const date = new Date(`${value.day}T00:00:00.000Z`);
   if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value.day) throw invalid(name, 'invalid UTC usage date.');
   return value;
+}
+
+function mergeUsage(left, right) {
+  const combined = { ...left, ...right, calls: Math.max(left.calls, right.calls) };
+  if (left.textCalls !== undefined || right.textCalls !== undefined) combined.textCalls = Math.max(left.textCalls ?? 0, right.textCalls ?? 0);
+  return combined;
 }
 
 // Pure transformation: an immutable backup keeps the original job history;
@@ -143,13 +150,13 @@ export function prepareRestore(files, { currentFiles = [] } = {}) {
   if (liveUsage?.day === today) {
     // A backup recorded by a clock ahead of UTC must never replace today's
     // live guard: reservePaidCall would otherwise reset that future date to 0.
-    const combined = { ...liveUsage, calls: Math.max(liveUsage.calls, oldUsage?.day === today ? oldUsage.calls : 0) };
+    const combined = oldUsage?.day === today ? mergeUsage(oldUsage, liveUsage) : liveUsage;
     prepared.set('.api-usage.json', encode(combined));
   } else {
     if ((oldUsage && oldUsage.day > today) || (liveUsage && liveUsage.day > today)) throw invalid('.api-usage.json', 'future UTC usage date without a current-day destination guard.');
     if (liveUsage) {
       const combined = !oldUsage || liveUsage.day > oldUsage.day ? liveUsage
-        : oldUsage.day > liveUsage.day ? oldUsage : { ...oldUsage, ...liveUsage, calls: Math.max(oldUsage.calls, liveUsage.calls) };
+        : oldUsage.day > liveUsage.day ? oldUsage : mergeUsage(oldUsage, liveUsage);
       prepared.set('.api-usage.json', encode(combined));
     }
   }

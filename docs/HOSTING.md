@@ -43,7 +43,14 @@ The app permits one cloud writer at a time. A concurrent edit or generation can 
 
 If generation was interrupted after a paid request started, the app marks it for review instead of automatically repeating the uncertain request. Check provider usage before choosing **Retry**: retrying creates a new paid request.
 
-`WARDROBE_DAILY_API_LIMIT` defaults to **40** dispatch reservations per UTC calendar day. Set a positive integer in Production to change it, then redeploy. Reservations are counted conservatively, so failed or uncertain attempts can consume the allowance. This limits request count, **not currency spend**; calls vary in price, and a batch can use several calls. Use provider-side controls alongside it.
+Hosted API requests have two independent allowances per UTC calendar day:
+
+- `WARDROBE_DAILY_IMAGE_API_LIMIT` defaults to **40** image generation requests.
+- `WARDROBE_DAILY_TEXT_API_LIMIT` defaults to **1,000** text/vision requests, including shopping checks, accessory suggestions, clothing analysis, outfit planning, and modeled-photo scene planning.
+
+Set positive integers in Production to change these limits, then redeploy. The legacy `WARDROBE_DAILY_API_LIMIT` remains an image-only fallback when the new image setting is unset. Existing aggregate usage is conservatively retained against images until the next UTC day; text starts with its own allowance. Backups preserve both counters.
+
+Each actual provider request reserves its own allowance immediately before dispatch, under the cloud writer lease. Cached suggestions and skipped tasks consume no allowance. Failed or uncertain requests still count. A modeled garment attempt uses one text request for scene planning and one image request; batches can use several calls. These limits control request count, **not currency spend**. Use provider-side controls alongside them.
 
 ## Updates and retained data
 

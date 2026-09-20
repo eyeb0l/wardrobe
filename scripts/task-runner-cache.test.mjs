@@ -69,8 +69,9 @@ test("default task workers reuse bounded image bytes while paths, leases and inj
   const options = {
     enabled: () => true,
     reserve: async () => { reservations += 1; },
-    pluginFactory: async () => ({
+    pluginFactory: async (_kind, { beforePaidCall }) => ({
       async runTask() {
+        await beforePaidCall("image");
         if (expectedStore) assert.equal(currentStorage(), expectedStore);
         if (expected === null) { await assert.rejects(readFile(image), { code: "ENOENT" }); return false; }
         assert.equal((await readFile(image)).toString(), expected);
