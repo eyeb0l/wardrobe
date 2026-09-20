@@ -1,7 +1,7 @@
-import { readFile, readdir, realpath, stat } from "./storage-fs.mjs";
+import { readFile, readdir, realpath, stat, containedFiles } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
-import { outfitContactSheets } from "./outfit-api.mjs";
+import { outfitContactSheets, contactThumbnail } from "./outfit-api.mjs";
 
 const API = "/api/shopping";
 const PARTS = ["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"];
@@ -130,7 +130,7 @@ export function wardrobeShoppingApi(options = {}) {
     if (controller.signal.aborted) throw fail("This shopping check was cancelled.", 499);
   };
 
-  async function references({ verifyImages = true } = {}) {
+  async function references() {
     const result = [];
     const defaultPath = path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"));
     try { result.push({ id: "default", label: "Default", file: await containedFile(path.dirname(defaultPath), path.basename(defaultPath)) }); }
@@ -142,38 +142,29 @@ export function wardrobeShoppingApi(options = {}) {
       try { result.push({ id: `model-reference-${number}`, label: `Reference ${number}`, number, file: await containedFile(dataDir, entry.name) }); }
       catch (error) { if (error.code !== "ENOENT" && error.status !== 404) throw error; }
     }
-    // Settings need only contained, existing paths. Analysis still excludes
-    // undecodable or excessively large references before any provider request.
-    if (!verifyImages) return result.sort((a, b) => (a.number || 0) - (b.number || 0));
-    const available = [];
-    for (const reference of result) {
-      try {
-        const metadata = await sharp(await readFile(reference.file), { limitInputPixels: 64e6 }).metadata();
-        if (metadata.width && metadata.height && metadata.width * metadata.height <= 64e6) available.push(reference);
-      } catch { /* An unreadable reference is not usable for analysis. */ }
-    }
-    return available.sort((a, b) => (a.number || 0) - (b.number || 0));
+    // Resolve paths without downloading unselected references. Analysis fully
+    // validates the selected image while preparing its provider input below.
+    return result.sort((a, b) => (a.number || 0) - (b.number || 0));
   }
 
-  async function inventory({ verifyImages = true } = {}) {
+  async function inventory() {
     let records;
     try { records = JSON.parse(await readFile(path.join(dataDir, "library.json"), "utf8")); }
     catch (error) { if (error.code === "ENOENT") return new Map(); throw fail("The wardrobe library could not be read. Restore library.json before continuing.", 503); }
     if (!Array.isArray(records)) throw fail("The wardrobe library is invalid. Restore library.json before continuing.", 503);
     const result = new Map();
-    for (const record of records) {
-      if (record?.hidden) continue;
-      if (!object(record) || !validId(record.id) || !PARTS.includes(record.part) || result.has(record.id)) continue;
+    const candidates = records.flatMap((record) => {
+      if (!object(record) || record.hidden || !validId(record.id) || !PARTS.includes(record.part)) return [];
       const match = typeof record.image === "string" && record.image.match(/^\/api\/import\/library\/([a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp))$/i);
-      if (!match) continue;
-      try {
-        const file = await containedFile(importedDir, match[1]);
-        if (verifyImages) {
-          const metadata = await sharp(await readFile(file), { limitInputPixels: 64e6 }).metadata();
-          if (!metadata.width || !metadata.height || metadata.width * metadata.height > 64e6) continue;
-        }
-        result.set(record.id, { id: record.id, file });
-      } catch { /* Missing or escaped cutouts are not part of the usable wardrobe. */ }
+      return match ? [{ record, filename: match[1] }] : [];
+    });
+    const files = await containedFiles(importedDir, candidates.map(({ filename }) => filename));
+    for (const { record, filename } of candidates) {
+      const file = files.get(filename);
+      if (!file) continue;
+      const existing = result.get(record.id);
+      if (!existing) result.set(record.id, { id: record.id, file, candidates: [file] });
+      else if (!existing.candidates.includes(file)) existing.candidates.push(file);
     }
     return result;
   }
@@ -187,7 +178,8 @@ export function wardrobeShoppingApi(options = {}) {
       seen.add(record.id);
       if (!available.has(record.id)) continue;
       if (!PARTS.includes(record.part) || !Array.isArray(record.tags) || record.tags.length > 12) throw fail("Invalid wardrobe details.");
-      result.push({ ...available.get(record.id), name: text(record.name, "wardrobe name", 120, false) || "Wardrobe piece", part: record.part,
+      const { id, file } = available.get(record.id);
+      result.push({ id, file, name: text(record.name, "wardrobe name", 120, false) || "Wardrobe piece", part: record.part,
         color: record.color == null ? "" : text(record.color, "wardrobe color", 20, false), secondaryColor: record.secondaryColor == null ? null : text(record.secondaryColor, "secondary color", 20, false),
         tags: record.tags.map((tag) => text(tag, "wardrobe tag", 40, false)),
       });
@@ -245,15 +237,38 @@ export function wardrobeShoppingApi(options = {}) {
     const available = await inventory();
     ensureRequest(controller);
     if (!available.size) throw fail("Add wardrobe pieces before checking a garment.", 503);
-    const items = visibleInventory(body.wardrobeItems, available);
+    let items = visibleInventory(body.wardrobeItems, available);
     if (!items.length) throw fail("Add wardrobe pieces before checking a garment.", 503);
     const candidate = await candidateImage(body.image);
     ensureRequest(controller);
     let referenceImage, sheets;
     try {
-      referenceImage = await jpeg(await readFile(reference.file));
+      const bytes = await readFile(reference.file);
+      const metadata = await sharp(bytes, { limitInputPixels: 64e6 }).metadata();
+      if (!metadata.width || !metadata.height || metadata.width * metadata.height > 64e6) throw new Error("Invalid reference");
+      referenceImage = await jpeg(bytes);
+    } catch { throw fail("Selected model reference is unavailable. Choose another reference."); }
+    ensureRequest(controller);
+    // Only submitted, server-authorized garments become inputs. Decode once
+    // into small tiles, excluding corrupt originals before numbering the sheets.
+    // Keeping tiles instead of all originals also avoids byte-cache thrashing.
+    const thumbnails = new Map();
+    const prepared = [];
+    for (const item of items) {
+      for (const file of available.get(item.id).candidates) {
+        ensureRequest(controller);
+        try {
+          thumbnails.set(item.id, await contactThumbnail(await readFile(file)));
+          prepared.push({ ...item, file });
+          break;
+        } catch { /* Try a later record for the same ID if its first image is corrupt. */ }
+      }
+    }
+    items = prepared;
+    if (!items.length) throw fail("Add wardrobe pieces before checking a garment.", 503);
+    try {
       ensureRequest(controller);
-      sheets = await outfitContactSheets(items);
+      sheets = await outfitContactSheets(items, thumbnails);
     } catch (error) { if (error.status) throw error; throw fail("A local reference image could not be read. Refresh your wardrobe and try again.", 503); }
     ensureRequest(controller);
     const prompt = `Assess whether the candidate garment is a worthwhile addition to this person's actual wardrobe. Inspect every supplied image; do not base advice only on metadata.
@@ -288,7 +303,7 @@ Owned inventory: ${JSON.stringify(items.map(({ file, ...item }, index) => ({ ...
     try {
       ensureActive();
       if (req.method === "GET" && url.pathname === `${API}/config`) {
-        const [refs, items] = await Promise.all([references({ verifyImages: false }), inventory({ verifyImages: false })]);
+        const [refs, items] = await Promise.all([references(), inventory()]);
         const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
         return sendJson(res, 200, { ready: hasApiKey && refs.length > 0 && items.size > 0, hasApiKey, hasModelReference: refs.length > 0,
           modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), wardrobeCount: items.size });

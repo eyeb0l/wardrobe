@@ -252,6 +252,11 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
         VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (cache_key) DO NOTHING`,
         [key, source.blob_url, DISPLAY_RECIPE, width, uploaded.url, bytes.length]);
       const [saved] = await db.query("SELECT * FROM wardrobe_image_variants WHERE cache_key = $1", [key]);
+      // Another process may have won publication while this upload was in
+      // flight. Only our own published URL can be paired with these bytes.
+      // The existing bounded immutable cache also makes warmup useful without
+      // downloading the WebP we have just encoded and uploaded.
+      if (saved?.blob_url === uploaded.url) return { ...saved, bytes: await cachedBlob(uploaded.url, () => bytes) };
       return saved;
     })();
     pendingVariants.set(key, work);
@@ -282,7 +287,7 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       const etag = displayETag(displayKey(source.blob_url, width));
       if (matchesETag(condition, etag)) return { etag, notModified: true };
       const variant = await variantFor(source, width);
-      return { etag, bytes: await readBlob(variant.blob_url, file) };
+      return { etag, bytes: variant.bytes ? Buffer.from(variant.bytes) : await readBlob(variant.blob_url, file) };
     },
     async listDisplayImageSources() {
       return db.query("SELECT path, size FROM wardrobe_files WHERE kind = 'file' AND blob_url IS NOT NULL AND path ~* $1 ORDER BY path", ["\\.(png|jpe?g|webp)$"]);
@@ -454,6 +459,19 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       const rows = await db.query(`SELECT * FROM wardrobe_files WHERE left(path, length($1) + 1) = $1 || '/'
         AND strpos(substring(path FROM length($1) + 2), '/') = 0 ORDER BY path`, [target]);
       return rows.map((row) => options.withFileTypes ? { name: path.posix.basename(row.path), ...fileStat(row) } : path.posix.basename(row.path));
+    },
+    async containedFiles(directory, filenames) {
+      const base = canonical(directory);
+      const names = [...new Set(filenames)].filter((name) => typeof name === "string" && name.length > 0 &&
+        name === path.posix.basename(name) && ![".", ".."].includes(name) && !/[\\\0]/.test(name));
+      if (!names.length) return new Map();
+      const candidates = new Map(names.map((name) => [name, `${base}/${name}`]));
+      // Fresh metadata only: never load JSON text or persist mutable path state.
+      const rows = await db.query("SELECT path, kind FROM wardrobe_files WHERE path = ANY($1::text[])",
+        [[base, ...candidates.values()]]);
+      const kinds = new Map(rows.map((row) => [row.path, row.kind]));
+      if (kinds.get(base) !== "dir") return new Map();
+      return new Map([...candidates].filter(([, file]) => kinds.get(file) === "file"));
     },
     async stat(file) { return fileStat(await rowFor(file)); },
     async lstat(file) { return store.stat(file); },

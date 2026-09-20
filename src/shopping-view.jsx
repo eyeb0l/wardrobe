@@ -31,10 +31,10 @@ function setupMessage(config) {
   return "";
 }
 
-function Photo({ src, alt, className = "" }) {
+function Photo({ src, alt, className = "", sizes = "(max-width: 580px) 33vw, 160px" }) {
   const [failedSource, setFailedSource] = useState(null);
   if (!src || failedSource === src) return <div className={`shopping-photo-fallback ${className}`} role="img" aria-label={alt || "Reference photo unavailable"}>Photo unavailable</div>;
-  return <OptimizedImage src={src} alt={alt} className={className} onError={() => setFailedSource(src)} sizes="(max-width: 580px) 33vw, 160px" />;
+  return <OptimizedImage src={src} alt={alt} className={className} onError={() => setFailedSource(src)} sizes={sizes} />;
 }
 
 function Assessment({ result, itemsById, headingRef, titleId }) {
@@ -323,7 +323,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
           {references.length ? <fieldset className="shopping-reference-picker" disabled={analyzing || configLoading}>
             <legend>Model reference</legend>
             <div className="shopping-reference-options">{references.map((reference) => <label key={reference.id} className={selectedReference?.id === reference.id ? "selected" : ""}>
-              <Photo src={reference.imageUrl} alt="" />
+              <Photo src={reference.imageUrl} alt="" sizes="104px" />
               <span><input type="radio" name={`${id}-reference`} value={reference.id} checked={selectedReference?.id === reference.id} onChange={() => { setModelReferenceId(reference.id); setResult(null); setAnalysisError(""); }} />{reference.label}</span>
             </label>)}</div>
             <button type="button" className="shopping-text-button shopping-refresh-references" onClick={refreshConfig} disabled={configLoading || analyzing}>{configLoading ? "Refreshing…" : "Refresh photos"}</button>

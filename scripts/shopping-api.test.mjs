@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import sharp from "sharp";
 import { wardrobeShoppingApi } from "./shopping-api.mjs";
+import { outfitContactSheets } from "./outfit-api.mjs";
 import { withStorage } from "./storage-fs.mjs";
 
 const API = "/api/shopping";
@@ -41,9 +42,13 @@ async function harness(t, { env = {}, timeoutMs, response } = {}) {
   const candidate = await sharp(await image("#667755", 120, 180)).jpeg().toBuffer();
   const requests = [];
   const imageReads = [];
+  let imageReadHook;
   const storage = { ...fileSystem, async readFile(filename, ...args) {
     const bytes = await fileSystem.readFile(filename, ...args);
-    if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
+    if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) {
+      imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
+      await imageReadHook?.(String(filename));
+    }
     return bytes;
   } };
   let providerResponse = response;
@@ -78,7 +83,7 @@ async function harness(t, { env = {}, timeoutMs, response } = {}) {
   }
   const body = (overrides = {}) => ({ image: `data:image/jpeg;base64,${candidate.toString("base64")}`, modelReferenceId: "default", notes: "An everyday top", wardrobeItems: items, ...overrides });
   async function serve() {
-    const server = createServer((req, res) => { void handler(req, res, () => { res.statusCode = 404; res.end(); }); });
+    const server = createServer((req, res) => { void withStorage(storage, () => handler(req, res, () => { res.statusCode = 404; res.end(); })); });
     await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
     t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
     return `http://127.0.0.1:${server.address().port}`;
@@ -87,6 +92,7 @@ async function harness(t, { env = {}, timeoutMs, response } = {}) {
     serve,
     analyze: (overrides, expected = 200, headers) => request("POST", `${API}/analyze`, body(overrides), expected, headers),
     setResponse(value) { providerResponse = value; }, close() { plugin.closeBundle(); },
+    setImageReadHook(value) { imageReadHook = value; },
     async restart({ preview = false } = {}) { const previous = plugin; plugin = makePlugin(); await plugin.configResolved({ root }); previous.closeBundle(); handler = middleware(plugin, preview); },
   };
 }
@@ -151,6 +157,11 @@ test("analysis sends the real candidate, selected person and labeled contact she
   const normalized = (bytes) => sharp(bytes, { limitInputPixels: 64e6 }).rotate().resize(1600, 1600, { fit: "inside", withoutEnlargement: true }).flatten({ background: "#ffffff" }).jpeg({ quality: 85 }).toBuffer();
   assert.deepEqual(images[0], await normalized(h.candidate));
   assert.deepEqual(images[1], await normalized(h.numberedIdentity));
+  const expectedSheets = await outfitContactSheets(h.items.map((item) => ({ ...item, file: path.join(h.dataDir, "imported", `${item.id}.png`) })));
+  assert.deepEqual(images.slice(2), expectedSheets, "single-pass preparation preserves every contact-sheet byte and ITEM label");
+  assert.equal(h.imageReads.length, 15, "fourteen submitted cutouts and only the selected reference are read once");
+  assert.equal(new Set(h.imageReads.map((entry) => entry.file)).size, 15);
+  assert.ok(!h.imageReads.some((entry) => entry.file === path.join(h.root, "identity.png")), "unselected reference is never downloaded");
   for (const [index, sheet] of images.slice(2).entries()) {
     const metadata = await sharp(sheet).metadata();
     assert.equal(metadata.width, 1024);
@@ -176,6 +187,65 @@ test("browser edits and deletions control the snapshot while source images remai
   assert.ok(!prompt.includes("untrusted.invalid"));
   assert.ok(!prompt.includes("/etc/passwd"));
   assert.equal(request.input[0].content.filter((item) => item.type === "input_image").length, 3);
+  assert.deepEqual(h.imageReads.map((entry) => path.basename(entry.file)), ["identity.png", "bottom-1.png", "dress-1.png"], "unsubmitted garments and unselected references are never downloaded");
+});
+
+test("single-pass Shopping excludes corrupt cutouts and retains contiguous labels and exact healthy images", async (t) => {
+  const h = await harness(t);
+  await writeFile(path.join(h.dataDir, "imported", "top-1.png"), "corrupt");
+  await writeFile(path.join(h.dataDir, "model-reference-2.png"), "corrupt unselected reference");
+  const result = await h.analyze({ wardrobeItems: [h.items[0], h.items.find((item) => item.id === "bottom-1")] });
+  assert.equal(result.context.wardrobeCount, 1);
+  const request = h.requests[0].request;
+  assert.deepEqual(request.text.format.schema.properties.pairings.items.properties.itemIds.items.enum, ["bottom-1"]);
+  assert.match(request.input[0].content[0].text, /ITEM 1/);
+  assert.doesNotMatch(request.input[0].content[0].text, /ITEM 2/);
+  const sheet = Buffer.from(request.input[0].content.at(-1).image_url.split(",")[1], "base64");
+  assert.deepEqual(sheet, (await outfitContactSheets([{ id: "bottom-1", name: "bottom-1", file: path.join(h.dataDir, "imported", "bottom-1.png") }]))[0]);
+  assert.deepEqual(h.imageReads.map((entry) => path.basename(entry.file)), ["identity.png", "top-1.png", "bottom-1.png"]);
+});
+
+test("Shopping retains a healthy later image for a duplicate ID and never exposes internal candidate paths", async (t) => {
+  const h = await harness(t);
+  const first = h.items.find((item) => item.id === "bottom-1");
+  await writeFile(path.join(h.dataDir, "imported", "bad.png"), "corrupt");
+  await writeFile(path.join(h.dataDir, "library.json"), JSON.stringify([{ ...first, image: "/api/import/library/bad.png" }, ...h.items]));
+  await h.analyze({ wardrobeItems: [first] });
+  assert.deepEqual(h.imageReads.map((entry) => path.basename(entry.file)), ["identity.png", "bad.png", "bottom-1.png"]);
+  assert.ok(!JSON.stringify(h.requests[0].request).includes(h.root));
+  assert.doesNotMatch(h.requests[0].request.input[0].content[0].text, /candidates/);
+});
+
+test("a selected reference with a readable header but corrupt pixels is rejected before provider submission", async (t) => {
+  const h = await harness(t);
+  const truncated = h.identity.subarray(0, 80);
+  assert.equal((await sharp(truncated).metadata()).width, 80);
+  await assert.rejects(sharp(truncated).jpeg().toBuffer());
+  await writeFile(path.join(h.root, "identity.png"), truncated);
+  await h.analyze({}, 400);
+  assert.equal(h.requests.length, 0);
+});
+
+test("disconnect during cutout preparation stops the next read and releases the Shopping slot", async (t) => {
+  const h = await harness(t);
+  let entered, release;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const held = new Promise((resolve) => { release = resolve; });
+  h.setImageReadHook(async (file) => { if (file.endsWith("top-1.png")) { entered(); await held; } });
+  const origin = await h.serve();
+  const controller = new AbortController();
+  const response = fetch(`${origin}${API}/analyze`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(h.body()), signal: controller.signal });
+  await started;
+  controller.abort();
+  await assert.rejects(response, { name: "AbortError" });
+  await delay(10);
+  release();
+  await delay(20);
+  assert.equal(h.requests.length, 0);
+  assert.deepEqual(h.imageReads.map((entry) => path.basename(entry.file)), ["identity.png", "top-1.png"]);
+  h.setImageReadHook(undefined);
+  await h.analyze();
+  assert.equal(h.requests.length, 1, "cancelled preparation does not strand the next check");
 });
 
 test("uploaded JPEGs are reoriented, resized and stripped of metadata", async (t) => {

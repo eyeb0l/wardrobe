@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { PGlite } from "@electric-sql/pglite";
 import { createCloudStore, CLOUD_ROOT } from "./cloud-store.mjs";
-import { withStorage, currentStorage, mkdir, readFile, writeFile } from "./storage-fs.mjs";
+import { withStorage, currentStorage, mkdir, readFile, writeFile, containedFiles } from "./storage-fs.mjs";
 import { publishCandidateImage } from "./outfit-storage.mjs";
 
 async function harness(t) {
@@ -55,6 +55,43 @@ test("storage context stays isolated between concurrent requests and defaults to
   ]);
   assert.deepEqual(result, ["a", "b", "local"]);
   assert.equal(currentStorage(), undefined);
+});
+
+test("cloud contained files batch fresh minimal metadata and reject unsafe or nonfile candidates", async (t) => {
+  const h = await harness(t);
+  const directory = `${CLOUD_ROOT}/images`;
+  const names = Array.from({ length: 40 }, (_, index) => `image-${index}.png`);
+  await h.store.withLease(async () => {
+    await h.store.mkdir(directory);
+    await h.store.mkdir(`${directory}/nested`);
+    for (const name of names) await h.store.writeFile(`${directory}/${name}`, Buffer.from([0, 1, 2]));
+    await h.store.writeFile(`${directory}/state.json`, '{"private":"metadata content"}');
+  });
+  const queries = [], query = h.database.query;
+  h.database.query = async (sql, values) => { queries.push({ sql, values }); return query(sql, values); };
+  const candidates = [...names, "state.json", "nested", "missing.png", "../escape.png", "/etc/passwd", "a/b.png",
+    "", ".", "..", "a\\b.png", "a\0b.png", null, 7, names[0]];
+  const found = await withStorage(h.store, () => containedFiles(directory, candidates));
+  assert.deepEqual([...found], [...names, "state.json"].map((name) => [name, `${directory}/${name}`]));
+  assert.equal(queries.length, 1, "all candidate checks share one fresh query");
+  assert.match(queries[0].sql, /^SELECT path, kind FROM wardrobe_files /);
+  assert.equal(h.reads.length, 0, "metadata checks do not read Blob bodies");
+  assert.ok(queries[0].values[0].every((file) => file === directory || file.startsWith(`${directory}/`)));
+  await h.store.withLease(async () => {
+    await h.store.rm(`${directory}/${names[0]}`);
+    await h.store.rm(`${directory}/${names[1]}`);
+    await h.store.mkdir(`${directory}/${names[1]}`);
+    await h.store.rename(`${directory}/${names[2]}`, `${directory}/renamed.png`);
+  });
+  queries.length = 0;
+  const fresh = await h.store.containedFiles(directory, [...candidates, "renamed.png"]);
+  assert.equal(queries.length, 1);
+  for (const name of names.slice(0, 3)) assert.equal(fresh.has(name), false, "deletion, retyping and rename remain fresh");
+  assert.equal(fresh.get("renamed.png"), `${directory}/renamed.png`);
+  assert.equal((await h.store.containedFiles(`${directory}/missing`, names)).size, 0);
+  assert.equal((await h.store.containedFiles(`${directory}/state.json`, names)).size, 0);
+  assert.equal((await h.store.containedFiles(directory, ["../escape", "bad\\name", "bad\0name"])).size, 0);
+  await assert.rejects(h.store.containedFiles(`${CLOUD_ROOT}/../outside`, names), { code: "EACCES" });
 });
 
 test("cloud directories, exact bytes, atomic publication and immutable links", async (t) => {

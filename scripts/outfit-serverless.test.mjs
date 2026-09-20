@@ -341,3 +341,22 @@ test("selected garment changes are still decoded before a paid call or approval"
   await writeFile(selected, original);
   await h.request(plugin, "POST", `${endpoint}/approve`);
 });
+
+test("batched inventory keeps later valid duplicate IDs after missing or corrupt first records", async (t) => {
+  const h = await hostedHarness(t, { plan: [plan()] });
+  const plugin = await h.makePlugin();
+  const job = await h.create(plugin, 1);
+  await plugin.runTask(h.scheduled[0]);
+  const top = h.items.find(item => item.id === "top-3");
+  const bottom = h.items.find(item => item.id === "bottom-1");
+  await writeFile(path.join(h.dataDir, "imported", "corrupt.png"), "not an image");
+  await writeFile(path.join(h.dataDir, "library.json"), JSON.stringify([
+    { ...top, image: "/api/import/library/corrupt.png" },
+    { ...bottom, image: "/api/import/library/missing.png" },
+    ...h.items,
+  ]));
+  await plugin.runTask(h.scheduled[0]);
+  const reviewed = await h.request(plugin, "GET", `${API}/jobs/${job.id}`);
+  assert.equal(reviewed.outfits[0].status, "review");
+  assert.deepEqual(h.requests, ["planning", "image"], "valid fallback references still reach the mocked provider");
+});

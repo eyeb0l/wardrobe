@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, stat, writeFile, imageIdentity } from "./storage-fs.mjs";
+import { mkdir, readFile, readdir, realpath, stat, writeFile, imageIdentity, containedFiles } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
 import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
@@ -114,7 +114,7 @@ export async function outfitContactSheets(items, thumbnails) {
   return sheets;
 }
 
-const contactThumbnail = (bytes) => sharp(bytes, { limitInputPixels: 64e6 }).rotate().resize(236, 252, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+export const contactThumbnail = (bytes) => sharp(bytes, { limitInputPixels: 64e6 }).rotate().resize(236, 252, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
 const imageHash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export function buildOutfitPrompt(outfit, items, correction = "", previousImage = false) {
@@ -243,13 +243,20 @@ export function wardrobeOutfitApi(options = {}) {
   async function inventory({ verifyImages = true, verifyImageIds, expectedImageHashes } = {}) {
     const records = await readJson(path.join(dataDir, "library.json"), []);
     if (!Array.isArray(records)) throw fail("The wardrobe library is invalid. Restore library.json before generating.", 503);
-    const found = new Map();
-    for (const record of records) {
-      if (!record || record.hidden || !validId(record.id) || !PARTS.includes(record.part) || found.has(record.id)) continue;
+    // Fetch fresh file metadata once for the eligible names. Keep records in
+    // order: a missing/corrupt first duplicate must not mask a later valid one.
+    const candidates = records.map((record) => {
+      if (!record || record.hidden || !validId(record.id) || !PARTS.includes(record.part)) return null;
       const match = typeof record.image === "string" && record.image.match(/^\/api\/import\/library\/([a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp))$/i);
-      if (!match) continue;
+      return match ? { record, filename: match[1] } : null;
+    }).filter(Boolean);
+    const files = await containedFiles(importedDir, candidates.map(({ filename }) => filename));
+    const found = new Map();
+    for (const { record, filename } of candidates) {
+      if (found.has(record.id)) continue;
       try {
-        const file = await containedFile(importedDir, match[1]);
+        const file = files.get(filename);
+        if (!file) continue;
         // Settings only need existing, contained file references. Full decoding
         // remains required for every selected generation/approval input. Keep
         // metadata for all garments so pair-reservation checks remain complete.
@@ -621,8 +628,11 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
 
   function pendingTasks() {
     ensureActive();
-    return [...jobs.values()].filter((job) => ["planning", "generating"].includes(job.status) && UUID.test(job.internal.cloudTaskId || ""))
+    const discover = () => [...jobs.values()].filter((job) => ["planning", "generating"].includes(job.status) && UUID.test(job.internal.cloudTaskId || ""))
       .map((job) => ({ kind: "outfit", jobId: job.id, taskId: job.internal.cloudTaskId }));
+    // Recovery callers await this hook even for read-only discovery. Lazy
+    // request initialization must not hide durable work from the outbox.
+    return options.readOnly ? loadJobs().then(discover) : discover();
   }
 
   async function failTask(task, message = "Generation was interrupted. Its result is unknown; check API usage before Retry, which starts another request.") {
@@ -757,6 +767,72 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     outfit.image = record.image;
   }
 
+  let loadingJobs;
+  async function loadJobs(saved) {
+    // Read-only plugin instances are request scoped in production. Do not load
+    // history for collection/image/accessory routes. Refresh when a reused
+    // read-only instance serves history or reservations; never cache metadata
+    // across requests. Concurrent readers may share one in-flight refresh.
+    if (loadingJobs) return loadingJobs;
+    loadingJobs = (async () => {
+      // Retain the established collection guard when serving job state or
+      // discovering recoverable tasks, without hydrating unrelated history.
+      saved ??= await manifest();
+      const refreshed = new Map();
+      const warnings = [];
+      const entries = await readdir(jobsDir, { withFileTypes: true }).catch((error) => { if (options.readOnly && error.code === "ENOENT") return []; throw error; });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !UUID.test(entry.name)) continue;
+        const relative = `outfit-jobs/${entry.name}/job.json`;
+        try {
+          const file = await containedFile(path.join(jobsDir, entry.name), "job.json");
+          const job = validateJob(await readJson(file, null), entry.name);
+          const before = JSON.stringify(job);
+          // Hosted instances are short lived. A new instance is not evidence
+          // of interrupted work; the external runner owns task recovery and
+          // mutation serialization. transition() reconciles approval commits
+          // under that caller's lock immediately before each mutation.
+          if (!options.serverless && !options.readOnly) {
+            reconcileAccepted(job, saved);
+            for (const outfit of job.outfits) {
+              if (["planned", "generating"].includes(outfit.status)) {
+                outfit.status = "failed";
+                outfit.error = "Generation was interrupted by a server restart. Check API usage before Retry; it starts another request.";
+              }
+            }
+            if (["planning", "generating"].includes(job.status)) {
+              job.status = "failed";
+              job.error = "Generation was interrupted by a server restart. Retry explicitly to continue; no API request was restarted automatically.";
+            }
+            if (job.outfits.length) recompute(job);
+            if (JSON.stringify(job) !== before) await save(job);
+          }
+          refreshed.set(job.id, job);
+        } catch (error) {
+          const detail = error.status ? error.message : error instanceof SyntaxError ? "Invalid JSON." : "The file could not be read or recovered.";
+          warnings.push(`${relative}: ${detail} The job was left out of recovery; inspect or restore the original file before restarting.`);
+        }
+      }
+      jobs.clear();
+      for (const [id, job] of refreshed) jobs.set(id, job);
+      jobWarnings.splice(0, jobWarnings.length, ...warnings);
+    })();
+    try { await loadingJobs; }
+    finally { loadingJobs = undefined; }
+  }
+
+  async function requestedJob(id) {
+    await manifest();
+    try {
+      const file = await containedFile(path.join(jobsDir, id), "job.json");
+      return validateJob(await readJson(file, null), id);
+    } catch {
+      // The history route reports invalid jobs with their recovery warnings.
+      // An individual route exposes only a current, fully validated job.
+      throw fail("Outfit job not found", 404);
+    }
+  }
+
   async function handler(req, res, next) {
     let url;
     try { url = new URL(req.url, "http://localhost"); } catch { return next(); }
@@ -764,6 +840,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     try {
       ensureActive();
       if (req.method !== "GET") { ensureWritable(); mutationOrigin(req); }
+      if (options.readOnly && (url.pathname === `${API}/config` || url.pathname === `${API}/jobs`)) await loadJobs();
       if (url.pathname === API && req.method === "GET") return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits() });
       if (url.pathname === `${API}/config` && req.method === "GET") return sendJson(res, 200, await configuration({ verifyImages: false }));
       if (url.pathname === `${API}/jobs` && req.method === "GET") return sendJson(res, 200, { jobs: [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob), warnings: jobWarnings });
@@ -808,8 +885,9 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         return res.end(await readFile(file));
       }
       const match = url.pathname.match(/^\/api\/outfits\/jobs\/([^/]+)(?:\/(.*))?$/);
-      if (!match || !UUID.test(match[1]) || !jobs.has(match[1])) throw fail("Outfit job not found", 404);
-      const job = jobs.get(match[1]);
+      if (!match || !UUID.test(match[1])) throw fail("Outfit job not found", 404);
+      const job = options.readOnly ? await requestedJob(match[1]) : jobs.get(match[1]);
+      if (!job) throw fail("Outfit job not found", 404);
       const action = match[2] || "";
       if (!action && req.method === "GET") return sendJson(res, 200, publicJob(job));
       const candidate = action.match(/^assets\/([^/]+)$/);
@@ -919,6 +997,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         imageDir = path.join(dataDir, "outfit-images");
         importedDir = path.join(dataDir, "imported");
         if (!options.readOnly) await Promise.all([jobsDir, imageDir, importedDir].map((directory) => mkdir(directory, { recursive: true })));
+        if (options.readOnly) return;
         const saved = await manifest();
         // Establish the empty manifest before creating any job/image artifacts,
         // so later ENOENT is recognizable as loss rather than a new collection.
@@ -926,39 +1005,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           try { await stat(path.join(dataDir, "outfits.json")); }
           catch (error) { if (error.code !== "ENOENT") throw error; await atomicJson(path.join(dataDir, "outfits.json"), saved); }
         }
-        const entries = await readdir(jobsDir, { withFileTypes: true }).catch((error) => { if (options.readOnly && error.code === "ENOENT") return []; throw error; });
-        for (const entry of entries) {
-          if (!entry.isDirectory() || !UUID.test(entry.name)) continue;
-          const relative = `outfit-jobs/${entry.name}/job.json`;
-          try {
-            const file = await containedFile(path.join(jobsDir, entry.name), "job.json");
-            const job = validateJob(await readJson(file, null), entry.name);
-            const before = JSON.stringify(job);
-            // Hosted instances are short lived. A new instance is not evidence
-            // of interrupted work; the external runner owns task recovery and
-            // mutation serialization. transition() reconciles approval commits
-            // under that caller's lock immediately before each mutation.
-            if (!options.serverless && !options.readOnly) {
-              reconcileAccepted(job, saved);
-              for (const outfit of job.outfits) {
-                if (["planned", "generating"].includes(outfit.status)) {
-                  outfit.status = "failed";
-                  outfit.error = "Generation was interrupted by a server restart. Check API usage before Retry; it starts another request.";
-                }
-              }
-              if (["planning", "generating"].includes(job.status)) {
-                job.status = "failed";
-                job.error = "Generation was interrupted by a server restart. Retry explicitly to continue; no API request was restarted automatically.";
-              }
-              if (job.outfits.length) recompute(job);
-              if (JSON.stringify(job) !== before) await save(job);
-            }
-            jobs.set(job.id, job);
-          } catch (error) {
-            const detail = error.status ? error.message : error instanceof SyntaxError ? "Invalid JSON." : "The file could not be read or recovered.";
-            jobWarnings.push(`${relative}: ${detail} The job was left out of recovery; inspect or restore the original file before restarting.`);
-          }
-        }
+        await loadJobs(saved);
       } catch (error) {
         await releaseStore?.();
         releaseStore = null;
