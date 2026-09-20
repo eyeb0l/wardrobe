@@ -1,10 +1,12 @@
 # Manual Terra detection retry
 
+Released with the colour-preservation fix in [PR #12](https://github.com/eyeb0l/wardrobe/pull/12), production commit `c70f1cf`. Live gallery, importer readiness and private access were verified.
+
 Crop review now offers **Retry with Terra**. It rechecks the original photo with `gpt-5.6-terra` at **medium** reasoning effort and holds up to eight candidate crops for review. Select the intended item and choose **Use selected item**, or **Keep current crop**. This updates only that import's crop and detected metadata; sibling imports stay untouched. The crop still needs its normal approval before garment generation. The UI explains that retries use paid API credits.
 
 The no-clothing message also offers **Retry with Terra**, using the prepared upload retained in the current page. Its new detections enter the ordinary crop-review queue. Reloading that empty-result page does not retain the upload; an existing import's retry candidates do survive reloads.
 
-Initial detection continues to use the configured default (`gpt-5.6-luna` by default), with its existing reasoning behaviour unchanged. Terra is an explicit choice. The feature changes detection only; it does not change image-generation models or automatically regenerate wardrobe images.
+Initial detection continues to use the configured default (`gpt-5.6-luna` by default), with reasoning effort omitted, unchanged from before this release. Terra is an explicit choice. The feature changes detection only; it does not change image-generation models or automatically regenerate wardrobe images.
 
 ## Backend behaviour
 

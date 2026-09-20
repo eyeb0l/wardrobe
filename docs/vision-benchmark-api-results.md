@@ -1,6 +1,8 @@
 # Wardrobe vision API evaluation
 
-Completed on 2026-09-20: 300 planned API attempts, 292 returned responses, eight unresolved transport failures, and no outstanding active calls or ungraded returned answers. Approved API cap: US$10 including failures. Recorded usage is **$1.626180137**, with a conservative total upper bound of **$1.759296937** including every uncertain call. At least **$8.240703063** of the cap remains. Production settings and hosted collection are unchanged.
+This report covers the initial evaluation. See the [detection-rescue follow-up](chroma-cleanup-and-detection-rescue.md) for later Terra medium results, cumulative spending and the deployed changes.
+
+Completed on 2026-09-20: 300 planned API attempts, 292 returned responses, eight unresolved transport failures, and no outstanding active calls or ungraded returned answers. Approved API cap: US$10 including failures. Recorded usage is **$1.626180137**, with a conservative total upper bound of **$1.759296937** including every uncertain call. At this phase’s close, **$8.240703063** of the cap remained; production settings and the hosted collection were unchanged.
 
 **Recommendation: retain `gpt-5.6-luna` at its current effective medium effort.** High effort improved the continuous quality score slightly, but did not improve usable-answer acceptance and was more expensive and slower. This is the best-supported value choice among the tested configurations, not proof that all other model/effort combinations are inferior.
 
