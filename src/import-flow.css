@@ -343,3 +343,16 @@
   .import-status.is-processing::before,
   .import-spinner { animation: none !important; }
 }
+
+.import-detection-retry { display: grid; justify-items: start; gap: 9px; padding-top: 14px; border-top: 1px solid var(--import-line); }
+.import-detection-retry > .import-card__detail { line-height: 1.5; }
+.import-detection-retry .import-actions { width: 100%; margin-top: 4px; }
+.import-detection-candidates { min-width: 0; width: 100%; margin: 0; padding: 0; border: 0; }
+.import-detection-candidates legend { margin-bottom: 8px; font-size: 13px; }
+.import-detection-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.import-detection-options label { min-width: 0; padding: 6px; border: 1px solid var(--import-line); border-radius: 8px; cursor: pointer; }
+.import-detection-options label.is-selected { border-color: var(--import-ink); }
+.import-detection-options img { display: block; width: 100%; height: 96px; object-fit: contain; background: var(--import-ivory); border-radius: 4px; }
+.import-detection-options span { display: flex; align-items: flex-start; gap: 6px; margin-top: 7px; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.import-detection-options input { flex-shrink: 0; margin: 1px 0 0; accent-color: var(--import-ink); }
+.import-undetected-retry { margin-top: 20px; }

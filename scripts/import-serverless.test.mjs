@@ -236,3 +236,42 @@ test("hosted manual uploads reject active work and invalidate old task delivery 
   assert.equal(h.requests.length, calls);
   assert.equal(h.tasks.length, 2, "uploading never queues generation");
 });
+
+test("hosted Terra timeouts keep the crop, consume one attempt, and never replay after restart", async t => {
+  const h = await harness(t, { requestTimeoutMs: 25 });
+  const keepAlive = setInterval(() => {}, 1000);
+  t.after(() => clearInterval(keepAlive));
+  const job = await h.createJob();
+  const base = `/api/import/jobs/${job.id}`;
+  const requestId = "00000000-0000-4000-8000-000000000010";
+  h.blockEndpoint("/responses");
+  const failed = await h.request("POST", `${base}/detection/retry`, { requestId });
+  assert.equal(failed.status, 502);
+  const after = await h.loadJob(job.id);
+  assert.deepEqual(after.metadata, job.metadata);
+  assert.deepEqual(after.stages, job.stages);
+  assert.equal(after.detectionRetryAttempt.status, "failed");
+  await h.restart();
+  assert.equal((await h.request("POST", `${base}/detection/retry`, { requestId })).status, 409);
+  assert.equal(h.requests.length, 2);
+  assert.equal(h.tasks.length, 0, "retry does not enqueue image generation");
+});
+
+test("hosted Terra retry enforces origin checks and recovers an interrupted attempt without auto-spending", async t => {
+  const h = await harness(t);
+  const job = await h.createJob();
+  const base = `/api/import/jobs/${job.id}`;
+  const requestId = "00000000-0000-4000-8000-000000000011";
+  assert.equal((await h.request("POST", `${base}/detection/retry`, { requestId }, { origin: "https://other.example" })).status, 403);
+  const stored = await h.loadJob(job.id);
+  stored.detectionRetryAttempt = { id: requestId, status: "started", createdAt: "2020-01-01T00:00:00.000Z" };
+  await writeFile(h.jobPath(job.id), JSON.stringify(stored));
+  await h.restart();
+  await h.request("GET", "/api/import/jobs");
+  assert.equal(h.requests.length, 1);
+  assert.equal((await h.request("POST", `${base}/detection/retry`, { requestId })).status, 409);
+  const response = await h.request("POST", `${base}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000012" });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.detectionRetry.candidates.length, 1);
+  assert.equal(h.requests.length, 2);
+});
