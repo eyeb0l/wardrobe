@@ -430,10 +430,12 @@ test("one concurrent analysis is allowed and the slot is reusable after completi
 
 test("timeout aborts even an uncooperative provider and does not retry", async (t) => {
   const h = await harness(t, { timeoutMs: 15, response: () => new Promise(() => {}) });
-  const work = h.analyze({}, 504);
-  // Keep a bounded test timer alive while the production timeout is unreferenced.
-  await delay(100);
-  const result = await work;
+  // Image preparation can outlast a fixed sleep under a parallel Node 22 run.
+  // Keep the event loop alive until the assertion settles, with a hard deadline.
+  let timer, result;
+  const deadline = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Shopping timeout did not settle")), 5000); });
+  try { result = await Promise.race([h.analyze({}, 504), deadline]); }
+  finally { clearTimeout(timer); }
   assert.match(result.error, /timed out/);
   assert.equal(h.requests.length, 1);
   assert.equal(h.requests[0].options.signal.aborted, true);
