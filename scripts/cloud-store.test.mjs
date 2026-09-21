@@ -1,3 +1,4 @@
+import { generationAttempt, readTelemetry } from "./generation-telemetry.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm as localRm } from "node:fs/promises";
@@ -360,4 +361,19 @@ test("warm original reads deduplicate by immutable URL while replacement, deleti
   assert.deepEqual(await h.store.readFile(file),replacement);
   assert.deepEqual(await h.store.readFile(alias),original,'a surviving link retains its own immutable identity');
   await h.store.withLease(()=>h.store.rm(file));await assert.rejects(h.store.readFile(file),{code:'ENOENT'});
+});
+
+
+test("generation telemetry survives cloud store instances and stays in metadata storage", async t => {
+  const h = await harness(t);
+  await h.store.withLease(() => withStorage(h.store, async () => {
+    const attempt = generationAttempt(CLOUD_ROOT, { episodeId: "test", generationType: "garment_modeled", attemptNumber: 1, pipelineAttempt: 1, garments: [] });
+    await attempt.start({ model: "test-model", baseUrl: "https://provider.invalid", prompt: "Private prompt" });
+    attempt.observe({ status: 400 }, { error: { code: "moderation_blocked" } });
+    await attempt.finish(false);
+  }));
+  const records = await withStorage(h.other(), () => readTelemetry(CLOUD_ROOT));
+  assert.equal(records.length, 1);
+  assert.equal(records[0].outcome, "refused");
+  assert.equal(h.blobs.size, 0);
 });

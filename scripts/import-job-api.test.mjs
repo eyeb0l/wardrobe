@@ -1,3 +1,4 @@
+import { readTelemetry, summarizeTelemetry } from "./generation-telemetry.mjs";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import * as fileSystem from "node:fs/promises";
@@ -493,6 +494,17 @@ test("a refused modeled shot exposes the exact prompt and manual uploads require
   const saved = await h.request("GET", approved.libraryItem.modeledImage);
   assert.equal((await sharp(saved).metadata()).width, 900);
   assert.deepEqual(await h.request("GET", original.modeledImage), originalBytes);
+  const records = await readTelemetry(path.join(h.root, "data"));
+  const refused = records.find(event => event.outcome === "refused");
+  assert.equal(refused.garments[0].id, `import-${job.id}`);
+  assert.equal(refused.garments[0].category, "dresses");
+  assert.equal(refused.apiCode, "moderation_blocked");
+  assert.equal(refused.attemptNumber, 1);
+  const stats = summarizeTelemetry(records).overall;
+  assert.equal(stats.manualUploadEpisodes, 2);
+  assert.equal(stats.manualApprovedEpisodes, 1);
+  assert.equal(stats.manualAfterRefusalEpisodes, 1);
+
   assert.equal((await sharp(await h.request("GET", `${approved.libraryItem.modeledImage}?format=webp&w=640`)).metadata()).format, "webp");
 });
 
@@ -660,4 +672,50 @@ test("candidate persistence failure leaves original review recoverable and reser
   assert.equal(after.detectionRetry, undefined);
   await h.request("POST", `${base}/detection/retry`, { requestId }, 409);
   assert.equal(h.requests.length, 2);
+});
+
+test("modeled retry telemetry skips scene-planning failures and keeps image attempt numbers", async t => {
+  const h = await harness(t);
+  h.setAnalysis([{ ...dress, name: 'Blue bodysuit', part: 'wholebody_up' }], true);
+  const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: (await productImage()).toString('base64') });
+  const url = `/api/import/jobs/${job.id}`;
+  await h.request('POST', `${url}/stages/crop/use-original`);
+  let images = 0, planningFails = false;
+  t.mock.method(globalThis, 'fetch', async endpoint => {
+    if (endpoint.endsWith('/responses')) return planningFails
+      ? Response.json({ error: { code: 'server_error' } }, { status: 500 })
+      : Response.json({ output_text: JSON.stringify({ setting: 'A naturally lit room.' }) });
+    images++;
+    return images === 1 ? Response.json({ error: { code: 'moderation_blocked' } }, { status: 400 })
+      : Response.json({ data: [{ b64_json: h.source.toString('base64') }] });
+  });
+  async function waitForFailure() {
+    for (let i = 0; i < 100; i++) {
+      if ((await h.request('GET', url)).stages.modeled.status === 'failed') return;
+      await delay(10);
+    }
+    assert.fail('Expected failed modeled stage');
+  }
+  await h.request('POST', `${url}/stages/garment/approve`);
+  await waitForFailure();
+  planningFails = true;
+  await h.request('POST', `${url}/stages/modeled/regenerate`, {});
+  await waitForFailure();
+  assert.equal((await readTelemetry(path.join(h.root, 'data'))).length, 1);
+  planningFails = false;
+  await h.request('POST', `${url}/stages/modeled/regenerate`, {});
+  await h.waitForStage(job.id, 'modeled');
+  // Stage state is saved before the best-effort telemetry completion.
+  let records;
+  for (let i = 0; i < 100; i++) {
+    records = (await readTelemetry(path.join(h.root, 'data'))).sort((a, b) => a.attemptNumber - b.attemptNumber);
+    if (records[1]?.outcome === 'succeeded') break;
+    await delay(10);
+  }
+  assert.deepEqual(records.map(e => e.attemptNumber), [1, 2]);
+  assert.deepEqual(records.map(e => e.pipelineAttempt), [1, 3]);
+  assert.equal(records[0].episodeId, records[1].episodeId);
+  const report = summarizeTelemetry(records);
+  assert.equal(report.overall.secondAttemptRecovery.rate, 1);
+  assert.equal(report.cohorts.find(c => c.category === 'subtype:bodysuit').eventualRetryRecovery.rate, 1);
 });

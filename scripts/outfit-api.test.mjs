@@ -1,3 +1,4 @@
+import { readTelemetry, summarizeTelemetry } from "./generation-telemetry.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -533,6 +534,13 @@ test("refused outfit photos expose the sent prompt and accept a manual photo thr
   assert.equal(h.requests.length, calls);
   await h.action(job, outfit, "upload", input, 409);
   assert.equal((await sharp(await h.request("GET", `${approved.outfits[0].image}?format=webp&w=640`)).metadata()).format, "webp");
+  const telemetry = await readTelemetry(h.dataDir);
+  assert.equal(telemetry.filter(event => event.kind === "attempt").length, 1);
+  assert.equal(telemetry.find(event => event.kind === "attempt").outcome, "refused");
+  assert.equal(telemetry.filter(event => event.action === "uploaded").length, 2);
+  assert.equal(summarizeTelemetry(telemetry).overall.manualAfterRefusalEpisodes, 1);
+  assert.equal(summarizeTelemetry(telemetry).overall.manualApprovedEpisodes, 1);
+
 });
 
 test("reading outfit settings transfers no image bytes and real generation still validates images",async t=>{
@@ -585,4 +593,45 @@ test("an exhausted image allowance stops the image dispatch after text planning"
   assert.equal(job.outfits[0].status, "failed");
   assert.equal(job.outfits[0].error, "Image allowance reached");
   assert.equal(h.requests.length, 1);
+  assert.deepEqual(await readTelemetry(h.dataDir), []);
+});
+
+
+test("telemetry links image retries across restarts and starts a new episode after success", async t => {
+  const h = await harness(t, { edit: () => Response.json({ error: { code: "content_policy_violation" } }, { status: 400 }) });
+  const job = await h.settled((await h.create()).id);
+  await h.restart();
+  await h.action(job, job.outfits[0], "reject");
+  h.setEdit(null);
+  await h.action(job, job.outfits[0], "retry");
+  const recovered = await h.settled(job.id);
+  const records = await readTelemetry(h.dataDir);
+  assert.deepEqual(records.sort((a, b) => a.attemptNumber - b.attemptNumber).map(e => e.outcome), ["refused", "succeeded"]);
+  assert.deepEqual(records.map(e => e.attemptNumber), [1, 2]);
+  assert.equal(records[0].episodeId, records[1].episodeId);
+  assert.equal(summarizeTelemetry(records).overall.eventualRetryRecovery.rate, 1);
+  await h.action(recovered, recovered.outfits[0], "retry", { prompt: "Different scene" });
+  await h.settled(job.id);
+  const revised = await readTelemetry(h.dataDir);
+  assert.equal(summarizeTelemetry(revised).overall.imageEpisodes, 2);
+  assert.equal(revised.filter(e => e.attemptNumber === 1).length, 2);
+});
+
+test("approving an uploaded candidate from before telemetry creates a valid approval-only event", async t => {
+  const h = await harness(t, { edit: () => Response.json({ error: { code: 'moderation_blocked' } }, { status: 400 }) });
+  const job = await h.settled((await h.create()).id);
+  const outfit = job.outfits[0];
+  await h.action(job, outfit, 'upload', { imageDataUrl: `data:image/png;base64,${(await h.image('#887766', 512, 512)).toString('base64')}` });
+  const file = path.join(h.dataDir, 'outfit-jobs', job.id, 'job.json');
+  const saved = JSON.parse(await readFile(file, 'utf8'));
+  for (const key of Object.keys(saved.outfits[0].internal).filter(key => key.startsWith('telemetry'))) delete saved.outfits[0].internal[key];
+  await writeFile(file, JSON.stringify(saved));
+  await rm(path.join(h.dataDir, 'generation-telemetry'), { recursive: true });
+  await h.restart();
+  await h.action(job, outfit, 'approve');
+  const records = await readTelemetry(h.dataDir);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].action, 'approved');
+  assert.equal(records[0].garments.length, outfit.garmentIds.length);
+  assert.equal(summarizeTelemetry(records).overall.imageEpisodes, 0);
 });

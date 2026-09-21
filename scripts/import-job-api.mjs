@@ -1,3 +1,4 @@
+import { generationAttempt, garmentTelemetry, manualTelemetry } from "./generation-telemetry.mjs";
 import { readLibrary, withLibraryLock, publicLibraryItem, saveLibraryEdit, deleteLibraryItem, migrateLibraryEdits, editableFields } from './wardrobe-library.mjs';
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "./storage-fs.mjs";
@@ -493,7 +494,7 @@ function stageState() {
   return { status: "pending", decision: null, attempts: 0, assetUrl: null, failedAssetUrl: null, cleanupPreviewUrl: null, cleanupTolerance: 46, cleanupDiagnostics: null, error: null, prompt: null, updatedAt: null };
 }
 
-async function openAIEdit({ beforePaidCall, key, baseUrl, model, prompt, images, size, background, quality, timeoutMs }) {
+async function openAIEdit({ telemetry, beforePaidCall, key, baseUrl, model, prompt, images, size, background, quality, timeoutMs }) {
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", prompt);
@@ -506,11 +507,13 @@ async function openAIEdit({ beforePaidCall, key, baseUrl, model, prompt, images,
     form.append("image[]", new Blob([normalized], { type: "image/png" }), image.name?.replace(/\.[^.]+$/, ".png") || `image-${index + 1}.png`);
   }
   await beforePaidCall?.("image");
+  await telemetry?.start({ model, baseUrl, prompt, images: images.map(image => image.data) });
   const response = await fetch(`${baseUrl}/images/edits`, {
     method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form,
     ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
   });
   const result = await response.json().catch(() => ({}));
+  telemetry?.observe(response, result);
   if (!response.ok) throw new Error(result.error?.message || `OpenAI image request failed (${response.status})`);
   const encoded = result.data?.[0]?.b64_json;
   if (!encoded) throw new Error("OpenAI response did not contain image data");
@@ -767,12 +770,31 @@ export function wardrobeImportApi(options = {}) {
     return publicLibraryItem(record);
   }
 
+  function telemetryContext(job, stageName) {
+    const stage = job.stages[stageName];
+    return { episodeId: stage.telemetryEpisodeId, jobId: job.id, generationId: job.generationId || null,
+      generationType: stageName === "garment" ? "garment_cutout" : "garment_modeled",
+      pipelineAttempt: stage.attempts, attemptNumber: stage.telemetryAttempts || 0,
+      generationRecord: `jobs/${job.id}/job.json#stages/${stageName}`,
+      garments: [garmentTelemetry({ ...job.metadata, id: `import-${job.id}` })] };
+  }
+
   async function generate(job, stageName) {
     const lock = `${job.id}:${stageName}`;
     if (running.has(lock)) return running.get(lock);
     const task = (async () => {
       const current = await loadJob(job.id);
       const stage = current.stages[stageName];
+      stage.telemetryEpisodeId ||= randomUUID();
+      const context = telemetryContext(current, stageName);
+      const telemetry = generationAttempt(dataDir, context);
+      const beforeImageCall = async () => {
+        await options.beforePaidCall?.("image");
+        stage.telemetryAttempts = (stage.telemetryAttempts || 0) + 1;
+        context.attemptNumber = stage.telemetryAttempts;
+        context.pipelineAttempt = stage.attempts;
+        await saveJob(current);
+      };
       stage.status = "processing"; stage.decision = null; stage.error = null; stage.attempts += 1; stage.updatedAt = new Date().toISOString();
       await saveJob(current);
       let failedAssetUrl = null;
@@ -790,7 +812,7 @@ export function wardrobeImportApi(options = {}) {
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, chromaKeyUsed);
           stage.generationPrompt = current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt;
           await saveJob(current);
-          bytes = await openAIEdit({ beforePaidCall: options.beforePaidCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: stage.generationPrompt });
+          bytes = await openAIEdit({ telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: stage.generationPrompt });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
           failedAssetUrl = `${ASSET_ROOT}/${current.id}/${rawName}`;
@@ -825,7 +847,7 @@ export function wardrobeImportApi(options = {}) {
           stage.settingHistory = [...(stage.settingHistory || []), stage.setting].slice(-12);
           stage.generationPrompt = buildModeledPhotoPrompt({ setting: stage.setting, direction: stage.prompt });
           await saveJob(current);
-          bytes = await openAIEdit({ beforePaidCall: options.beforePaidCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: stage.generationPrompt });
+          bytes = await openAIEdit({ telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: stage.generationPrompt });
         }
         await writeFile(output, bytes);
         const fresh = await loadJob(current.id);
@@ -838,8 +860,10 @@ export function wardrobeImportApi(options = {}) {
         if (chromaKeyUsed) fresh.stages[stageName].chromaKey = chromaKeyUsed;
         fresh.stages[stageName].updatedAt = new Date().toISOString();
         await saveJob(fresh);
+        await telemetry.finish(true);
         return publicJob(fresh);
       } catch (error) {
+        await telemetry.finish(false, error);
         const fresh = await loadJob(current.id);
         fresh.stages[stageName].status = "failed"; fresh.stages[stageName].error = error.message; fresh.stages[stageName].updatedAt = new Date().toISOString();
         if (typeof failedAssetUrl === "string") fresh.stages[stageName].failedAssetUrl = failedAssetUrl;
@@ -854,6 +878,7 @@ export function wardrobeImportApi(options = {}) {
 
   function prepareGeneration(job, stageName) {
     const stage = job.stages[stageName];
+    if (stage.status !== "failed") { stage.telemetryEpisodeId = randomUUID(); stage.telemetryAttempts = 0; }
     stage.status = "queued";
     stage.decision = null;
     stage.error = null;
@@ -1204,9 +1229,12 @@ export function wardrobeImportApi(options = {}) {
         const bytes = await normalizeModeledUpload(input, "garment");
         const filename = `modeled-upload-${randomUUID()}.png`;
         await writeFile(path.join(jobsDir, job.id, filename), bytes, { flag: "wx" });
+        if (stage.status === "review" && stage.source === "generated") { stage.telemetryEpisodeId = randomUUID(); stage.telemetryAttempts = 0; }
+        stage.telemetryEpisodeId ||= randomUUID();
         Object.assign(stage, { status: "review", decision: null, source: "uploaded", assetUrl: `${ASSET_ROOT}/${job.id}/${filename}`,
           error: null, failedAssetUrl: null, taskId: null, setting: null, attempts: stage.attempts + 1, updatedAt: new Date().toISOString() });
         await saveJob(job);
+        await manualTelemetry(dataDir, telemetryContext(job, "modeled"), filename, "uploaded");
         return json(res, 200, publicJob(job));
       }
       const stageMatch = action.match(/^stages\/(crop|garment|modeled)\/(approve|reject|regenerate)$/);
@@ -1240,6 +1268,7 @@ export function wardrobeImportApi(options = {}) {
         let libraryItem;
         const previousStages = structuredClone(job.stages);
         const previousJobStatus = job.status;
+        if (stageName === "modeled" && decision === "approve" && job.stages.modeled.source === "uploaded") job.stages.modeled.telemetryEpisodeId ||= randomUUID();
         job.stages[stageName].decision = decision === "approve" ? "approved" : "rejected";
         job.stages[stageName].status = job.stages[stageName].decision;
         job.stages[stageName].error = null;
@@ -1259,6 +1288,9 @@ export function wardrobeImportApi(options = {}) {
             await saveJob(job);
             throw error;
           }
+        }
+        if (stageName === "modeled" && decision === "approve" && job.stages.modeled.source === "uploaded") {
+          await manualTelemetry(dataDir, telemetryContext(job, "modeled"), path.basename(job.stages.modeled.assetUrl), "approved");
         }
         if (decision === "reject") await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
         if (startGarment) await scheduleGeneration(job, "garment");

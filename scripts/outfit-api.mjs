@@ -1,3 +1,4 @@
+import { generationAttempt, garmentTelemetry, manualTelemetry } from "./generation-telemetry.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, realpath, stat, writeFile, imageIdentity, containedFiles } from "./storage-fs.mjs";
 import path from "node:path";
@@ -420,7 +421,7 @@ export function wardrobeOutfitApi(options = {}) {
     return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), counts, maxCount: 12, availableCombinations, models: models() };
   }
 
-  async function apiRequest(endpoint, init) {
+  async function apiRequest(endpoint, init, telemetry, beforeTelemetry) {
     ensureActive();
     const key = setting("OPENAI_API_KEY").trim();
     if (!key) throw fail("OPENAI_API_KEY is missing. Configure it and restart the server.", 503);
@@ -439,11 +440,17 @@ export function wardrobeOutfitApi(options = {}) {
         await options.beforePaidCall?.(endpoint === "/responses" ? "text" : "image");
         ensureActive();
         controller.signal.throwIfAborted();
+        if (telemetry) {
+          await beforeTelemetry();
+          await telemetry.start({ model: models().image, baseUrl: setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1"), prompt: init.body.get("prompt"), images: await Promise.all(init.body.getAll("image[]").map(async image => Buffer.from(await image.arrayBuffer()))) });
+          controller.signal.throwIfAborted();
+        }
         const response = await (options.fetch || fetch)(`${setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/+$/, "")}${endpoint}`, { ...init, headers: { ...init.headers, Authorization: `Bearer ${key}` }, signal: controller.signal });
         const result = await response.json().catch(() => ({}));
         return { response, result };
       })();
       const { response, result } = await Promise.race([work, aborted]);
+      telemetry?.observe(response, result);
       ensureActive();
       if (!response.ok) {
         const advice = [401, 403].includes(response.status) ? "Check the configured API key and model access."
@@ -534,6 +541,13 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     return selected.sort((a, b) => PARTS.indexOf(a.part) - PARTS.indexOf(b.part));
   }
 
+  function outfitTelemetryContext(job, outfit, items) {
+    return { episodeId: outfit.internal.telemetryEpisodeId, jobId: job.id, outfitId: outfit.id,
+      generationType: "outfit_modeled", pipelineAttempt: outfit.attempts,
+      generationRecord: `outfit-jobs/${job.id}/job.json#outfits/${outfit.id}/internal/history`,
+      garments: items.length ? items.map(garmentTelemetry) : outfit.internal.telemetryGarments || outfit.garmentIds.map(id => ({ id, category: "unknown", subtype: null, subtypeSource: null })) };
+  }
+
   async function generate(job, outfit) {
     const items = validateSelection(outfit.garmentIds, await inventory({ verifyImageIds: new Set(outfit.garmentIds) }));
     const reference = await resolveReference(job.modelReferenceId);
@@ -553,23 +567,38 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       form.append("image[]", new Blob([bytes], { type: "image/png" }), input.name);
     }
     await transition(job, async (next) => {
+      next.outfits.find((item) => item.id === outfit.id).internal.telemetryGarments = items.map(garmentTelemetry);
       next.outfits.find((item) => item.id === outfit.id).internal.history.push({ attempt: outfit.attempts, at: now(), model: models().image, prompt, correction: outfit.prompt, references: inputs.map((item) => item.name) });
     });
-    const result = await apiRequest("/images/edits", { method: "POST", body: form });
-    const encoded = result.data?.[0]?.b64_json;
-    if (typeof encoded !== "string" || !encoded.length || encoded.length > 100 * 1024 * 1024) throw fail("The image API did not return usable PNG image data. Retry this outfit.", 502);
-    let bytes;
+    const context = outfitTelemetryContext(job, outfit, items);
+    const telemetry = generationAttempt(dataDir, context);
     try {
-      const raw = Buffer.from(encoded, "base64");
-      const decoded = sharp(raw, { limitInputPixels: 64e6 });
-      const metadata = await decoded.metadata();
-      if (metadata.format !== "png" || !metadata.width || metadata.width !== metadata.height || (metadata.pages || 1) !== 1) throw new Error();
-      bytes = await decoded.png().toBuffer();
-    } catch { throw fail("The image API returned an invalid or non-square PNG. Retry this outfit.", 502); }
-    const filename = `${outfit.id}-${outfit.attempts}-${randomUUID().slice(0, 8)}.png`;
-    ensureActive();
-    await writeFile(path.join(jobsDir, job.id, filename), bytes, { flag: "wx" });
-    return filename;
+      const result = await apiRequest("/images/edits", { method: "POST", body: form }, telemetry, async () => {
+        await transition(job, async next => {
+          const item = next.outfits.find(item => item.id === outfit.id);
+          item.internal.telemetryAttempts = (item.internal.telemetryAttempts || 0) + 1;
+          context.attemptNumber = item.internal.telemetryAttempts;
+        });
+      });
+      const encoded = result.data?.[0]?.b64_json;
+      if (typeof encoded !== "string" || !encoded.length || encoded.length > 100 * 1024 * 1024) throw fail("The image API did not return usable PNG image data. Retry this outfit.", 502);
+      let bytes;
+      try {
+        const raw = Buffer.from(encoded, "base64");
+        const decoded = sharp(raw, { limitInputPixels: 64e6 });
+        const metadata = await decoded.metadata();
+        if (metadata.format !== "png" || !metadata.width || metadata.width !== metadata.height || (metadata.pages || 1) !== 1) throw new Error();
+        bytes = await decoded.png().toBuffer();
+      } catch { throw fail("The image API returned an invalid or non-square PNG. Retry this outfit.", 502); }
+      const filename = `${outfit.id}-${outfit.attempts}-${randomUUID().slice(0, 8)}.png`;
+      ensureActive();
+      await writeFile(path.join(jobsDir, job.id, filename), bytes, { flag: "wx" });
+      await telemetry.finish(true);
+      return filename;
+    } catch (error) {
+      await telemetry.finish(false, error);
+      throw error;
+    }
   }
 
   function safeError(error) {
@@ -605,10 +634,10 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     for (const outfit of job.outfits) {
       if (disposed) return;
       if (outfit.status !== "planned") continue;
-      await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "generating"; item.attempts += 1; item.error = null; recompute(next); });
+      await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.internal.telemetryEpisodeId ||= randomUUID(); item.internal.telemetrySucceeded = false; item.status = "generating"; item.attempts += 1; item.error = null; recompute(next); });
       try {
         const filename = await generate(job, outfit);
-        await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "review"; item.image = `${API}/jobs/${job.id}/assets/${filename}`; item.internal.candidateFile = filename; item.source = "generated"; item.error = null; recompute(next); });
+        await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "review"; item.image = `${API}/jobs/${job.id}/assets/${filename}`; item.internal.candidateFile = filename; item.internal.telemetrySucceeded = true; item.source = "generated"; item.error = null; recompute(next); });
       } catch (error) {
         if (disposed) return;
         await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "failed"; item.error = safeError(error); recompute(next); });
@@ -929,7 +958,10 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         await transition(job, async (next) => {
           const outfit = next.outfits.find((item) => item.id === outfitAction[1]);
           if (!outfit) throw fail("Outfit not found", 404);
-          if (outfitAction[2] === "approve") await approve(next, outfit);
+          if (outfitAction[2] === "approve") {
+            if (outfit.source === "uploaded") outfit.internal.telemetryEpisodeId ||= randomUUID();
+            await approve(next, outfit);
+          }
           else if (outfitAction[2] === "upload") {
             if (queued.has(job.id) || ["planning", "generating"].includes(next.status) || !["review", "failed", "rejected"].includes(outfit.status)) throw fail("Wait for this collection to finish generating before uploading a photo.", 409);
             const bytes = await normalizeModeledUpload(input, "outfit");
@@ -938,7 +970,10 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             outfit.internal.previousImage = outfit.internal.candidateFile || outfit.internal.previousImage || null;
             outfit.internal.candidateFile = filename;
             outfit.image = `${API}/jobs/${job.id}/assets/${filename}`;
+            if (outfit.status === "review" && outfit.source === "generated") { outfit.internal.telemetryEpisodeId = randomUUID(); outfit.internal.telemetryAttempts = 0; }
             outfit.status = "review";
+            outfit.internal.telemetryEpisodeId ||= randomUUID();
+            outfit.internal.telemetryUploadContext = outfitTelemetryContext(next, outfit, []);
             outfit.source = "uploaded";
             outfit.error = null;
           } else if (outfitAction[2] === "reject") {
@@ -953,6 +988,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             if ((await usedPairs(items, null, outfit.id)).has(pairKey(outfit.garmentIds, items))) throw fail("This top-and-bottom combination is already saved or being generated.", 409);
             outfit.prompt = input.prompt === undefined ? outfit.prompt : shortText(input.prompt, "correction (maximum 2000 characters)", 2000, false);
             outfit.internal.previousImage = await previousCandidate(next, outfit);
+            if (outfit.status !== "failed" && (outfit.status !== "rejected" || outfit.internal.telemetrySucceeded || outfit.source === "uploaded")) { outfit.internal.telemetryEpisodeId = randomUUID(); outfit.internal.telemetryAttempts = 0; }
             outfit.status = "planned";
             outfit.error = null;
             // The new identity atomically invalidates older task deliveries and
@@ -961,6 +997,12 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           }
           recompute(next);
         });
+        const changed = job.outfits.find(item => item.id === outfitAction[1]);
+        if (["upload", "approve"].includes(outfitAction[2]) && changed.source === "uploaded") {
+          // Reuse the upload's category snapshot even if the wardrobe changes later.
+          const context = changed.internal.telemetryUploadContext || outfitTelemetryContext(job, changed, []);
+          await manualTelemetry(dataDir, context, changed.internal.candidateFile, outfitAction[2] === "upload" ? "uploaded" : "approved");
+        }
         if (outfitAction[2] === "retry") await enqueue(job.id);
         sendJson(res, outfitAction[2] === "retry" ? 202 : 200, publicJob(job));
         return;
