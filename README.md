@@ -49,7 +49,7 @@ The importer detects up to eight visible clothing items per photo with the Respo
 
 For difficult detections, choose **Retry with Terra** in crop review or after a no-clothing result. This paid retry uses Terra at medium effort; review its candidates before replacing the crop. Luna remains the default. See [retry behaviour and limits](docs/terra-detection-retry.md).
 
-Cutout cleanup preserves garment colours by limiting background-colour removal to detected background boundaries. The fix applies to subsequent processing; it does not replace saved images.
+Cutout cleanup handles colour spill at detected background boundaries while preserving garment interiors. When review is needed, previews update automatically; use light/dark backgrounds and zoom to inspect the edges. Optional strength adjustments stay under **Adjust cleanup**. Acceptance uses the exact displayed preview. Saved images are not changed retroactively.
 
 For a likely single-item product shot, **Use original image** skips generative extraction. Existing transparency is preserved; opaque backgrounds are removed on the device with a browser worker, then shown against a checkerboard for review. Only a transparency mask is returned to the app: garment colours and dimensions come from the stored original. **Extract garment** remains the default for ordinary photos. If detection gets it wrong, you can manually select **Use original image** after checking that the full original contains one isolated item without a person or other products.
 

@@ -758,3 +758,33 @@ test('manual original override accepts a reviewed browser mask without a paid ex
   await h.restart();
   assert.equal((await h.request('GET', `/api/import/jobs/${job.id}`)).stages.garment.backgroundRemoved, true);
 });
+
+test('cleanup acceptance requires the displayed immutable preview and makes no provider call', async (t) => {
+  const h = await harness(t);
+  const upload = await h.request('POST', '/api/import/jobs', { imageBase64: h.source.toString('base64') });
+  const job = upload.jobs[0];
+  const dir = path.join(h.root, 'data', 'jobs', job.id);
+  const file = path.join(dir, 'job.json');
+  const saved = JSON.parse(await readFile(file, 'utf8'));
+  const sourceUrl = `/api/import/assets/${job.id}/failed.png`;
+  Object.assign(saved.stages.crop, { status: 'approved', decision: 'approved' });
+  Object.assign(saved.stages.garment, { status: 'failed', attempts: 1, failedAssetUrl: sourceUrl, chromaKey: '#ff00ff' });
+  await writeFile(path.join(dir, 'failed.png'), h.source);
+  await writeFile(file, JSON.stringify(saved));
+  const calls = h.requests.length;
+  const route = `/api/import/jobs/${job.id}/stages/garment/cleanup-`;
+  await h.request('POST', `${route}accept`, { tolerance: 46 }, 409);
+  const a = await h.request('POST', `${route}preview`, { tolerance: 46 });
+  const firstUrl = a.stages.garment.cleanupPreviewUrl;
+  const firstBytes = await readFile(path.join(dir, path.basename(firstUrl)));
+  const b = await h.request('POST', `${route}preview`, { tolerance: 46 });
+  const secondUrl = b.stages.garment.cleanupPreviewUrl;
+  assert.notEqual(firstUrl, secondUrl);
+  assert.deepEqual(await readFile(path.join(dir, path.basename(firstUrl))), firstBytes);
+  await h.request('POST', `${route}accept`, { tolerance: 46, previewUrl: firstUrl }, 409);
+  await h.request('POST', `${route}accept`, { tolerance: 110, previewUrl: secondUrl }, 409);
+  const accepted = await h.request('POST', `${route}accept`, { tolerance: 46, previewUrl: secondUrl });
+  assert.equal(accepted.stages.garment.status, 'review');
+  assert.equal(accepted.stages.garment.assetUrl, secondUrl);
+  assert.equal(h.requests.length, calls);
+});
