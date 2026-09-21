@@ -3,6 +3,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { ArrowCounterClockwise, ArrowRight, Check, Plus, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { createViewResource } from "./view-resource.mjs";
+import { OutfitFinder, OwnedItemSwaps } from "./outfit-discovery.jsx";
+import { discoveryFingerprint, orderDiscovery } from "../shared/outfit-discovery.mjs";
 import "./outfit-view.css";
 
 const API = "/api/outfits";
@@ -262,6 +264,8 @@ function JobRow({ job, onOpen }) {
 }
 
 export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
+  const [discoveryConfig, setDiscoveryConfig] = useState(null);
+  const [discoveryResult, setDiscoveryResult] = useState(null);
   const [outfits, setOutfits] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [config, setConfig] = useState(null);
@@ -284,8 +288,17 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
   const wardrobeFingerprint = JSON.stringify(items.map(({ id, part, image, revision }) => [id, part, image, revision]));
   const previousWardrobe = useRef(wardrobeFingerprint);
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  const fingerprint = discoveryFingerprint(outfits, items);
+  const currentDiscovery = discoveryConfig?.ready && discoveryResult?.fingerprint === fingerprint ? discoveryResult : null;
+  const outfitsById = new Map(outfits.map((outfit) => [outfit.id, outfit]));
+  const displayedOutfits = currentDiscovery ? orderDiscovery(currentDiscovery.rankings, currentDiscovery).map(({ id }) => outfitsById.get(id)).filter(Boolean) : outfits;
 
   if (!resources.current) resources.current = {
+    discovery: createViewResource({
+      load: (signal) => request(`${API}/discovery/config`, { signal }),
+      onValue: setDiscoveryConfig,
+      onError: () => setDiscoveryConfig(null),
+    }),
     collection: createViewResource({
       load: (signal) => request(API, { signal }),
       onValue: (value) => { setOutfits(value.outfits || []); setLoadError(""); },
@@ -404,6 +417,7 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
       <div><p className="outfit-count">{loading ? "Your collection" : `${outfits.length} ${outfits.length === 1 ? "outfit" : "outfits"}`}</p><h1>Outfits</h1><p>New ways to wear the pieces you already own.</p></div>
       <button className="outfit-primary" type="button" onClick={() => { setActionError(""); setModal({ type: "generate" }); }} disabled={!config && refreshingConfig}><Plus size={18} aria-hidden="true" />Generate outfits</button>
     </header>
+    {outfits.length ? <OutfitFinder config={discoveryConfig} fingerprint={fingerprint} active={active && visible} result={currentDiscovery} onChange={setDiscoveryResult} /> : null}
     {jobsError ? <div className="outfit-page-notice" role="status"><p>{jobsError}</p><button className="outfit-text-button" type="button" onClick={() => { void resources.current.jobs.refresh({ force: true }).catch(() => {}); }}>Refresh</button></div> : null}
     {jobWarnings.length ? <div className="outfit-page-notice" role="alert"><p>Some saved generations need attention.</p><ul>{jobWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
     {actionError && !modal ? <p className="outfit-page-notice outfit-error" role="alert">{actionError}</p> : null}
@@ -411,10 +425,10 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
     {loadError ? <div className="outfit-page-notice" role="alert"><p>{loadError}</p><button className="outfit-text-button" type="button" onClick={() => { void refreshCollection().catch(() => {}); }}>Reload collection</button></div> : null}
     {loading && !outfits.length ? <p className="outfit-empty" role="status">Loading your outfits…</p> : null}
     {!loading && !loadError && !outfits.length ? <div className="outfit-empty"><h2>Your next look starts here.</h2><p>Generate a collection from your wardrobe, then keep the looks you love.</p></div> : null}
-    {outfits.length ? <section className="outfit-grid" aria-label="Your outfit collection">{outfits.map((outfit, index) => <button key={outfit.id} className="outfit-card" type="button" onClick={() => setModal({ type: "outfit", id: outfit.id })} aria-label={`View ${outfit.name}`}><div className="outfit-card-photo"><Photo src={outfit.image} alt={`${outfit.name}, modeled outfit`} priority={index < 3} /></div><div className="outfit-card-caption"><h2>{outfit.name}</h2><ArrowRight size={19} aria-hidden="true" /><p>{occasionText(outfit)}</p></div></button>)}</section> : null}
+    {displayedOutfits.length ? <section className="outfit-grid" aria-label={currentDiscovery ? "Matching saved outfits" : "Your outfit collection"}>{displayedOutfits.map((outfit, index) => <button key={outfit.id} className="outfit-card" type="button" onClick={() => setModal({ type: "outfit", id: outfit.id })} aria-label={`View ${outfit.name}`}><div className="outfit-card-photo"><Photo src={outfit.image} alt={`${outfit.name}, modeled outfit`} priority={index < 3} /></div><div className="outfit-card-caption"><h2>{outfit.name}</h2><ArrowRight size={19} aria-hidden="true" /><p>{occasionText(outfit)}</p></div></button>)}</section> : null}
     {previousJobs.length ? <details className="outfit-history"><summary>Previous generations <span>({previousJobs.length})</span></summary>{previousJobs.map((job) => <JobRow key={job.id} job={job} onOpen={openJob} />)}</details> : null}
     {active && modal?.type === "generate" ? <OutfitModal title="Generate outfits" className="outfit-generate-modal" onClose={closeModal}><GenerateForm config={config} configError={configError} refreshing={refreshingConfig} onRefresh={refreshConfig} busy={!!busyKey} error={actionError} onSubmit={startGeneration} /></OutfitModal> : null}
-    {active && selectedOutfit ? <OutfitModal title={selectedOutfit.name} onClose={closeModal}><OutfitDetails outfit={selectedOutfit} itemsById={itemsById} visible={visible} /></OutfitModal> : null}
+    {active && selectedOutfit ? <OutfitModal title={selectedOutfit.name} onClose={closeModal}><OutfitDetails outfit={selectedOutfit} itemsById={itemsById} visible={visible}>{discoveryConfig?.ready ? <OwnedItemSwaps key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} fingerprint={fingerprint} active={visible} /> : null}</OutfitDetails></OutfitModal> : null}
     {active && selectedJob ? <OutfitModal title={`${selectedJob.count} outfit ${selectedJob.count === 1 ? "idea" : "ideas"}`} className="outfit-review-modal" onClose={closeModal}><ReviewJob key={selectedJob.id} job={selectedJob} itemsById={itemsById} busy={!!busyKey} error={actionError} onAction={outfitAction} onRetryJob={retryJob} visible={visible} /></OutfitModal> : null}
   </main>;
 }

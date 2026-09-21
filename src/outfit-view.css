@@ -15,6 +15,19 @@
 .outfit-secondary:not(:disabled):hover { border-color: var(--ink); background: rgba(25, 25, 25, .04); }
 .outfit-page button:disabled, .outfit-modal button:disabled { opacity: .48; cursor: not-allowed; }
 .outfit-page-heading > button { flex-shrink: 0; margin-bottom: 3px; }
+.outfit-finder { padding: 0 0 24px; margin-bottom: 28px; border-bottom: 1px solid var(--line); }
+.outfit-finder form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; }
+.outfit-finder .outfit-field { flex: 1 1 320px; }
+.outfit-finder .outfit-small { margin: 12px 0 0; }
+.outfit-discovery-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 22px; }
+.outfit-discovery-controls button[aria-pressed="true"] { border-color: var(--ink); background: rgba(25, 25, 25, .06); }
+.outfit-discovery-controls label { display: flex; align-items: center; gap: 7px; font-size: 12px; line-height: 1.5; margin-left: 4px; }
+.outfit-discovery-controls input { accent-color: var(--ink); }
+.outfit-swaps { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 22px; }
+.outfit-swaps h3 { margin: 0 0 14px; font-size: 12px; font-weight: 550; letter-spacing: .035em; }
+.outfit-swaps form { display: grid; gap: 16px; }
+.outfit-field select { width: 100%; min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 0; background: var(--paper); color: var(--ink); font: inherit; }
+.outfit-finder input:focus-visible, .outfit-modal select:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .outfit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 38px 24px; }
 .outfit-card { min-width: 0; width: 100%; background: transparent; padding: 0; border: 0; color: var(--ink); text-align: left; cursor: pointer; }
 .outfit-card-photo { aspect-ratio: 1; width: 100%; background: #e9e3d9; overflow: hidden; }

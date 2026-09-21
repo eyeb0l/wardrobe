@@ -54,11 +54,15 @@ Hosted requests have separate allowances per UTC calendar day:
 | Production variable | Default | Requests counted |
 | --- | --- | --- |
 | `WARDROBE_DAILY_IMAGE_API_LIMIT` | 40 | Image generation |
-| `WARDROBE_DAILY_TEXT_API_LIMIT` | 1,000 | Text/vision, including shopping, accessories, clothing analysis, outfit planning, and modeled-photo scene planning |
+| `WARDROBE_DAILY_TEXT_API_LIMIT` | 1,000 | Text/vision, including shopping, accessories, clothing analysis, outfit planning, modeled-photo scene planning, and optional Jev discovery batches |
 
 Set positive integers and redeploy to change them. `WARDROBE_DAILY_API_LIMIT` remains an image-only fallback when the image-specific setting is unset. Legacy aggregate usage counts against images until the next UTC day; text has its own allowance. Backups preserve both counters.
 
 Each provider request reserves allowance immediately before dispatch under the writer lease. Cached suggestions and skipped work use none; failed or uncertain requests still count. A successful modeled-garment attempt uses one text request for scene planning followed by one image request; planning must succeed before image generation starts. Batches may make several calls. These are **request-count limits, not currency budgets**; use provider-side controls too.
+
+### Optional Jev discovery
+
+Add `TYPESAFE_API_KEY` and `WARDROBE_JEV_ENABLED=1` to **Production only**, then redeploy, to enable saved-look search and owned-item replacement suggestions. Neither variable needs a `VITE_` prefix. The feature is off by default and ordinary browsing needs no TypeSafe key. The existing authentication gate and writer lease protect these endpoints and their text quota reservations. See [Outfit discovery](OUTFIT_DISCOVERY.md) for data sent, caching, limits and validation. Disable the flag and redeploy to remove the controls without changing wardrobe data.
 
 ## Release code and retain data
 

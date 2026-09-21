@@ -4,6 +4,7 @@ import { wardrobeImportApi } from "./scripts/import-job-api.mjs";
 import { wardrobeOutfitApi } from "./scripts/outfit-api.mjs";
 import { wardrobeShoppingApi } from "./scripts/shopping-api.mjs";
 import { responsiveImageApi } from "./scripts/responsive-image-api.mjs";
+import { wardrobeDiscoveryApi } from "./scripts/outfit-discovery-api.mjs";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -23,6 +24,6 @@ export default defineConfig(({ mode }) => {
       port: 4173,
       allowedHosts: ["localhost"],
     },
-    plugins: [react(), responsiveImageApi(), wardrobeImportApi({ env }), wardrobeOutfitApi({ env }), wardrobeShoppingApi({ env })],
+    plugins: [react(), responsiveImageApi(), wardrobeImportApi({ env }), wardrobeDiscoveryApi({ env }), wardrobeOutfitApi({ env }), wardrobeShoppingApi({ env })],
   };
 });
