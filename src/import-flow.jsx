@@ -1,3 +1,4 @@
+import { prepareOriginalCutout } from "./background-removal.mjs";
 import { CopyPrompt, ModeledPhotoUpload } from "./modeled-photo-controls.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -117,7 +118,7 @@ function ReviewEditor({ job, stage, draft, setDraft, regenPrompt, setRegenPrompt
   const detectionReview = isCrop && job.detectionRetry?.status === "review";
   const decisionBusy = busy || detectionChecking || detectionReview;
   const isGarment = stage === "garment";
-  const useOriginal = isCrop && job.canUseOriginal && imageChoice === "original";
+  const useOriginal = isCrop && imageChoice === "original";
   const originalGarment = isGarment && job.stages.garment.source === "original";
   const isReady = job.stages[stage]?.status === "ready";
   const isFailed = job.stages[stage]?.status === "failed";
@@ -128,18 +129,19 @@ function ReviewEditor({ job, stage, draft, setDraft, regenPrompt, setRegenPrompt
   const secondaryValid = !draft.secondaryColor || HEX_COLOR.test(draft.secondaryColor);
   return (
     <div className="import-editor">
-      <OptimizedImage className="import-editor__preview" src={asset} alt={useOriginal || originalGarment ? "Original product image" : isCrop ? "Detected item crop" : isGarment ? "Extracted garment" : isFailed && !job.stages[stage]?.assetUrl ? "Garment awaiting modeled image" : "Generated modeled look"} />
+      <OptimizedImage className={`import-editor__preview${useOriginal || originalGarment ? " has-transparency" : ""}`} src={asset} alt={useOriginal || originalGarment ? "Original product image" : isCrop ? "Detected item crop" : isGarment ? "Extracted garment" : isFailed && !job.stages[stage]?.assetUrl ? "Garment awaiting modeled image" : "Generated modeled look"} />
       <div className="import-fields">
         <p className="import-editor__stage">{isCrop ? "Detected item" : isGarment ? "Garment image" : "Modeled image"}</p>
-        {isCrop ? job.canUseOriginal ? (
+        {isCrop ? (
           <fieldset className="import-image-choice" disabled={decisionBusy || cropping}>
-            <legend>This looks like a clean product photo</legend>
-            <label><input type="radio" name={`image-choice-${job.id}`} value="original" checked={imageChoice === "original"} onChange={() => setImageChoice("original")} /><span><strong>Use original image</strong><small>Keep the uploaded image and its white or transparent background. No garment generation.</small></span></label>
+            <legend>{job.canUseOriginal ? "This looks like a clean product photo" : "How would you like to prepare this item?"}</legend>
+            <label><input type="radio" name={`image-choice-${job.id}`} value="original" checked={imageChoice === "original"} onChange={() => setImageChoice("original")} /><span><strong>Use original image</strong><small>Keep the photographed item. Remove its background on this device if needed; preserve existing transparency.</small></span></label>
             <label><input type="radio" name={`image-choice-${job.id}`} value="extract" checked={imageChoice === "extract"} onChange={() => setImageChoice("extract")} /><span><strong>Extract garment</strong><small>Generate a clean garment cutout with a transparent background.</small></span></label>
+            {!job.canUseOriginal && imageChoice === "original" && <p className="import-card__detail">Use this only when the full original shows one isolated item, without a person or other products. Check the cutout before approving.</p>}
           </fieldset>
-        ) : <p className="import-card__detail">Check that this crop contains the complete intended item. Extract garment will generate a clean cutout for review.</p> : isGarment ? (
+        ) : isGarment ? (
           <>
-            {originalGarment && <p className="import-card__detail">Your original product image is ready. Check its details below. Approving it adds the item and creates a modeled preview.</p>}
+            {originalGarment && <p className="import-card__detail">Your original item is ready on a transparent background. Check the edges and details below. Approving it adds the item and creates a modeled preview.</p>}
             <div className="import-field"><label htmlFor={`name-${job.id}`}>Name</label><input id={`name-${job.id}`} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></div>
             <div className="import-field"><label htmlFor={`part-${job.id}`}>Category</label><select id={`part-${job.id}`} value={draft.part} onChange={(event) => setDraft({ ...draft, part: event.target.value })}>{PARTS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></div>
             <div className="import-field"><label htmlFor={`primary-${job.id}`}>Primary color</label><div className="import-color-row"><input id={`primary-${job.id}`} type="color" value={primaryValid ? draft.color : "#000000"} onChange={(event) => setDraft({ ...draft, color: event.target.value })} /><input aria-label="Primary color hex" aria-invalid={!primaryValid} value={draft.color} onChange={(event) => setDraft({ ...draft, color: event.target.value })} /></div>{!primaryValid && <small className="import-field-error">Use a six-digit hex color, such as #d8d0c2.</small>}</div>
@@ -212,6 +214,9 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   const [open, setOpen] = useState(false);
   const [selectedReviewId, setSelectedReviewId] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [cutoutProgress, setCutoutProgress] = useState("");
+  const cutoutController = useRef(null);
+  useEffect(() => () => cutoutController.current?.abort(), []);
   const [detectionBusyId, setDetectionBusyId] = useState(null);
   const [, updateDetectionClock] = useState(0);
   const mutationRef = useRef(false);
@@ -417,7 +422,14 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
         onGarmentApproved?.({ id: `import-${job.id}`, ...metadata, image: garmentPath, thumbnail: garmentPath, modeledImage: null, palette: [metadata.color, metadata.secondaryColor].filter(Boolean), importJobId: job.id });
         setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
       } else {
-        const updated = await api(`${API}/${job.id}/stages/${stage}/${action}`, { method: "POST", body: action === "regenerate" ? JSON.stringify({ prompt, ...(stage === "modeled" ? { modelReferenceId } : {}) }) : undefined });
+        let originalInput;
+        if (action === "use-original") {
+          cutoutController.current = new AbortController();
+          originalInput = { ...await prepareOriginalCutout(job.originalAssetUrl, { onProgress: setCutoutProgress, signal: cutoutController.current.signal }), confirmOriginal: true };
+          cutoutController.current = null;
+          setCutoutProgress("");
+        }
+        const updated = await api(`${API}/${job.id}/stages/${stage}/${action}`, { method: "POST", body: originalInput ? JSON.stringify(originalInput) : action === "regenerate" ? JSON.stringify({ prompt, ...(stage === "modeled" ? { modelReferenceId } : {}) }) : undefined });
         const removeFromQueue = action === "reject" || (stage === "modeled" && action === "approve");
         const remainingJobs = removeFromQueue ? jobs.filter((item) => item.id !== job.id) : null;
         setJobs((current) => removeFromQueue ? current.filter((item) => item.id !== job.id) : current.map((item) => item.id === job.id ? updated : item));
@@ -429,8 +441,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
         if (action === "regenerate") setRegenerationPrompts((current) => ({ ...current, [`${job.id}:${stage}`]: "" }));
         if (stage === "modeled" && action === "approve") onModeledApproved?.(job.id, updated.libraryItem?.modeledImage || `/api/import/library/import-${job.id}-modeled.png`);
       }
-    } catch (requestError) { setError(requestError.message); }
-    finally { endMutation(); }
+    } catch (requestError) { if (requestError.name !== "AbortError") setError(requestError.message); }
+    finally { cutoutController.current = null; setCutoutProgress(""); endMutation(); }
   };
 
   const uploadModeled = async (job, image) => {
@@ -497,6 +509,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
               <SpinnerGap size={20} className="import-spinner" aria-hidden="true" />
             </div>)}
           </div>}
+          {cutoutProgress && <div className="import-cutout-progress" role="status" aria-live="polite"><SpinnerGap size={18} className="import-spinner" /><span>{cutoutProgress}</span><button className="import-button" onClick={() => cutoutController.current?.abort()}>Cancel</button></div>}
           {openingModeled && <p className="import-card__detail" role="status"><SpinnerGap size={16} className="import-spinner" /> Opening modelled shot…</p>}
           {openingModeled ? null : !jobs.length ? uploads.length ? null : setupRequired ? <div className="import-drop-target import-setup-warning"><WarningCircle size={30} /><h2>Setup required</h2><p>Add your OpenAI API key to <code>.env</code> and a PNG reference photo of yourself at <code>{setup.modelReference || "data/model-reference.png"}</code>, then restart the app.</p></div> : <div className="import-drop-target"><UploadSimple size={28} /><h2>{notice || error ? "Try another image" : "Choose or paste an image"}</h2><p>{notice?.detail || "We’ll isolate each clothing item, suggest its details, and hold everything for your approval."}</p><button className="import-button import-button--primary" disabled={!setup?.ready || Boolean(busyId)} onClick={() => inputRef.current?.click()}>Choose images</button></div> : (
             <>

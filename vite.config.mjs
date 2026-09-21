@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
     optimizeDeps: {
-      include: ["react", "react-dom/client"],
+      include: ["react", "react-dom/client", "@huggingface/transformers"],
     },
     server: {
       host: "0.0.0.0",

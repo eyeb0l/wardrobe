@@ -275,3 +275,22 @@ test("hosted Terra retry enforces origin checks and recovers an interrupted atte
   assert.equal(response.body.detectionRetry.candidates.length, 1);
   assert.equal(h.requests.length, 2);
 });
+
+test("hosted original override saves a browser mask without scheduling generation", async t => {
+  const h = await harness(t);
+  const job = await h.createJob();
+  const mask = await sharp({ create: { width: 64, height: 80, channels: 3, background: '#000000' } })
+    .composite([{ input: await sharp({ create: { width: 32, height: 48, channels: 3, background: '#ffffff' } }).png().toBuffer(), left: 16, top: 16 }]).png().toBuffer();
+  const endpoint = `/api/import/jobs/${job.id}/stages/crop/use-original`;
+  const bad = await h.request('POST', endpoint, { confirmOriginal: true, maskDataUrl: 'invalid' });
+  assert.equal(bad.status, 400);
+  const result = await h.request('POST', endpoint, { confirmOriginal: true, maskDataUrl: `data:image/png;base64,${mask.toString('base64')}` });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.stages.garment.backgroundRemoved, true);
+  assert.equal(result.body.stages.garment.status, 'review');
+  assert.equal(h.tasks.length, 0);
+  assert.equal(h.requests.length, 1);
+  await h.restart();
+  const restored = await h.request('GET', `/api/import/jobs/${job.id}`);
+  assert.equal(restored.body.stages.garment.backgroundRemoved, true);
+});
