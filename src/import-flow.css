@@ -360,3 +360,16 @@
 .import-editor__preview.has-transparency { background-color: #faf9f6; background-image: conic-gradient(#e7e5df 25%, transparent 0 50%, #e7e5df 0 75%, transparent 0); background-size: 20px 20px; }
 .import-cutout-progress { display: flex; align-items: center; gap: 12px; padding: 12px 0; font-size: 13px; }
 .import-cutout-progress span { flex: 1; }
+
+.import-cleanup-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.import-cleanup-toolbar label { display: grid; gap: 6px; color: var(--import-muted); font-size: 12px; }
+.import-cleanup-toolbar select { padding: 8px 10px; border: 1px solid var(--import-line); border-radius: 8px; color: var(--import-ink); background: var(--import-ivory); font: inherit; }
+.import-cleanup-viewport { height: min(50vh, 460px); overflow: auto; border: 1px solid var(--import-line); border-radius: 12px; background: #fff; }
+.import-cleanup-viewport.is-checker { background-color: #fff; background-image: conic-gradient(#e4e4e4 25%, transparent 0 50%, #e4e4e4 0 75%, transparent 0); background-size: 20px 20px; }
+.import-cleanup-viewport.is-dark { background: #202020; }
+.import-cleanup-viewport > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.import-cleanup-viewport > img.is-zoomed { width: 200%; height: 200%; max-width: none; }
+.import-cleanup-viewport > p { padding: 20px; color: #444; }
+.import-cleanup-adjustments summary { cursor: pointer; padding: 8px 0; font-size: 13px; }
+.import-cleanup-adjustments .import-field { margin-block: 12px; }
+.import-cleanup-source { display: block; width: min(100%, 340px); border-radius: 10px; }

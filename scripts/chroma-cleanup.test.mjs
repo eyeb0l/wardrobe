@@ -180,3 +180,43 @@ test('transparent exterior protects key-colored garment touching the canvas bord
   await sameFramed(result.bytes, source);
   assert.deepEqual(result.verification, { contaminatedPixels: 0, maxSpill: 0 });
 });
+
+for (const key of ['#ff00ff', '#00ffff', '#00ff00']) {
+  test(`${key}: noisy bright edge blends are cleaned automatically without changing the body`, async () => {
+    const background = rgb(key);
+    const color = [28, 32, 30];
+    const source = await raster((x, y) => {
+      const depth = Math.min(x - 19, 76 - x, y - 19, 76 - y);
+      if (depth <= 0) return [...background, 255];
+      if (depth > 2) return [...color, 255];
+      const alpha = depth === 1 ? 0.2 : 0.55;
+      return [...color.map((v, c) => Math.min(255, Math.round(v * alpha + background[c] * (1 - alpha) + 45))), 255];
+    });
+    const result = await processChromaBackground(source, key);
+    assert.equal(result.verification.contaminatedPixels, 0);
+    const output = await pixels(result.bytes);
+    let visible = 0;
+    for (let i = 0; i < output.length; i += 4) {
+      if (output[i + 3] <= 8) continue;
+      visible++;
+      assert.ok((Math.max(...output.subarray(i, i + 3)) - Math.min(...output.subarray(i, i + 3))) * output[i + 3] / 255 < 12, `no visible saturated edge remains: ${[...output.subarray(i, i + 4)]}`);
+    }
+    assert.ok(visible > 1000);
+    assert.deepEqual([...output.subarray(4 * (512 * 1024 + 512), 4 * (512 * 1024 + 512) + 4)], [...color, 255]);
+  });
+}
+
+test('isolated near-key dust is removed while detached contrasting details survive', async () => {
+  const source = await raster((x, y) => {
+    if (x >= 20 && x < 76 && y >= 20 && y < 76) return [25, 25, 25, 255];
+    if (x === 8 && y === 8) return [247, 18, 247, 255];
+    if (x === 84 && y === 84) return [240, 220, 30, 255];
+    return [255, 0, 255, 255];
+  });
+  const expected = await raster((x, y) => {
+    if (x >= 20 && x < 76 && y >= 20 && y < 76) return [25, 25, 25, 255];
+    if (x === 84 && y === 84) return [240, 220, 30, 255];
+    return [0, 0, 0, 0];
+  });
+  await sameFramed((await processChromaBackground(source, '#ff00ff')).bytes, expected);
+});

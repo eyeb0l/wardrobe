@@ -1,3 +1,4 @@
+import { CHROMA_CLEANUP_RECIPE } from "../shared/chroma-cleanup.mjs";
 import { inspectProductBackground, applyProductMask } from "./product-cutout.mjs";
 import { generationAttempt, garmentTelemetry, manualTelemetry } from "./generation-telemetry.mjs";
 import { readLibrary, withLibraryLock, publicLibraryItem, saveLibraryEdit, deleteLibraryItem, migrateLibraryEdits, editableFields } from './wardrobe-library.mjs';
@@ -266,21 +267,33 @@ function chromaMatte(data, info, target, tolerance) {
       }
     }
   }
-  return { background, layers, edgeBand, ambiguityRadius: tolerance + 40, keyColor, hasBackground: true };
+  return { background, layers, edgeBand, ambiguityRadius: tolerance + 40, keyColor, tolerance, hasBackground: true };
 }
 
-function fitChromaBlend(source, anchor, observed, keyColor, best) {
+function keyChroma(color, keyColor) {
+  const high = keyColor.map((v, c) => v > 127 ? c : -1).filter(c => c >= 0);
+  const low = keyColor.map((v, c) => v <= 127 ? c : -1).filter(c => c >= 0);
+  return high.reduce((sum, c) => sum + color[c], 0) / high.length - low.reduce((sum, c) => sum + color[c], 0) / low.length;
+}
+
+function fitChromaBlend(source, anchor, observed, keyColor, best, tolerance) {
   const foreground = [...source.subarray(anchor * 4, anchor * 4 + 3)];
   const vector = foreground.map((value, channel) => value - keyColor[channel]);
   const denominator = vector.reduce((sum, value) => sum + value * value, 0);
   const coverage = vector.reduce((sum, value, channel) => sum + value * (observed[channel] - keyColor[channel]), 0) / denominator;
   if (coverage <= 0 || coverage >= 0.98) return best;
   const residual = Math.hypot(...observed.map((value, channel) => value - (keyColor[channel] + coverage * vector[channel])));
-  if (residual > 4 + 18 * coverage || (best && residual >= best.residual)) return best;
+  // Generated backgrounds are not perfectly flat: low-coverage edge pixels
+  // can contain compression/noise off the ideal foreground-to-key line.
+  const noiseAllowance = 90 + tolerance / 5;
+  if (residual > noiseAllowance + 18 * coverage || (best && residual >= best.residual)) return best;
   // Unmix the observed pixel, retaining its local texture rather than
   // copying the anchor's RGB. The anchor estimates coverage only.
   const unmixed = observed.map((value, channel) => Math.round(Math.max(0, Math.min(255, (value - (1 - coverage) * keyColor[channel]) / coverage))));
-  return { foreground: unmixed, coverage, residual };
+  // Dividing off-line noise by tiny coverage turns a faint fringe into vivid
+  // coloured speckles. Use the nearby opaque sample for noisy edge RGB only;
+  // retain exact unmixing for clean blends and never touch opaque interiors.
+  return { foreground: coverage < 0.25 || residual > 1 ? foreground : unmixed, anchorColor: foreground, coverage, residual };
 }
 
 function unmixChromaEdge(source, pixel, info, matte) {
@@ -290,6 +303,8 @@ function unmixChromaEdge(source, pixel, info, matte) {
   const y = Math.floor(pixel / width);
   const observed = [...source.subarray(index, index + 3)];
   let best = null;
+  const anchors = [];
+  let furthestColor = 0;
   for (const [dx, dy] of CHROMA_NEIGHBORS) {
     const bx = x + dx;
     const by = y + dy;
@@ -297,8 +312,6 @@ function unmixChromaEdge(source, pixel, info, matte) {
     // Look inward for the least key-like samples along this ray. This avoids
     // mistaking another feather pixel for opaque foreground, and also works
     // on thin handles where no wide constant-color interior exists.
-    const anchors = [];
-    let furthestColor = 0;
     for (let step = 1; step <= Math.max(6, matte.edgeBand * 3); step += 1) {
       const ax = x - dx * step;
       const ay = y - dy * step;
@@ -311,12 +324,12 @@ function unmixChromaEdge(source, pixel, info, matte) {
       furthestColor = Math.max(furthestColor, distance);
       anchors.push({ anchor, distance });
     }
-    for (const { anchor, distance } of anchors) {
-      if (distance < furthestColor * 0.65) continue;
-      best = fitChromaBlend(source, anchor, observed, matte.keyColor, best);
-    }
   }
-  if (!best && colorDistance(source, index, matte.keyColor) < matte.ambiguityRadius) {
+  for (const { anchor, distance } of anchors) {
+    if (distance < furthestColor * 0.92) continue;
+    best = fitChromaBlend(source, anchor, observed, matte.keyColor, best, matte.tolerance);
+  }
+  if (!best && (colorDistance(source, index, matte.keyColor) < matte.ambiguityRadius || keyChroma(observed, matte.keyColor) > 30)) {
     // Corners, fine hardware and curved handles need samples along the same
     // connected foreground, not just eight straight rays. Restrict this more
     // expensive search to unresolved background-dominated boundary pixels.
@@ -347,8 +360,13 @@ function unmixChromaEdge(source, pixel, info, matte) {
       }
     }
     for (const { anchor, distance } of anchors) {
-      if (distance < furthestColor * 0.65) continue;
-      best = fitChromaBlend(source, anchor, observed, matte.keyColor, best);
+      if (distance < furthestColor * 0.92) continue;
+      best = fitChromaBlend(source, anchor, observed, matte.keyColor, best, matte.tolerance);
+    }
+    // Tiny detached key-coloured specks have no garment sample to unmix.
+    // Do not treat a substantial or differently coloured component as dust.
+    if (!best && queue.length <= 9 && queue.every(p => colorDistance(source, p * 4, matte.keyColor) < Math.max(150, matte.ambiguityRadius))) {
+      return { foreground: [0, 0, 0], coverage: 0 };
     }
   }
   if (best && best.coverage > 0.65) {
@@ -371,7 +389,9 @@ function unmixChromaEdge(source, pixel, info, matte) {
       }
       if (hasTransition) break;
     }
-    if (!hasTransition) return null;
+    // A one-pixel spill can meet the background directly, with no intermediate
+    // transition. Require excess key chroma relative to the opaque anchor.
+    if (!hasTransition && keyChroma(observed, matte.keyColor) - keyChroma(best.anchorColor, matte.keyColor) < 20) return null;
   }
   return best;
 }
@@ -1197,24 +1217,25 @@ export function wardrobeImportApi(options = {}) {
         }
         const input = await requestBody(req);
         const tolerance = cleanupTolerance(input.tolerance);
-        const sourceName = path.basename(new URL(stage.failedAssetUrl, "http://localhost").pathname);
-        const source = await readFile(path.join(jobsDir, job.id, sourceName));
-        const key = stage.chromaKey || chooseChromaKey(job.metadata?.color);
-        const cleaned = await processChromaBackground(source, key, { tolerance });
-        const previewName = `garment-${stage.attempts}-cleanup-${tolerance}.png`;
-        const previewUrl = `${ASSET_ROOT}/${job.id}/${previewName}`;
-        await writeFile(path.join(jobsDir, job.id, previewName), cleaned.bytes);
-        stage.chromaKey = key;
-        stage.cleanupTolerance = cleaned.tolerance;
-        stage.cleanupDiagnostics = cleaned.verification;
-        stage.cleanupPreviewUrl = previewUrl;
-        stage.updatedAt = new Date().toISOString();
         if (cleanupAction[1] === "cleanup-accept") {
-          stage.status = "review";
-          stage.decision = null;
-          stage.error = null;
-          stage.assetUrl = previewUrl;
+          if (!stage.cleanupPreviewUrl || input.previewUrl !== stage.cleanupPreviewUrl || tolerance !== stage.cleanupTolerance || stage.cleanupRecipe !== CHROMA_CLEANUP_RECIPE) {
+            throw Object.assign(new Error("Preview the current cleanup before using it"), { status: 409 });
+          }
+          // Accept the exact immutable preview that was shown, without rerunning
+          // cleanup or changing pixels between preview and approval.
+          await stat(path.join(jobsDir, job.id, path.basename(stage.cleanupPreviewUrl)));
+          Object.assign(stage, { status: "review", decision: null, error: null, assetUrl: stage.cleanupPreviewUrl });
+        } else {
+          const sourceName = path.basename(new URL(stage.failedAssetUrl, "http://localhost").pathname);
+          const source = await readFile(path.join(jobsDir, job.id, sourceName));
+          const key = stage.chromaKey || chooseChromaKey(job.metadata?.color);
+          const cleaned = await processChromaBackground(source, key, { tolerance });
+          const previewName = `garment-${stage.attempts}-cleanup-${randomUUID()}.png`;
+          await writeFile(path.join(jobsDir, job.id, previewName), cleaned.bytes, { flag: "wx" });
+          Object.assign(stage, { chromaKey: key, cleanupTolerance: cleaned.tolerance, cleanupDiagnostics: cleaned.verification,
+            cleanupRecipe: CHROMA_CLEANUP_RECIPE, cleanupPreviewUrl: `${ASSET_ROOT}/${job.id}/${previewName}` });
         }
+        stage.updatedAt = new Date().toISOString();
         await saveJob(job);
         return json(res, 200, publicJob(job));
       }
