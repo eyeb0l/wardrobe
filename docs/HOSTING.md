@@ -1,6 +1,10 @@
 # Private hosting on Vercel
 
-[Wardrobe](https://wardrobe-snowy-rho.vercel.app) uses Vercel Authentication for access, Neon for records and job state, and a **private** Vercel Blob store for images. This personal-use setup can run on Vercel Hobby; check current service allowances before assuming it will remain free. OpenAI usage is billed separately.
+[Wardrobe](https://wardrobe.iriss.dev/) uses Vercel Authentication for access, Neon for records and job state, and a **private** Vercel Blob store for images. This personal-use setup can run on Vercel Hobby; check current service allowances before assuming it will remain free. OpenAI usage is billed separately.
+
+The primary production address is **https://wardrobe.iriss.dev/**. The existing [Vercel address](https://wardrobe-snowy-rho.vercel.app/) remains available as an alternate address for the same project and cloud wardrobe. Use the primary address in documentation, bookmarks, and browser-based skill workflows.
+
+Manage both addresses under **Vercel → wardrobe → Domains**, connected to **Production**, and keep **Vercel Authentication → All Deployments** enabled for both. The app uses same-origin API and image paths, so adding the custom domain requires no application base-URL change or data migration. Browser-local preferences, caches, and sign-in sessions are separate for each origin.
 
 ## Set up the project
 

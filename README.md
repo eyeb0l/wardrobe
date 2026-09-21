@@ -4,6 +4,8 @@
 
 Import your clothes, create modeled outfits, and assess potential purchases against what you own.
 
+[Open Wardrobe →](https://wardrobe.iriss.dev/) · Private access through Vercel Authentication.
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-191919?style=flat-square)](LICENSE)
 [![Node 22](https://img.shields.io/badge/node-22.x-191919?style=flat-square)](package.json)
 

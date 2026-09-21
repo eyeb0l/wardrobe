@@ -1,6 +1,6 @@
 # Storage for Wardrobe project skills
 
-Read this before obtaining wardrobe context or saving a skill's results. The [hosted wardrobe](https://wardrobe-snowy-rho.vercel.app) is the default target. Local `data/` is an independent snapshot, not a production mirror. Use local mode only when the user requests it; never substitute local data after a cloud connection fails.
+Read this before obtaining wardrobe context or saving a skill's results. The [hosted wardrobe](https://wardrobe.iriss.dev/) is the default target. Local `data/` is an independent snapshot, not a production mirror. Use local mode only when the user requests it; never substitute local data after a cloud connection fails.
 
 ## Read the current wardrobe
 
