@@ -5,6 +5,8 @@ import { OptimizedImage } from "./OptimizedImage.jsx";
 import { OutfitView } from "./outfit-view.jsx";
 import { ShoppingView } from "./shopping-view.jsx";
 
+import { uiErrorMessage } from "./ui-error.mjs";
+
 import { wardrobeRequest, migrateBrowserEdits } from "./wardrobe-sync.mjs";
 
 const TYPES = [
@@ -186,8 +188,8 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
           <span>{label}</span>
           <small>Optional</small>
         </div>
-        <p>No distinct secondary color detected.</p>
-        <button className="add-secondary-button" type="button" onClick={onAdd}>Add secondary color</button>
+        <p>Add one if this piece has a second colour.</p>
+        <button className="add-secondary-button" type="button" onClick={onAdd}>Add secondary colour</button>
       </div>
     );
   }
@@ -206,15 +208,15 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
           aria-label={`Choose ${label.toLowerCase()}`}
         />
         <span className="selected-color-copy">
-          <small>Selected</small>
+          <small>Change colour</small>
           <strong>{value || "Custom"}</strong>
         </span>
       </label>
       <div className="suggestion-heading">
-        <span>Image suggestions</span>
-        <small>Click to apply</small>
+        <span>From this photo</span>
+
       </div>
-      <div className="palette" aria-label={`${label} suggestions from image`}>
+      <div className="palette" aria-label={`${label} suggestions from photo`}>
         {palette.map((color) => (
           <button
             type="button"
@@ -232,7 +234,7 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
         type="button"
         onClick={() => setSampling((current) => current === field ? null : field)}
       >
-        {sampling === field ? "Cancel picking" : `Pick ${label.toLowerCase()} from image`}
+        {sampling === field ? "Cancel" : "Pick from photo"}
       </button>
     </div>
   );
@@ -260,10 +262,10 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
       </label>
 
       <fieldset className="color-field">
-        <legend>Colors</legend>
+        <legend>Colours</legend>
         <div className="colors-editor">
           <ColorControl
-            label="Primary color"
+            label="Primary colour"
             field="primary"
             value={draft.color}
             palette={palette}
@@ -272,7 +274,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
             setSampling={setSampling}
           />
           <ColorControl
-            label="Secondary color"
+            label="Secondary colour"
             field="secondary"
             value={draft.secondaryColor}
             palette={palette}
@@ -284,7 +286,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
             onAdd={() => setDraft((current) => ({ ...current, secondaryColor: suggestedSecondary }))}
           />
         </div>
-        <p className="color-help" aria-live="polite">{sampling ? `Click anywhere on the garment to sample the ${sampling} color.` : sampleStatus || "Primary colors come from the image. A secondary is suggested only when a distinct color has meaningful coverage."}</p>
+        <p className="color-help" aria-live="polite">{sampling ? `Select a point on the garment photo to pick the ${sampling} colour.` : sampleStatus || "Choose a swatch or pick a colour from the garment photo."}</p>
       </fieldset>
 
       <div className="field details-field">
@@ -297,6 +299,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
 
 function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
   const closeButtonRef = useRef(null);
+  const dialogRef = useRef(null);
   const imageRef = useRef(null);
   const samplingCanvasRef = useRef(null);
   const shakeTimerRef = useRef(null);
@@ -349,22 +352,18 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
   }, [isDirty, nudgeUnsaved, onClose]);
 
   useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        if (sampling) setSampling(null);
-        else requestClose();
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
+    const previousFocus = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog.showModal();
     document.body.classList.add("viewer-open");
     closeButtonRef.current?.focus({ preventScroll: true });
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
+      dialog.close();
       document.body.classList.remove("viewer-open");
       clearTimeout(shakeTimerRef.current);
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     };
-  }, [requestClose, sampling]);
+  }, []);
 
   useEffect(() => {
     if (!isDirty) setCloseBlocked(false);
@@ -384,7 +383,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
       setRevision(saved.revision);
       setDraft({ name: saved.name || "", part: saved.part, color: saved.color || "#9a9286", secondaryColor: saved.secondaryColor || null, tags: [...(saved.tags || [])] });
       setSampling(null);
-      setSampleStatus("Changes saved across devices.");
+      setSampleStatus("Changes saved.");
     } catch (error) { setSaveError(error.message); }
     finally { setSaving(false); }
   };
@@ -405,18 +404,18 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
   const handleImageClick = (event) => {
     if (!sampling || !samplingCanvasRef.current) return;
     if (!event.currentTarget.complete || event.currentTarget.currentSrc !== event.currentTarget.src) {
-      setSampleStatus("Loading the original image for colour sampling.");
+      setSampleStatus("Loading the photo for colour picking…");
       return;
     }
     const color = sampleImageColor(event.currentTarget, samplingCanvasRef.current, event);
     if (!color) {
-      setSampleStatus("That spot is transparent—try directly on the garment.");
+      setSampleStatus("Choose a point on the garment itself.");
       return;
     }
     const targetField = sampling === "secondary" ? "secondaryColor" : "color";
     setDraft((current) => ({ ...current, [targetField]: color }));
     setPalette((current) => [color, ...current.filter((existing) => existing.toLowerCase() !== color.toLowerCase())].slice(0, 5));
-    setSampleStatus(`Sampled ${color} as the ${sampling} color.`);
+    setSampleStatus(`Updated the ${sampling} colour.`);
     setSampling(null);
   };
 
@@ -436,14 +435,18 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
         onLoad={handleImageLoad}
         onClick={handleImageClick}
       />
-      {sampling && <span className="sample-hint">Click garment to sample</span>}
+      {sampling && <span className="sample-hint">Pick a colour</span>}
     </div>
   );
 
   return (
-    <div className="viewer-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && requestClose()}>
+    <dialog ref={dialogRef} className="viewer-overlay" aria-label="Selected wardrobe item" onCancel={(event) => {
+      event.preventDefault();
+      if (sampling) setSampling(null);
+      else requestClose();
+    }} onMouseDown={(event) => event.target === event.currentTarget && requestClose()}>
     <div className="viewer-entry">
-    <aside className={`viewer editing${hasModeledImage ? " has-modeled-image" : ""}${shaking ? " shake" : ""}`} role="dialog" aria-modal="true" aria-label="Selected wardrobe item">
+    <aside className={`viewer editing${hasModeledImage ? " has-modeled-image" : ""}${shaking ? " shake" : ""}`}>
       <button className="viewer-icon-close" type="button" onClick={requestClose} aria-label="Close viewer" ref={closeButtonRef}>
         <X size={24} weight="light" aria-hidden="true" />
       </button>
@@ -487,18 +490,18 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
           sampleStatus={sampleStatus}
         />
 
-        <button className="secondary-button modeled-regenerate-button" type="button" disabled={isDirty} title={isDirty ? "Save or cancel your changes first" : undefined} onClick={() => onRegenerate(item)}>
-          <ArrowCounterClockwise size={15} aria-hidden="true" /> {hasModeledImage ? "Update modelled shot" : "Create modelled shot"}
+        <button className="secondary-button modeled-regenerate-button" type="button" disabled={isDirty} title={isDirty ? "Save or discard your changes first" : undefined} onClick={() => onRegenerate(item)}>
+          <ArrowCounterClockwise size={15} aria-hidden="true" /> {hasModeledImage ? "Update modelled photo" : "Create modelled photo"}
         </button>
-        {saveError && <p className="status error" role="alert">{saveError}</p>}
-        {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}
+        {saveError && <p className="status error" role="alert">{uiErrorMessage(saveError)}</p>}
+        {closeBlocked && <p className="unsaved-notice" role="status">Save or discard changes before closing.</p>}
 
         <div className="viewer-actions">
           <button className="delete-button" type="button" onClick={deleteSelected}>
             <Trash size={15} weight="regular" aria-hidden="true" /> Delete
           </button>
           <span className="action-spacer" />
-          <button className="secondary-button" type="button" onClick={cancelEditing}>Cancel</button>
+          <button className="secondary-button" type="button" onClick={cancelEditing}>{isDirty ? "Discard changes" : "Close"}</button>
           <button className="primary-button" type="button" onClick={saveEditing}>
             <Check size={15} weight="bold" aria-hidden="true" /> {saving ? "Saving…" : "Save"}
           </button>
@@ -506,7 +509,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
       </fieldset>
     </aside>
     </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -632,7 +635,7 @@ export function App() {
       <main className="gallery-pane">
         <header className="gallery-header">
           <div className="gallery-meta-row">
-            <p className="piece-count">{items.length} {items.length === 1 ? "piece" : "pieces"}</p>
+            <p className="piece-count" role="status">{loading ? "Your wardrobe" : `${visibleItems.length} ${visibleItems.length === 1 ? "piece" : "pieces"}`}</p>
           </div>
           <nav className="category-nav" aria-label="Filter wardrobe by item type">
             {TYPES.map((type) => (
@@ -650,9 +653,11 @@ export function App() {
         </header>
 
         {syncNotice && <p className="status" role="status">{syncNotice}</p>}
-        {error && <p className="status error">{error}</p>}
+        {error && <p className="status error">{uiErrorMessage(error)}</p>}
         {!error && loading && <p className="status">Loading wardrobe</p>}
         {!error && !loading && !items.length && <p className="status empty">Drop, paste, or add a photo to import your first piece.</p>}
+
+        {!loading && !!items.length && !visibleItems.length && <p className="status empty">No {TYPE_MAP[activeType]?.label.toLowerCase()} yet. Choose another category or add a photo.</p>}
 
         {!!items.length && (
           <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>

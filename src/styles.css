@@ -19,7 +19,7 @@ html { background: var(--paper); }
 
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
   min-height: 100vh;
   background: var(--paper);
   color: var(--ink);
@@ -38,7 +38,7 @@ button { font: inherit; }
 .gallery-pane { min-width: 0; }
 
 .gallery-header {
-  padding: 60px 56px 0;
+  padding: 32px 56px 0;
 }
 
 .gallery-meta-row {
@@ -64,7 +64,7 @@ button { font: inherit; }
   align-items: center;
   flex-wrap: nowrap;
   gap: 0;
-  margin: 48px 0 0;
+  margin: 24px 0 0;
   border: 0;
   border-radius: 0;
   padding: 0;
@@ -124,7 +124,7 @@ button { font: inherit; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
   gap: 22px 26px;
-  padding: 43px 52px 70px;
+  padding: 24px 52px 90px;
 }
 
 .gallery-item {
@@ -170,6 +170,14 @@ button { font: inherit; }
 .status.error { color: var(--accent); }
 
 .viewer-overlay {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
   position: fixed;
   inset: 0;
   z-index: 20;
@@ -179,9 +187,11 @@ button { font: inherit; }
   animation: overlay-in 180ms ease-out both;
 }
 
+.viewer-overlay::backdrop { background: transparent; }
+
 .viewer-entry {
   width: clamp(390px, 34vw, 520px);
-  height: 100vh;
+  height: 100dvh;
   animation: viewer-in 240ms cubic-bezier(.22, .8, .22, 1) both;
 }
 
@@ -461,7 +471,7 @@ button { font: inherit; }
 .secondary-button,
 .delete-button,
 .sample-button {
-  min-height: 36px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -545,7 +555,7 @@ button { font: inherit; }
 .colors-editor {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 24px;
+  gap: 16px;
 }
 
 .color-slot {
@@ -555,7 +565,7 @@ button { font: inherit; }
 
 .color-slot + .color-slot {
   border-left: 1px solid var(--line);
-  padding-left: 24px;
+  padding-left: 16px;
 }
 
 .color-slot-heading {
@@ -685,6 +695,7 @@ button { font: inherit; }
 
 .palette {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   min-height: 32px;
   margin-bottom: 12px;
@@ -763,8 +774,8 @@ button { font: inherit; }
 }
 
 .editable-tag button {
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   border: 0;
@@ -800,8 +811,8 @@ button { font: inherit; }
 }
 
 @media (max-width: 860px) {
-  .gallery-header { padding: 38px 24px 0; }
-  .category-nav { width: 100%; margin: 38px 0 0; }
+  .gallery-header { padding: 28px 24px 0; }
+  .category-nav { width: 100%; margin: 24px 0 0; }
   .category-nav button { min-height: 38px; padding: 9px 15px; font-size: 11px; }
   .gallery-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -836,14 +847,15 @@ button { font: inherit; }
 @media (max-width: 520px) {
   .gallery-header { padding: max(24px, env(safe-area-inset-top)) 18px 0; }
   .piece-count { font-size: 12px; }
-  .category-nav { margin: 24px 0 0; }
+  .category-nav { margin: 20px 0 0; flex-wrap: wrap; gap: 6px; overflow: visible; }
+  .category-nav button { border: 1px solid var(--line); }
   .category-nav button { min-height: 44px; padding: 9px 14px; font-size: 10px; }
   .gallery-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px 8px;
     padding: 22px 12px 40px;
   }
-  .gallery-item { aspect-ratio: .72; }
+  .gallery-item { aspect-ratio: .85; }
   .viewer { padding: max(24px, env(safe-area-inset-top)) 22px max(28px, env(safe-area-inset-bottom)); }
   .modeled-hero { flex-basis: 326px; height: 326px; }
   .modeled-hero-photo { object-fit: cover; }
@@ -894,3 +906,14 @@ button { font: inherit; }
 .modeled-crop-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 10px; font-size: 12px; }
 .modeled-crop-control input { width: 100%; min-width: 0; accent-color: #49483f; }
 .modeled-crop-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+.viewer :is(button, input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.viewer .status.error { margin: 16px 0; font-size: 13px; letter-spacing: 0; text-transform: none; line-height: 1.5; overflow-wrap: anywhere; }
+.viewer-actions { flex-wrap: wrap; }
+.gallery-pane > .status { text-transform: none; letter-spacing: 0; line-height: 1.6; }
+@media (max-width: 520px) {
+  .viewer :is(input:not([type="color"]), select) { font-size: 16px; }
+  .viewer-actions { gap: 8px; }
+  .viewer-actions .action-spacer { display: none; }
+  .viewer-actions .delete-button { margin-right: auto; }
+}

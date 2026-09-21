@@ -3,6 +3,7 @@ import { Copy, UploadSimple } from "@phosphor-icons/react";
 import { IMAGE_ACCEPT } from "./image-upload.mjs";
 import { modeledCrop } from "./modeled-crop.mjs";
 import { encodeModeledCrop, loadCropPhoto } from "./modeled-crop-image.mjs";
+import { uiErrorMessage } from "./ui-error.mjs";
 
 export function CopyPrompt({ prompt, className, disabled }) {
   const [copiedPrompt, setCopiedPrompt] = useState(null);
@@ -13,7 +14,7 @@ export function CopyPrompt({ prompt, className, disabled }) {
       try { await navigator.clipboard.writeText(prompt); setCopiedPrompt(prompt); setManualCopy(false); }
       catch { setManualCopy(true); }
     }}><Copy size={14} aria-hidden="true" />{copiedPrompt === prompt ? "Copied" : "Copy prompt"}</button>
-    {manualCopy && <label className="manual-photo-copy">Clipboard unavailable. Select and copy this prompt:<textarea readOnly rows={6} value={prompt} onFocus={(event) => event.target.select()} /></label>}
+    {manualCopy && <label className="manual-photo-copy">Select and copy the prompt below:<textarea readOnly rows={6} value={prompt} onFocus={(event) => event.target.select()} /></label>}
   </>;
 }
 
@@ -67,8 +68,8 @@ export function ModeledPhotoUpload({ kind = "garment", className, disabled, onUp
       finally { if (token === lifecycle.current) setPreparing(false); }
     }} />
     {photo ? <div className="modeled-crop">
-      <p className="modeled-crop-title">Crop modeled photo</p>
-      <p className="manual-photo-help">Drag the photo or use the controls to frame it. The crop stays {kind === "outfit" ? "square" : "3:2"}.</p>
+      <p className="modeled-crop-title">Frame your modelled photo</p>
+      <p className="manual-photo-help">Drag the photo or use the controls to keep the person and clothing in view.</p>
       <div className="modeled-crop-frame" role="group" aria-label="Photo crop. Drag to reposition, or use arrow keys." tabIndex={busy ? -1 : 0}
         style={{ aspectRatio: kind === "outfit" ? "1" : "3 / 2" }}
         onPointerDown={(event) => {
@@ -93,21 +94,20 @@ export function ModeledPhotoUpload({ kind = "garment", className, disabled, onUp
           const change = ["ArrowLeft", "ArrowUp"].includes(event.key) ? -0.02 : 0.02;
           setFraming((current) => ({ ...current, [axis]: clampPosition(current[axis] + change) }));
         }}>
-        <img src={photo.url} alt="Preview of the cropped modeled photo" draggable={false} style={{ width: `${photo.width / crop.width * 100}%`, height: `${photo.height / crop.height * 100}%`, left: `${-crop.x / crop.width * 100}%`, top: `${-crop.y / crop.height * 100}%` }} />
+        <img src={photo.url} alt="Preview of the cropped modelled photo" draggable={false} style={{ width: `${photo.width / crop.width * 100}%`, height: `${photo.height / crop.height * 100}%`, left: `${-crop.x / crop.width * 100}%`, top: `${-crop.y / crop.height * 100}%` }} />
         <div className="modeled-crop-grid" aria-hidden="true" />
       </div>
-      <p className="manual-photo-help" role="status">{crop.outputWidth} × {crop.outputHeight} pixels</p>
       <label className="modeled-crop-control">Zoom<input type="range" min="1" max={crop.maxZoom} step="0.01" value={framing.zoom} disabled={busy || crop.maxZoom <= 1} onChange={(event) => setFraming((current) => ({ ...current, zoom: Number(event.target.value) }))} /></label>
       <label className="modeled-crop-control">Horizontal position<input type="range" min="0" max="1" step="0.01" value={framing.x} disabled={busy || photo.width - crop.width < 0.001} onChange={(event) => setFraming((current) => ({ ...current, x: Number(event.target.value) }))} /></label>
       <label className="modeled-crop-control">Vertical position<input type="range" min="0" max="1" step="0.01" value={framing.y} disabled={busy || photo.height - crop.height < 0.001} onChange={(event) => setFraming((current) => ({ ...current, y: Number(event.target.value) }))} /></label>
       <div className="modeled-crop-actions">
         <button type="button" className={className} disabled={busy} onClick={() => setFraming(centered())}>Reset crop</button>
         <button type="button" className={className} disabled={busy} onClick={clearPhoto}>Cancel crop</button>
-        <button type="button" className={className} disabled={busy} onClick={upload}><UploadSimple size={16} aria-hidden="true" />{preparing ? "Preparing photo…" : "Use crop"}</button>
+        <button type="button" className={className} disabled={busy} onClick={upload}><UploadSimple size={16} aria-hidden="true" />{preparing ? "Preparing photo…" : "Upload for review"}</button>
       </div>
     </div> : null}
-    <button type="button" className={className} disabled={busy} onClick={() => input.current?.click()}><UploadSimple size={16} aria-hidden="true" />{preparing ? "Preparing photo…" : photo ? "Choose another photo" : "Upload modeled photo"}</button>
-    {!photo && <p className="manual-photo-help">Have a photo from another model? Choose it, adjust the crop, then upload it for review. Use the same person and garment references.</p>}
-    {error && <p className="manual-photo-error" role="alert">{error}</p>}
+    <button type="button" className={className} disabled={busy} onClick={() => input.current?.click()}><UploadSimple size={16} aria-hidden="true" />{preparing ? "Preparing photo…" : photo ? "Choose another photo" : "Upload modelled photo"}</button>
+    {!photo && <p className="manual-photo-help">Have a modelled photo you made elsewhere? Use the same person and clothing as the references. You’ll review the photo before saving it.</p>}
+    {error && <p className="manual-photo-error" role="alert">{uiErrorMessage(error)}</p>}
   </div>;
 }
