@@ -77,6 +77,8 @@ After failed generation, **Copy prompt** copies the recorded attempt, including 
 
 See [manual modeled photos](docs/MODELED_PHOTOS.md) for prompt availability, reference order, crop controls, image limits and contributor API details.
 
+Image generations also collect private [refusal and retry telemetry](docs/GENERATION_TELEMETRY.md), including eventual recovery and manual fallback. The read-only report separates models, generation types and garment categories without duplicating prompts.
+
 ## Shopping assistant
 
 Open **Shopping** or `/shopping`, choose/drop/paste a listing screenshot or garment photo, select a model reference, and optionally add the occasion, price or fit you have in mind. **Check this piece** returns a recommendation, styling considerations, overlap and combinations with owned pieces. Unclear evidence may produce **A closer look is needed**; photographs alone cannot establish exact sizing, fabric quality or value.
