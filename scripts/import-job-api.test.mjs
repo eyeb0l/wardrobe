@@ -121,7 +121,7 @@ test("background checks accept white/alpha product borders but reject blank or o
 });
 
 for (const transparent of [false, true]) {
-  test(`original ${transparent ? "transparent" : "white"} dress skips extraction and survives review/restart unchanged`, async (t) => {
+  test(`original ${transparent ? "transparent" : "white"} dress skips extraction and keeps its pixels through review/restart`, async (t) => {
     const h = await harness(t);
     const source = await productImage(transparent);
     h.setAnalysis([dress], true);
@@ -131,7 +131,10 @@ for (const transparent of [false, true]) {
     const schema = h.requests[0].request.text.format.schema;
     assert.ok(schema.required.includes("isCleanProductShot"));
     assert.ok(schema.properties.items.items.properties.part.enum.includes("dresses"));
-    const selected = await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`);
+    const alpha = await sharp(await productImage(true)).extractChannel(3).png().toBuffer();
+    if (!transparent) await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`, {}, 400);
+    const selected = await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`, transparent ? {} : { maskDataUrl: `data:image/png;base64,${alpha.toString("base64")}` });
+    assert.equal(selected.stages.garment.backgroundRemoved, !transparent);
     assert.equal(h.requests.length, 1, "no image model called when selecting original");
     assert.equal(selected.stages.garment.status, "review");
     assert.equal(selected.stages.garment.source, "original");
@@ -148,12 +151,14 @@ for (const transparent of [false, true]) {
     assert.equal(edits.length, 1);
     assert.equal(edits[0].images.length, 2, "only modeled generation is called");
     const originalRaw = await sharp(source).ensureAlpha().raw().toBuffer();
+    const mask = await sharp(alpha).greyscale().raw().toBuffer();
+    if (!transparent) for (let p = 0; p < mask.length; p++) originalRaw[p * 4 + 3] = mask[p];
     assert.deepEqual(await sharp(edits[0].images[1].data).ensureAlpha().raw().toBuffer(), originalRaw);
     const records = await h.request("GET", "/api/import/wardrobe");
     assert.equal(records[0].part, "dresses");
     assert.equal(records[0].name, "Edited dress");
     const saved = await readFile(path.join(h.root, "data", "imported", `import-${job.id}-garment.png`));
-    assert.deepEqual(await sharp(saved).ensureAlpha().raw().toBuffer(), originalRaw, "original dimensions, colors, white background and alpha remain unchanged");
+    assert.deepEqual(await sharp(saved).ensureAlpha().raw().toBuffer(), originalRaw, "original dimensions and RGB are preserved; only an opaque background becomes transparent");
   });
 }
 
@@ -262,7 +267,7 @@ test("scene planning receives other items' settings and fails without an image c
   const h = await harness(t);
   h.setAnalysis([dress], true);
   const create = async () => {
-    const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage()).toString("base64") });
+    const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage(true)).toString("base64") });
     await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`);
     return job;
   };
@@ -327,7 +332,7 @@ test("selected reference persists and is used for modeling and regeneration", as
   const alternatePath = path.join(h.root, "data", "model-reference-2.png");
   await writeFile(alternatePath, alternate);
   h.setAnalysis([dress], true);
-  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage()).toString("base64") });
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage(true)).toString("base64") });
   await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`);
   const approve = `/api/import/jobs/${job.id}/stages/garment/approve`;
   for (const modelReferenceId of ["../../identity.png", "model-reference-99", 2]) {
@@ -373,7 +378,7 @@ test("selected reference persists and is used for modeling and regeneration", as
 test("saved modeled shots reopen, regenerate and replace only after approval", async (t) => {
   const h = await harness(t);
   h.setAnalysis([dress], true);
-  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage()).toString("base64") });
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage(true)).toString("base64") });
   const jobUrl = `/api/import/jobs/${job.id}`;
   const itemUrl = `/api/import/wardrobe/import-${job.id}/modeled`;
   await h.request("POST", `${jobUrl}/stages/crop/use-original`);
@@ -443,7 +448,7 @@ test("saved modeled shots reopen, regenerate and replace only after approval", a
 test("a refused modeled shot exposes the exact prompt and manual uploads require approval, survive restart and serve WebP", async (t) => {
   const h = await harness(t);
   h.setAnalysis([dress], true);
-  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage()).toString("base64") });
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage(true)).toString("base64") });
   const jobUrl = `/api/import/jobs/${job.id}`;
   const upload = `${jobUrl}/stages/modeled/upload`;
   const photo = await sharp({ create: { width: 900, height: 600, channels: 3, background: "#887766" } }).jpeg().toBuffer();
@@ -677,7 +682,7 @@ test("candidate persistence failure leaves original review recoverable and reser
 test("modeled retry telemetry skips scene-planning failures and keeps image attempt numbers", async t => {
   const h = await harness(t);
   h.setAnalysis([{ ...dress, name: 'Blue bodysuit', part: 'wholebody_up' }], true);
-  const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: (await productImage()).toString('base64') });
+  const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: (await productImage(true)).toString('base64') });
   const url = `/api/import/jobs/${job.id}`;
   await h.request('POST', `${url}/stages/crop/use-original`);
   let images = 0, planningFails = false;
@@ -718,4 +723,38 @@ test("modeled retry telemetry skips scene-planning failures and keeps image atte
   const report = summarizeTelemetry(records);
   assert.equal(report.overall.secondAttemptRecovery.rate, 1);
   assert.equal(report.cohorts.find(c => c.category === 'subtype:bodysuit').eventualRetryRecovery.rate, 1);
+});
+
+test('transparent product is suggested even when vision says false; vision sees white and storage retains alpha', async t => {
+  const h = await harness(t);
+  const source = await productImage(true);
+  h.setAnalysis([{ ...dress, name: 'Tote bag', part: 'accessories_up' }], false);
+  const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: source.toString('base64') });
+  assert.equal(job.canUseOriginal, true);
+  const sent = Buffer.from(h.requests[0].request.input[0].content[1].image_url.split(',')[1], 'base64');
+  const sample = await sharp(sent).ensureAlpha().raw().toBuffer();
+  assert.deepEqual([...sample.subarray(0, 4)], [255, 255, 255, 255]);
+  const result = await h.request('POST', `/api/import/jobs/${job.id}/stages/crop/use-original`);
+  assert.equal(result.stages.garment.backgroundRemoved, false);
+  const stored = await h.request('GET', result.stages.garment.assetUrl);
+  assert.deepEqual(await sharp(stored).raw().toBuffer(), await sharp(source).raw().toBuffer());
+  assert.equal(h.requests.length, 1);
+});
+
+test('manual original override accepts a reviewed browser mask without a paid extraction', async t => {
+  const h = await harness(t);
+  h.setAnalysis([dress], false);
+  const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: (await productImage()).toString('base64') });
+  assert.equal(job.canUseOriginal, false);
+  const endpoint = `/api/import/jobs/${job.id}/stages/crop/use-original`;
+  await h.request('POST', endpoint, { confirmOriginal: true }, 400);
+  await h.request('POST', endpoint, { confirmOriginal: true, maskDataUrl: 'invalid' }, 400);
+  assert.equal((await h.request('GET', `/api/import/jobs/${job.id}`)).stages.crop.status, 'review');
+  const mask = await sharp(await productImage(true)).extractChannel(3).png().toBuffer();
+  const result = await h.request('POST', endpoint, { confirmOriginal: true, maskDataUrl: `data:image/png;base64,${mask.toString('base64')}` });
+  assert.equal(result.stages.garment.status, 'review');
+  assert.equal(result.stages.garment.backgroundRemoved, true);
+  assert.equal(h.requests.length, 1);
+  await h.restart();
+  assert.equal((await h.request('GET', `/api/import/jobs/${job.id}`)).stages.garment.backgroundRemoved, true);
 });

@@ -356,3 +356,7 @@
 .import-detection-options span { display: flex; align-items: flex-start; gap: 6px; margin-top: 7px; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .import-detection-options input { flex-shrink: 0; margin: 1px 0 0; accent-color: var(--import-ink); }
 .import-undetected-retry { margin-top: 20px; }
+
+.import-editor__preview.has-transparency { background-color: #faf9f6; background-image: conic-gradient(#e7e5df 25%, transparent 0 50%, #e7e5df 0 75%, transparent 0); background-size: 20px 20px; }
+.import-cutout-progress { display: flex; align-items: center; gap: 12px; padding: 12px 0; font-size: 13px; }
+.import-cutout-progress span { flex: 1; }
