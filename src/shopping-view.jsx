@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowRight, Plus, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
-import { formatImageBytes, prepareShoppingImage } from "./shopping-image.mjs";
+import { prepareShoppingImage } from "./shopping-image.mjs";
+import { uiErrorMessage } from "./ui-error.mjs";
 import "./shopping-view.css";
 
 const EMPTY_ITEMS = [];
@@ -25,9 +26,9 @@ async function request(path, options = {}) {
 
 function setupMessage(config) {
   if (!config) return "Shopping settings couldn't be loaded. Refresh to try again.";
-  if (!config.hasApiKey) return "Add your API key to the server’s local configuration, restart the server, then refresh settings.";
-  if (!config.hasModelReference || !config.modelReferences?.length) return "Add a model reference photo to your local wardrobe setup, then refresh settings.";
-  if (!config.ready) return "The shopping service isn't ready. Check the local server configuration, then refresh settings.";
+  if (!config.hasApiKey) return "Shopping checks aren't connected yet. The AI connection needs to be set up before you can continue.";
+  if (!config.hasModelReference || !config.modelReferences?.length) return "A model reference photo is needed before you can check a piece. Add one to your wardrobe setup, then try again.";
+  if (!config.ready) return "Shopping checks aren't available right now. Please try again shortly.";
   return "";
 }
 
@@ -115,7 +116,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   const wardrobeFingerprint = JSON.stringify(wardrobeItems);
   const latestWardrobe = useRef(wardrobeFingerprint);
   latestWardrobe.current = wardrobeFingerprint;
-  const setupProblem = configLoading ? "" : configError || setupMessage(config);
+  const setupProblem = configLoading ? "" : configError ? uiErrorMessage(configError) : setupMessage(config);
   const wardrobeProblem = wardrobeError ? "Your wardrobe couldn't be loaded. Reload the page to try again." : !loading && !items.length ? "Add a few pieces in the Wardrobe tab first so this check can compare with what you own." : "";
   const canAnalyze = !!prepared && !preparing && !analyzing && !configLoading && !setupProblem && !loading && !wardrobeProblem && !!selectedReference;
 
@@ -278,12 +279,11 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   }, [result, active]);
 
   const fileDragged = (event) => active && [...event.dataTransfer.types].includes("Files");
-  const imageSize = prepared ? prepared.bytes < prepared.originalBytes * .98 ? `Reduced from ${formatImageBytes(prepared.originalBytes)} to ${formatImageBytes(prepared.bytes)}.` : `${formatImageBytes(prepared.bytes)} · Ready to check.` : "";
 
   return <main className="shopping-page">
     <header className="shopping-page-heading">
       <h1>Worth adding?</h1>
-      <p>Check a piece against your model reference and the wardrobe you already own.</p>
+      <p>See how a new piece could suit you and work with what you own.</p>
     </header>
 
     <form className="shopping-form" onSubmit={analyze}>
@@ -296,21 +296,21 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             onDragLeave={(event) => { if (fileDragged(event)) { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); } }}
             onDrop={(event) => { if (fileDragged(event)) { event.preventDefault(); dragDepth.current = 0; setDragging(false); acceptFiles([...event.dataTransfer.files]); } }}
           >
-            {prepared ? <img className="shopping-upload-preview" src={prepared.dataUrl} alt="The shopping image you selected" /> : preparing ? <div className="shopping-upload-empty" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-upload-title">Preparing your photo…</p><p>Making it smaller while keeping the details.</p><button type="button" className="shopping-text-button" onClick={removeImage}>Cancel</button></div> : <div className="shopping-upload-empty">
+            {prepared ? <img className="shopping-upload-preview" src={prepared.dataUrl} alt="The shopping image you selected" /> : preparing ? <div className="shopping-upload-empty" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-upload-title">Preparing your photo…</p><button type="button" className="shopping-text-button" onClick={removeImage}>Cancel</button></div> : <div className="shopping-upload-empty">
               <Plus size={30} weight="light" aria-hidden="true" />
-              <p className="shopping-upload-title">Add a screenshot or photo</p>
-              <p>A listing you've saved, or a piece you've spotted in a shop.</p>
+              <p className="shopping-upload-title">Add a photo or screenshot</p>
+              <p>Use a saved listing or a photo from a shop.</p>
               <button ref={chooseImageButton} type="button" className="shopping-secondary" onClick={() => fileInput.current?.click()}>Choose image</button>
-              <p className="shopping-upload-hint">Or drop an image here or paste it.<br />Large photos are resized before uploading.</p>
+              <p className="shopping-upload-hint">You can also drop or paste an image here.</p>
             </div>}
             {dragging ? <div className="shopping-drop-message" aria-hidden="true">Drop your image here</div> : null}
           </div>
           <input className="shopping-file-input" ref={fileInput} id={`${id}-file`} type="file" accept="image/*,.heic,.heif" aria-label="Choose a shopping image" disabled={analyzing} tabIndex={-1} onChange={(event) => { acceptFiles([...event.target.files]); event.target.value = ""; }} />
           {prepared ? <div className="shopping-image-details">
-            <div><p className="shopping-file-name" title={prepared.name}>{prepared.name}</p><p className="shopping-small">{imageSize}</p></div>
+            <div><p className="shopping-file-name" title={prepared.name}>{prepared.name}</p><p className="shopping-small">Ready to check.</p></div>
             <div className="shopping-image-actions"><button type="button" className="shopping-text-button" disabled={analyzing} onClick={() => fileInput.current?.click()}>Replace</button><button type="button" className="shopping-remove" onClick={removeImage} disabled={analyzing} aria-label="Remove shopping image"><X size={18} aria-hidden="true" /></button></div>
           </div> : null}
-          {imageError ? <p className="shopping-error" role="alert">{imageError}</p> : null}
+          {imageError ? <p className="shopping-error" role="alert">{uiErrorMessage(imageError)}</p> : null}
         </section>
 
         <div className="shopping-context">
@@ -332,7 +332,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
 
           <div className="shopping-wardrobe-context">
             <p>{loading ? "Loading your wardrobe…" : `${items.length} ${items.length === 1 ? "piece" : "pieces"} in your wardrobe`}</p>
-            <span>For new combinations, useful additions and anything you already have covered.</span>
+            <span>We'll look for new combinations and pieces similar to this one.</span>
           </div>
 
           {wardrobeProblem ? <div className="shopping-notice" role="status"><p>{wardrobeProblem}</p>{wardrobeError ? <button type="button" className="shopping-text-button" onClick={() => window.location.reload()}>Reload wardrobe</button> : <a className="shopping-text-button" href="/">Go to Wardrobe <ArrowRight size={14} aria-hidden="true" /></a>}</div> : null}
@@ -340,7 +340,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
 
           <div className="shopping-submit-area">
             <p className="shopping-disclosure">This check sends your image, selected model reference and wardrobe photos to the AI service.</p>
-            {analysisError ? <p className="shopping-error" role="alert">{analysisError}</p> : null}
+            {analysisError ? <p className="shopping-error" role="alert">{uiErrorMessage(analysisError)}</p> : null}
             <button className="shopping-primary" type="submit" disabled={!canAnalyze}>{analyzing ? "Checking your wardrobe…" : analysisError ? "Try again" : result ? "Check again" : "Check this piece"}<ArrowRight size={17} aria-hidden="true" /></button>
             {analyzing ? <div className="shopping-analysis-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p>Looking at the piece, your reference and possible combinations. This can take a minute.</p></div> : null}
             {!prepared && !preparing && !setupProblem && !wardrobeProblem ? <p className="shopping-small shopping-upload-prompt">Add an image to get started.</p> : null}
