@@ -432,10 +432,6 @@ export function wardrobeOutfitApi(options = {}) {
     timer.unref?.();
     let abortListener;
     try {
-      const aborted = new Promise((resolve, reject) => {
-        abortListener = () => reject(new Error("Request aborted"));
-        controller.signal.addEventListener("abort", abortListener, { once: true });
-      });
       const work = (async () => {
         await options.beforePaidCall?.(endpoint === "/responses" ? "text" : "image");
         ensureActive();
@@ -445,11 +441,23 @@ export function wardrobeOutfitApi(options = {}) {
           await telemetry.start({ model: models().image, baseUrl: setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1"), prompt: init.body.get("prompt"), images: await Promise.all(init.body.getAll("image[]").map(async image => Buffer.from(await image.arrayBuffer()))) });
           controller.signal.throwIfAborted();
         }
-        const response = await (options.fetch || fetch)(`${setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/+$/, "")}${endpoint}`, { ...init, headers: { ...init.headers, Authorization: `Bearer ${key}` }, signal: controller.signal });
-        const result = await response.json().catch(() => ({}));
-        return { response, result };
+        return (options.outsideLease || (fn => fn()))(async () => {
+          const aborted = new Promise((resolve, reject) => {
+            abortListener = () => reject(new Error("Request aborted"));
+            controller.signal.addEventListener("abort", abortListener, { once: true });
+          });
+          const request = (async () => {
+          controller.signal.throwIfAborted();
+          const response = await (options.fetch || fetch)(`${setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/+$/, "")}${endpoint}`, { ...init, headers: { ...init.headers, Authorization: `Bearer ${key}` }, signal: controller.signal });
+          const result = await response.json().catch(() => ({}));
+          return { response, result };
+          })();
+          return Promise.race([request, aborted]);
+        });
       })();
-      const { response, result } = await Promise.race([work, aborted]);
+      // Always await lease reacquisition before handling an abort or error.
+      // The provider signal bounds both fetch and body consumption.
+      const { response, result } = await work;
       telemetry?.observe(response, result);
       ensureActive();
       if (!response.ok) {

@@ -51,7 +51,7 @@ After the import succeeds and deployment protection is verified, set `WARDROBE_H
 
 In a signed-out/private browser, open both the production domain and its generated deployment URL. The page and a direct API URL such as `/api/import/jobs` must require Vercel sign-in. Then sign in with your account and inspect the wardrobe, references, and existing photos before generating anything.
 
-Only one operation can hold the cloud writer lease. Concurrent edits or generation may report that another operation is running; wait and retry. Reads remain available. Job state survives deployments, and polling the jobs list can recover work saved before dispatch.
+Only one operation can hold the cloud writer lease. Background image generation and garment cleanup release it during provider waits and image processing, then validate task ownership and the job revision before saving. Other items can be updated during that work. Short storage contention during cleanup previews retries automatically; the same active job stays protected from conflicting edits. Some synchronous endpoints still hold the writer throughout their request. Reads remain available. Job state survives deployments, and polling the jobs list can recover work saved before dispatch.
 
 An interrupted, uncertain paid request is marked for review rather than repeated automatically. Check provider usage before choosing **Retry**, which starts a new paid request.
 

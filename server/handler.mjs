@@ -1,10 +1,10 @@
 import { start } from "workflow/api";
 import { waitUntil } from "@vercel/functions";
 import { createCloudStore } from "../scripts/cloud-store.mjs";
-import { withStorage } from "../scripts/storage-fs.mjs";
+import { withStorage, readFile } from "../scripts/storage-fs.mjs";
 import { createPlugin, DATA_ROOT } from "./plugins.mjs";
 import { sendDisplayImage, sendOriginalImage } from "../scripts/display-image.mjs";
-import { createTask, saveTask, reservePaidCall } from "./task-store.mjs";
+import { createTask, readTask, saveTask, reservePaidCall } from "./task-store.mjs";
 import { generateWardrobe } from "./generation-workflow.mjs";
 import { recoverOutbox } from "./outbox.mjs";
 import { maintenance } from "./maintenance.mjs";
@@ -55,6 +55,19 @@ export default async function handler(req, res) {
   const store = requestStore();
   let plugin;
   const serve = () => withStorage(store, async () => {
+    const jobMatch = pathname.match(/^\/api\/(import|outfits)\/jobs\/([a-f0-9-]{36})(?:\/|$)/i);
+    if (!readOnly && jobMatch) {
+      try {
+        const job = JSON.parse(await readFile(`${DATA_ROOT}/${kind === "import" ? "jobs" : "outfit-jobs"}/${jobMatch[2]}/job.json`, "utf8"));
+        const ids = kind === "import" ? Object.values(job.stages || {}).map(stage => stage.taskId).filter(Boolean) : [job.internal?.cloudTaskId].filter(Boolean);
+        for (const id of ids) {
+          const task = await readTask(id).catch(error => { if (error.code === "ENOENT") return null; throw error; });
+          if (task?.state === "running" && Date.parse(task.activeUntil) > Date.now()) {
+            return json(res, 409, { error: "This item is still being prepared. Your other items remain available." });
+          }
+        }
+      } catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
     // The library's image route only requires an existing file in imported/.
     // Avoid loading every import job for each gallery thumbnail. Authentication
     // and the production gate above still apply to every request.
@@ -67,6 +80,17 @@ export default async function handler(req, res) {
     }
     plugin = await createPlugin(kind, {
       readOnly, beforePaidCall: reservePaidCall,
+      outsideLease: async callback => {
+        // Manual edge adjustments use immutable source bytes. Publish only if
+        // the same job revision is still current after processing.
+        const match = pathname.match(/^\/api\/import\/jobs\/([a-f0-9-]{36})\/stages\/garment\/cleanup-preview$/i);
+        if (!match) return callback();
+        const file = `${DATA_ROOT}/jobs/${match[1]}/job.json`;
+        const revision = await readFile(file, "utf8");
+        return store.withoutLease(callback, async () => {
+          if (revision !== await readFile(file, "utf8")) throw Object.assign(new Error("The item changed. Reload its latest preview."), { code: "ESTALE", status: 409 });
+        });
+      },
       scheduleTask: async (payload) => {
         const task = await createTask(payload);
         try {

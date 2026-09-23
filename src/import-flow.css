@@ -398,3 +398,11 @@ body.import-open { overflow: hidden; }
 .import-popover .manual-photo-upload { padding-top: 18px; border-top: 1px solid var(--import-line); }
 .import-status.is-error { align-items: flex-start; line-height: 1.5; overflow-wrap: anywhere; }
 .import-status.is-error::before { flex-shrink: 0; margin-top: 6px; }
+
+.import-garment-review { min-width: 0; }
+.import-cutout-frame { position: relative; width: 100%; }
+.import-cutout-frame.is-zoomed { width: 200%; max-width: none; }
+.import-cutout-frame img { display: block; width: 100%; max-height: none; }
+.import-cutout-frame svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.import-edge-options { margin-top: 16px; }
+.import-edge-options > summary { cursor: pointer; padding: 12px 0; }
