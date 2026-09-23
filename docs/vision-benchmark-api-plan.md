@@ -1,6 +1,6 @@
 # Next vision evaluation: real retailer images and measured API cost
 
-Plan frozen on 2026-09-20. The user authorized reuse of their existing API key and approved a **US$10 total API usage cap**, including retries. Execution is recorded in [the results report](vision-benchmark-api-results.md). No production model change is part of this evaluation.
+Historical plan frozen on 2026-09-20, before the GPT-6 migration. The user authorized reuse of their existing API key and approved a **US$10 total API usage cap**, including retries. Execution is recorded in [the results report](vision-benchmark-api-results.md). No production model change was part of this evaluation; see the [current model configuration](model-migration.md).
 
 ## Decision to make
 

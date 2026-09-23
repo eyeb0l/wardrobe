@@ -2,13 +2,15 @@
 
 The importer defaults to `gpt-image-2.5-sunburst` for cutouts and modeled photos, and `gpt-6-luna` for garment detection and modeled-scene planning. Existing library images are never regenerated automatically.
 
+The manual difficult-detection retry uses `gpt-6-sol` at medium reasoning effort. The default vision requests omit `reasoning.effort`, which [OpenAI documents as medium for GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna). Sol is used only when the user chooses **Retry with Sol**; it is not an automatic fallback. The private Preview deployment was checked with a copied wardrobe before this production release. Historical GPT-5.6 evaluations remain linked below as baselines, not claims about GPT-6 quality.
+
 ## Configuration
 
 Set overrides in local `.env` and restart Vite. Hosted configuration uses production environment variables; follow [HOSTING.md](HOSTING.md) when changing a deployment.
 
 | Variable | Default / precedence |
 | --- | --- |
-| `OPENAI_VISION_MODEL` | `gpt-6-luna`; detection and scene planning |
+| `OPENAI_VISION_MODEL` | `gpt-6-luna`; detection, scene planning, outfit curation, accessories and shopping assessment |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst`; fallback for both image stages |
 | `OPENAI_GARMENT_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for cutouts |
 | `OPENAI_MODELED_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for modeled photos |

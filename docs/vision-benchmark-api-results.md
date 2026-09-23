@@ -1,12 +1,12 @@
 # Wardrobe vision API evaluation
 
-This report covers the initial evaluation. See the [detection-rescue follow-up](chroma-cleanup-and-detection-rescue.md) for later Terra medium results, cumulative spending and the deployed changes.
+**Historical GPT-5.6 results (2026-09-20).** This report covers the initial evaluation. Its recommendation applies to the compared GPT-5.6 configurations; the current app defaults to GPT-6 Luna and offers a manual GPT-6 Sol detection retry. See [model migration](model-migration.md) and the [detection-rescue follow-up](chroma-cleanup-and-detection-rescue.md) for the later Terra medium results and cumulative spending.
 
 Completed on 2026-09-20: 300 planned API attempts, 292 returned responses, eight unresolved transport failures, and no outstanding active calls or ungraded returned answers. Approved API cap: US$10 including failures. Recorded usage is **$1.626180137**, with a conservative total upper bound of **$1.759296937** including every uncertain call. At this phase’s close, **$8.240703063** of the cap remained; production settings and the hosted collection were unchanged.
 
-**Recommendation: retain `gpt-5.6-luna` at its current effective medium effort.** High effort improved the continuous quality score slightly, but did not improve usable-answer acceptance and was more expensive and slower. This is the best-supported value choice among the tested configurations, not proof that all other model/effort combinations are inferior.
+**Recommendation at the time: retain `gpt-5.6-luna` at its effective medium effort.** High effort improved the continuous quality score slightly, but did not improve usable-answer acceptance and was more expensive and slower. This was the best-supported value choice among the tested configurations, not proof that all other model/effort combinations are inferior.
 
-The app selects `gpt-5.6-luna` and omits `reasoning.effort` in its detection, curation, shopping, scene and accessory request builders. OpenAI documents medium as Luna's default; the evaluation makes medium explicit. [Model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
+At the time of this evaluation, the app selected `gpt-5.6-luna` and omitted `reasoning.effort` in its detection, curation, shopping, scene and accessory request builders. OpenAI documented medium as that Luna model's default; the evaluation made medium explicit. [Historical model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
 
 The private reproducibility bundle is `data/vision-eval-api-2026-09-20/`. Source images, wardrobe/person images, labels and raw responses stay in this ignored, access-restricted directory.
 

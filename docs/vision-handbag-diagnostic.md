@@ -1,6 +1,6 @@
 # Handbag fidelity diagnostic — 2026-09-20
 
-**Historical diagnostic.** The [colour fix and Terra medium retry](chroma-cleanup-and-detection-rescue.md) are now deployed. The findings below describe the earlier Luna medium/Terra low comparison. Terra low had better raw handle localization in this example, but was less consistent at rejecting its incorrect color.
+**Historical diagnostic.** The [colour fix and former Terra medium retry](chroma-cleanup-and-detection-rescue.md) were deployed in PR #12; the current manual retry uses GPT-6 Sol. The findings below describe the earlier Luna medium/Terra low comparison. Terra low had better raw handle localization in this example, but was less consistent at rejecting its incorrect color.
 
 The user supplied an original navy/slate-blue tote with brown trim and an imported version whose fabric looks dark purple. This is a focused diagnostic of one known failure, not a representative benchmark. Nothing was regenerated, replaced in the wardrobe or deployed.
 

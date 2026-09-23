@@ -17,6 +17,8 @@ The hosted API requires `WARDROBE_HOSTED_ENABLED=1` and `VERCEL_ENV=production`.
 
 For a Preview copy, connect separate Neon and private Blob resources to **Preview only**. Restore an encrypted cloud backup into those resources so stored Blob URLs point to the Preview store. Copy `OPENAI_API_KEY` and set `OPENAI_VISION_MODEL=gpt-6-luna` in Preview. Set the two expected resource IDs, `WARDROBE_HOSTED_ENABLED=1`, and `WARDROBE_PREVIEW_ENABLED=1` only after the restore succeeds. Preview writes remain in its own resources; refresh the copy manually when needed. Keep both Preview resources private and Vercel Authentication on All Deployments.
 
+For the GPT-6 release, set the existing Production `OPENAI_VISION_MODEL` override to `gpt-6-luna` before creating the new Production deployment. The user-triggered difficult-detection retry is pinned to `gpt-6-sol` in code; it needs no separate environment override. Leave `OPENAI_IMAGE_MODEL`, `OPENAI_IMAGE_QUALITY`, storage credentials and the Preview-only flags as configured. A deployment changes code and environment, not saved garment or outfit images.
+
 ## Copy the existing wardrobe
 
 Stop the local server, finish or cancel generation, and back up the entire local data directory plus any separately configured reference photos. See [local storage and recovery](LOCAL_STORAGE.md).
