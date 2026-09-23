@@ -630,7 +630,7 @@ export function wardrobeImportApi(options = {}) {
     Object.assign(stage, { status: "review", decision: null, source: "generated", error: null,
       assetUrl: previewUrl, cleanupPreviewUrl: previewUrl, cleanupSourceUrl: sourceUrl,
       cleanupTolerance: cleaned.tolerance, cleanupRecipe: CHROMA_CLEANUP_RECIPE,
-      cleanupDiagnostics: cleaned.diagnostics, cleanupAttempts: cleaned.attempts,
+      cleanupDiagnostics: cleaned.diagnostics, cleanupAssetDiagnostics: cleaned.diagnostics, cleanupAttempts: cleaned.attempts,
       cleanupNeedsReview: !cleaned.diagnostics.clean, updatedAt: new Date().toISOString() });
     await saveJob(job);
     return publicJob(job);
@@ -991,7 +991,7 @@ export function wardrobeImportApi(options = {}) {
           // Accept the exact immutable preview that was shown, without rerunning
           // cleanup or changing pixels between preview and approval.
           await stat(path.join(jobsDir, job.id, path.basename(stage.cleanupPreviewUrl)));
-          Object.assign(stage, { status: "review", decision: null, error: null, assetUrl: stage.cleanupPreviewUrl, cleanupNeedsReview: false });
+          Object.assign(stage, { status: "review", decision: null, error: null, assetUrl: stage.cleanupPreviewUrl, cleanupAssetDiagnostics: stage.cleanupDiagnostics, cleanupNeedsReview: false });
         } else {
           const sourceName = path.basename(new URL(stage.cleanupSourceUrl || stage.failedAssetUrl, "http://localhost").pathname);
           const source = await readFile(path.join(jobsDir, job.id, sourceName));

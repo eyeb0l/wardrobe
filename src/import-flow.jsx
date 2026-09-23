@@ -154,7 +154,7 @@ function ReviewEditor({ cleanupEditor, job, stage, draft, setDraft, regenPrompt,
   return (
     <div className="import-editor">
       {isGarment ? <div className="import-garment-review">
-        <CutoutPreview onLoaded={setLoadedGarment} asset={asset} diagnostics={job.stages.garment.cleanupDiagnostics} highlight={job.stages.garment.cleanupNeedsReview} />
+        <CutoutPreview onLoaded={setLoadedGarment} asset={asset} diagnostics={job.stages.garment.cleanupAssetDiagnostics || job.stages.garment.cleanupDiagnostics} highlight={job.stages.garment.cleanupNeedsReview} />
         {job.stages.garment.cleanupNeedsReview && <p className="import-field-error" role="status">Some edges need a closer look. Check the marked areas or adjust the cleanup before approving.</p>}
         {cleanupEditor && <details className="import-edge-options"><summary>Adjust edges</summary>{cleanupEditor}</details>}
       </div> : <OptimizedImage className={`import-editor__preview${useOriginal || originalGarment ? " has-transparency" : ""}`} src={asset} alt={useOriginal || originalGarment ? "Original product image" : isCrop ? "Detected item crop" : isGarment ? "Extracted garment" : isFailed && !job.stages[stage]?.assetUrl ? "Garment awaiting modelled photo" : "Generated modelled look"} />}
@@ -518,7 +518,10 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   const performCleanup = async (job, action, requestedTolerance) => {
     if (!beginMutation(job.id)) return;
     try {
-      if (requestedTolerance === "auto") action = "auto";
+      if (requestedTolerance === "auto") {
+        action = "auto";
+        setCleanupTolerances(current => { const next = { ...current }; delete next[job.id]; return next; });
+      }
       const tolerance = requestedTolerance === "auto" ? undefined : requestedTolerance ?? cleanupTolerances[job.id] ?? job.stages?.garment?.cleanupTolerance ?? 46;
       const updated = await api(`${API}/${job.id}/stages/garment/cleanup-${action}`, { method: "POST", body: JSON.stringify({ tolerance, ...(action === "accept" ? { previewUrl: job.stages.garment.cleanupPreviewUrl } : {}) }) });
       setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
