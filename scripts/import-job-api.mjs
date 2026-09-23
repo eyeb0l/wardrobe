@@ -1,6 +1,7 @@
 import { cleanupTolerance, processChromaBackground, frameTransparentGarment } from "./chroma-processing.mjs";
 export { processChromaBackground, removeChromaBackground, frameTransparentGarment } from "./chroma-processing.mjs";
 import { automaticChromaCleanup, inspectFinishedCutout } from "./automatic-chroma-cleanup.mjs";
+import { normalizeGeneratedTransparency, NATIVE_TRANSPARENCY_RECIPE } from "./native-transparent-cutout.mjs";
 import { CHROMA_CLEANUP_RECIPE } from "../shared/chroma-cleanup.mjs";
 import { inspectProductBackground, applyProductMask } from "./product-cutout.mjs";
 import { generationAttempt, garmentTelemetry, manualTelemetry } from "./generation-telemetry.mjs";
@@ -174,7 +175,7 @@ export function chooseChromaKey(primary = "#808080", secondary = null) {
   return `#${selected.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function buildGarmentPrompt(metadata = {}, chromaKey = "#00ff00") {
+export function buildGarmentPrompt(metadata = {}) {
   const name = metadata.name || "clothing item";
   const category = metadata.part || "wardrobe item";
   const primary = metadata.color || "the exact visible color";
@@ -194,13 +195,13 @@ Garment fidelity: Identification hints: primary color ${primary}${secondary}; de
 
 Composition: Center the item using the reference's visible viewing angle. Keep the entire item inside the frame with generous, even padding on every side. No cropping or truncation.
 
-Background: Perfectly flat, absolutely uniform solid ${chromaKey} chroma-key color, edge-to-edge. No shadows, gradient, texture, vignette, floor, horizon, reflection, or lighting variation.
+Background: Fully transparent PNG alpha outside the garment and inside genuine openings. No painted checkerboard, solid color, shadows, gradient, texture, vignette, floor, horizon, reflection, or lighting variation. Keep opaque fabric fully opaque, including white and pale fabric; retain real semi-transparent fabric and softly antialiased boundaries.
 
 Lighting: Neutral diffuse product lighting contained on the garment only.
 
-Avoid: person, body, skin, hair, mannequin, hanger, props, other garments, retail tags, cast shadow, contact shadow, reflection, watermark, caption, border, background variation, or chroma spill.
+Avoid: person, body, skin, hair, mannequin, hanger, props, other garments, retail tags, cast shadow, contact shadow, reflection, watermark, caption, border, painted background, or color spill.
 
-Critical: Apply ${chromaKey} only to the background; do not recolor the garment to avoid the key or let the key spill onto it. Produce exactly one complete item (or one matching pair) with a crisp, separable outer silhouette.`;
+Critical: Produce exactly one complete item (or one matching pair) with a clean outer silhouette and a truly transparent background. Do not erase pale garment fabric or invent missing details.`;
 }
 
 async function atomicJson(file, value) {
@@ -534,7 +535,6 @@ export function wardrobeImportApi(options = {}) {
       stage.status = "processing"; stage.decision = null; stage.error = null; stage.attempts += 1; stage.updatedAt = new Date().toISOString();
       await saveJob(current);
       let failedAssetUrl = null;
-      let chromaKeyUsed = null;
       try {
         const dir = path.join(jobsDir, current.id);
         const output = path.join(dir, `${stageName}-${stage.attempts}.png`);
@@ -544,16 +544,16 @@ export function wardrobeImportApi(options = {}) {
         if (stageName === "garment") {
           const sourceFile = current.internal.cropFile || current.internal.originalFile;
           const original = { data: await readFile(path.join(dir, sourceFile)), mime: "image/png", name: sourceFile };
-          chromaKeyUsed = chooseChromaKey(current.metadata.color, current.metadata.secondaryColor);
-          const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, chromaKeyUsed);
+          stage.cleanupMode = NATIVE_TRANSPARENCY_RECIPE;
+          const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata);
           stage.generationPrompt = current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt;
           await saveJob(current);
-          bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: stage.generationPrompt });
+          bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", background: "transparent", images: [original], prompt: stage.generationPrompt });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
           failedAssetUrl = `${ASSET_ROOT}/${current.id}/${rawName}`;
           Object.assign(stage, { status: "cleaning", cleanupSourceUrl: failedAssetUrl, failedAssetUrl,
-            chromaKey: chromaKeyUsed, cleanupPreviewUrl: null, cleanupDiagnostics: null });
+            chromaKey: null, cleanupPreviewUrl: null, cleanupDiagnostics: null });
           await saveJob(current);
           await telemetry.finish(true);
           // Cleanup is a separate durable step. A restart can repeat this free
@@ -599,7 +599,6 @@ export function wardrobeImportApi(options = {}) {
         fresh.stages[stageName].failedAssetUrl = null;
         fresh.stages[stageName].cleanupPreviewUrl = null;
         fresh.stages[stageName].cleanupDiagnostics = null;
-        if (chromaKeyUsed) fresh.stages[stageName].chromaKey = chromaKeyUsed;
         fresh.stages[stageName].updatedAt = new Date().toISOString();
         await saveJob(fresh);
         await telemetry.finish(true);
@@ -609,7 +608,6 @@ export function wardrobeImportApi(options = {}) {
         const fresh = await loadJob(current.id);
         fresh.stages[stageName].status = "failed"; fresh.stages[stageName].error = error.message; fresh.stages[stageName].updatedAt = new Date().toISOString();
         if (typeof failedAssetUrl === "string") fresh.stages[stageName].failedAssetUrl = failedAssetUrl;
-        if (chromaKeyUsed) fresh.stages[stageName].chromaKey = chromaKeyUsed;
         await saveJob(fresh);
         return publicJob(fresh);
       }
@@ -623,15 +621,31 @@ export function wardrobeImportApi(options = {}) {
     const sourceUrl = stage.cleanupSourceUrl || stage.failedAssetUrl;
     const source = await readFile(path.join(jobsDir, job.id, path.basename(sourceUrl)));
     const work = options.outsideLease || (fn => fn());
-    const cleaned = await work(() => automaticChromaCleanup(source, stage.chromaKey || chooseChromaKey(job.metadata.color, job.metadata.secondaryColor)));
+    const native = stage.cleanupMode === NATIVE_TRANSPARENCY_RECIPE;
+    let cleaned;
+    try {
+      cleaned = await work(() => native
+        ? normalizeGeneratedTransparency(source)
+        : automaticChromaCleanup(source, stage.chromaKey || chooseChromaKey(job.metadata.color, job.metadata.secondaryColor)));
+    } catch (error) {
+      if (!native || error.code !== "EINVALIDCUTOUT") throw error;
+      Object.assign(stage, { status: "failed", error: error.message, updatedAt: new Date().toISOString() });
+      await saveJob(job);
+      return publicJob(job);
+    }
     const name = `garment-${stage.attempts}-cleanup-${randomUUID()}.png`;
     await writeFile(path.join(jobsDir, job.id, name), cleaned.bytes, { flag: "wx" });
     const previewUrl = `${ASSET_ROOT}/${job.id}/${name}`;
-    Object.assign(stage, { status: "review", decision: null, source: "generated", error: null,
-      assetUrl: previewUrl, cleanupPreviewUrl: previewUrl, cleanupSourceUrl: sourceUrl,
-      cleanupTolerance: cleaned.tolerance, cleanupRecipe: CHROMA_CLEANUP_RECIPE,
-      cleanupDiagnostics: cleaned.diagnostics, cleanupAssetDiagnostics: cleaned.diagnostics, cleanupAttempts: cleaned.attempts,
-      cleanupNeedsReview: !cleaned.diagnostics.clean, updatedAt: new Date().toISOString() });
+    Object.assign(stage, native
+      ? { status: "review", decision: null, source: "generated", error: null,
+        assetUrl: previewUrl, cleanupPreviewUrl: null, cleanupSourceUrl: sourceUrl,
+        cleanupRecipe: NATIVE_TRANSPARENCY_RECIPE, cleanupDiagnostics: null, cleanupAssetDiagnostics: null,
+        nativeTransparencyDiagnostics: cleaned.diagnostics, cleanupNeedsReview: false, updatedAt: new Date().toISOString() }
+      : { status: "review", decision: null, source: "generated", error: null,
+        assetUrl: previewUrl, cleanupPreviewUrl: previewUrl, cleanupSourceUrl: sourceUrl,
+        cleanupTolerance: cleaned.tolerance, cleanupRecipe: CHROMA_CLEANUP_RECIPE,
+        cleanupDiagnostics: cleaned.diagnostics, cleanupAssetDiagnostics: cleaned.diagnostics, cleanupAttempts: cleaned.attempts,
+        cleanupNeedsReview: !cleaned.diagnostics.clean, updatedAt: new Date().toISOString() });
     await saveJob(job);
     return publicJob(job);
   }
@@ -966,7 +980,7 @@ export function wardrobeImportApi(options = {}) {
       }
       if (action === "stages/garment/cleanup-auto" && req.method === "POST") {
         const stage = job.stages.garment;
-        if (!["failed", "review"].includes(stage.status) || !(stage.cleanupSourceUrl || stage.failedAssetUrl)) {
+        if (stage.cleanupMode === NATIVE_TRANSPARENCY_RECIPE || !["failed", "review"].includes(stage.status) || !(stage.cleanupSourceUrl || stage.failedAssetUrl)) {
           return json(res, 409, { error: "No saved source is available for cleanup" });
         }
         stage.status = "cleaning"; stage.error = null; stage.taskId = randomUUID();
@@ -979,7 +993,7 @@ export function wardrobeImportApi(options = {}) {
       const cleanupAction = action.match(/^stages\/garment\/(cleanup-preview|cleanup-accept)$/);
       if (cleanupAction && req.method === "POST") {
         const stage = job.stages.garment;
-        if (!["failed", "review"].includes(stage.status) || !(stage.cleanupSourceUrl || stage.failedAssetUrl)) {
+        if (stage.cleanupMode === NATIVE_TRANSPARENCY_RECIPE || !["failed", "review"].includes(stage.status) || !(stage.cleanupSourceUrl || stage.failedAssetUrl)) {
           throw Object.assign(new Error("No failed garment source is available for cleanup"), { status: 409 });
         }
         const input = await requestBody(req);
