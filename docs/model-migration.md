@@ -18,7 +18,7 @@ Set overrides in local `.env` and restart Vite. Hosted configuration uses produc
 
 ## API compatibility
 
-The [importer](../scripts/import-job-api.mjs) sends multipart `/images/edits` requests with PNG references and output, 1024×1024 cutouts, and 1536×1024 modeled photos. It uses direct `fetch`, with no SDK or `input_fidelity` parameter. Cutouts are generated against a solid chroma background, then made transparent by the app's cleanup stage. Native transparent generation would require changing that stage as well.
+The [importer](../scripts/import-job-api.mjs) sends multipart `/images/edits` requests with PNG references and output, 1024×1024 cutouts, and 1536×1024 modeled photos. It uses direct `fetch`, with no SDK or `input_fidelity` parameter. New cutouts request `background=transparent`; the saved API PNG is passed through a local near-opaque interior correction before review. Older chroma-key jobs retain their original cleanup stage. A garment-model override must support transparent PNG output.
 
 Detection sends image input to `/responses` with a strict clothing JSON schema, including Dresses and `isCleanProductShot`. Original-image import requires one detected item, this classification and the app's background checks to pass.
 
@@ -27,7 +27,7 @@ Each modeled attempt first makes a separate `/responses` scene-planning request 
 ## Prompt behavior
 
 - Detection defines categories, paired items, visible-only evidence, record ordering, the eight-item limit and bounding-box extents. Estimated colors and uncertain fabric, brand or closure details must not become invented facts.
-- Extraction prioritizes the source image over metadata, preserving asymmetry, the visible side and matching pairs without inventing an unseen front. The garment must not be recolored to avoid the chroma key. Key selection considers both recorded colors but cannot guarantee safety for every multicolored item.
+- Extraction prioritizes the source image over metadata, preserving asymmetry, the visible side and matching pairs without inventing an unseen front. The requested background is truly transparent; pale opaque fabric and genuine transparent openings must be preserved. Older chroma-key jobs keep their saved key and cleanup recipe.
 - Modeled images use Image 1 for identity and Image 2 for the garment; reference clothing must not leak through. Identity, garment fidelity and visibility outrank scenery. Preserve garment lettering without added captions. Supporting clothes are limited to necessary plain neutral pieces and permitted basics, including unpatterned black/brown tights.
 
 Scene and image prompts share [modeled-photo-prompts.mjs](../scripts/modeled-photo-prompts.mjs). Settings follow the garment and recent scenes, with no fixed backdrop list. The import skill renders these prompts through [modeled-photo-prompt.mjs](../scripts/modeled-photo-prompt.mjs); keep creative direction in the shared module.

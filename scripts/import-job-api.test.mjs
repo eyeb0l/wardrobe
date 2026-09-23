@@ -70,9 +70,14 @@ async function harness(t, env = {}, beforePaidCall) {
     requests.push({ type: "edit", form, images });
     let output = source;
     if (images.length === 1) {
-      const key = form.get("prompt").match(/uniform solid (#[0-9a-f]{6})/)[1];
-      const item = await sharp({ create: { width: 32, height: 40, channels: 3, background: "#777777" } }).png().toBuffer();
-      output = await sharp({ create: { width: 64, height: 64, channels: 3, background: key } }).composite([{ input: item, left: 16, top: 12 }]).png().toBuffer();
+      assert.equal(form.get("background"), "transparent");
+      assert.match(form.get("prompt"), /truly transparent background/);
+      const pixels = Buffer.alloc(64 * 64 * 4);
+      for (let y = 12; y < 52; y++) for (let x = 16; x < 48; x++) {
+        const i = (y * 64 + x) * 4;
+        pixels.set([119, 119, 119, 253], i);
+      }
+      output = await sharp(pixels, { raw: { width: 64, height: 64, channels: 4 } }).png().toBuffer();
     }
     return Response.json({ data: [{ b64_json: output.toString("base64") }] });
   });
@@ -241,7 +246,7 @@ test("default models complete the import and review flow with ordered PNG refere
   assert.deepEqual(await sharp(edits[1].images[0].data).raw().toBuffer(), await sharp(h.identity).raw().toBuffer());
   const garment = await sharp(edits[1].images[1].data).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   assert.equal(garment.data[3], 0, "cutout corner is transparent");
-  assert.equal(garment.data[((512 * garment.info.width + 512) * 4) + 3], 255, "garment center is opaque");
+  assert.equal(garment.data[((32 * garment.info.width + 32) * 4) + 3], 255, "garment center is opaque");
   await h.request("POST", `/api/import/jobs/${id}/stages/modeled/approve`);
   const library = await h.request("GET", "/api/import/wardrobe");
   assert.equal(library.length, 1);

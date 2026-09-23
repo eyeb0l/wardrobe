@@ -35,9 +35,15 @@ async function harness(t, overrides = {}) {
     assert.ok(url.endsWith("/images/edits"));
     let output = source;
     if (options.body.getAll("image[]").length === 1) {
-      const key = options.body.get("prompt").match(/uniform solid (#[0-9a-f]{6})/)[1];
-      const item = await sharp({ create: { width: 32, height: 40, channels: 3, background: "#777777" } }).png().toBuffer();
-      output = await sharp({ create: { width: 64, height: 64, channels: 3, background: key } }).composite([{ input: item, left: 16, top: 12 }]).png().toBuffer();
+      assert.equal(options.body.get("background"), "transparent");
+      assert.match(options.body.get("prompt"), /truly transparent background/);
+      const pixels = Buffer.alloc(64 * 64 * 4);
+      for (let y = 12; y < 52; y++) for (let x = 16; x < 48; x++) {
+        const i = (y * 64 + x) * 4;
+        pixels.set([119, 119, 119, 253], i);
+      }
+      output = await sharp(pixels, { raw: { width: 64, height: 64, channels: 4 } }).png().toBuffer();
+      if (overrides.garmentOutput) output = overrides.garmentOutput;
     }
     return Response.json({ data: [{ b64_json: output.toString("base64") }] });
   });
@@ -95,8 +101,17 @@ test("cloud approvals enqueue durable tasks and startup never starts paid image 
   assert.deepEqual(await h.plugin.runTask({ ...h.tasks[0], generationId: "old-generation" }), { skipped: true });
   const first = await h.plugin.runTask(h.tasks[0]);
   assert.equal(first.job.stages.garment.status, "cleaning");
+  assert.match(first.job.stages.garment.cleanupMode, /^native-transparent-/);
   await h.restart();
-  assert.equal((await h.plugin.runTask(h.tasks[0])).job.stages.garment.status, "review");
+  const corrected = (await h.plugin.runTask(h.tasks[0])).job.stages.garment;
+  assert.equal(corrected.status, "review");
+  assert.equal(corrected.cleanupPreviewUrl, null);
+  assert.ok(corrected.nativeTransparencyDiagnostics.correctedPixels > 0);
+  const savedSource = await sharp(await readFile(path.join(h.root, "data", "jobs", job.id, path.basename(corrected.cleanupSourceUrl)))).raw().toBuffer();
+  const savedCutout = await sharp(await readFile(path.join(h.root, "data", "jobs", job.id, path.basename(corrected.assetUrl)))).raw().toBuffer();
+  assert.equal(savedSource[(32 * 64 + 32) * 4 + 3], 253);
+  assert.equal(savedCutout[(32 * 64 + 32) * 4 + 3], 255);
+  assert.equal((await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/cleanup-preview`, { tolerance: 110 })).status, 409);
   assert.equal(first.job.stages.garment.attempts, 1);
   assert.equal(first.job.stages.modeled.status, "pending");
   assert.deepEqual(await h.plugin.runTask(h.tasks[0]), { skipped: true });
@@ -111,6 +126,21 @@ test("cloud approvals enqueue durable tasks and startup never starts paid image 
   assert.equal(h.requests.length, 4, "one scene plan and one image request; replay repeats neither");
   const image = await h.request("GET", garmentApproved.body.libraryItem.image);
   assert.equal(image.headers["cache-control"], "private, no-store");
+});
+
+test("an opaque API result fails from saved bytes without another model call", async (t) => {
+  const opaque = await sharp({ create: { width: 64, height: 64, channels: 3, background: "white" } }).png().toBuffer();
+  const h = await harness(t, { garmentOutput: opaque });
+  const job = await h.createJob();
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  const first = await h.plugin.runTask(h.tasks[0]);
+  assert.equal(first.job.stages.garment.status, "cleaning");
+  const second = await h.plugin.runTask(h.tasks[0]);
+  assert.equal(second.job.stages.garment.status, "failed");
+  assert.match(second.job.stages.garment.error, /no transparent PNG background/);
+  assert.ok(second.job.stages.garment.failedAssetUrl);
+  assert.deepEqual(await h.plugin.runTask(h.tasks[0]), { skipped: true });
+  assert.equal(h.requests.length, 2);
 });
 
 test("HTTP success waits for durable scheduling and failed scheduling remains manually retryable", async (t) => {

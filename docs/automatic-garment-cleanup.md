@@ -1,10 +1,16 @@
 # Automatic garment cleanup
 
-Generated garments now pass through a durable `cleaning` stage before normal garment review. The saved green/cyan/magenta source is retained throughout review. Cleanup makes no model calls and can resume after interruption without repeating image generation.
+Generated garments pass through a durable `cleaning` stage before normal garment review. New API cutouts request a transparent PNG directly from Sunburst. The original API PNG is retained, and a free local correction makes only established near-opaque fabric interiors fully opaque. The correction can resume after interruption without repeating image generation. The user still reviews every generated garment for shape, detail fidelity and edge quality before approval.
+
+The native correction requires a PNG with a meaningful transparent background and visible garment. It sets alpha to 255 only when the pixel and its full 5×5 neighbourhood already have alpha at least 250. RGB, antialiased boundaries, openings and more transparent fabric are unchanged. If the API returns an opaque or empty image, the job fails with the raw output saved for diagnosis; it never silently strips a guessed background. The three-image API trial and corrected samples are in ignored private `data/native-transparency-qa/api/`.
+
+## Earlier chroma-key jobs
+
+Jobs generated before the native-transparent change still use the saved green/cyan/magenta source and the existing cleanup controls. Their processing and review behaviour is described below. New native-transparent jobs cannot invoke the chroma preview or acceptance routes.
 
 ## Selection and quality checks
 
-Each candidate starts from the same source at strengths 46, 62, 78, 94 and 110. The first candidate passing all checks wins. If none passes, the safest candidate with the lowest remaining spill severity is shown in normal review, with suspect regions highlighted and optional **Adjust edges**. The system never approves a garment for the user.
+For earlier chroma-key jobs, each candidate starts from the same source at strengths 46, 62, 78, 94 and 110. The first candidate passing all checks wins. If none passes, the safest candidate with the lowest remaining spill severity is shown in normal review, with suspect regions highlighted and optional **Adjust edges**. The system never approves a garment for the user.
 
 `scripts/chroma-processing.mjs` contains the existing boundary-matting algorithm. `scripts/automatic-chroma-cleanup.mjs` adds an output-space check independent of strength and the cleaner's corrected-pixel counter. It examines visible key-colour excess relative to neighbouring opaque fabric after resizing, including detached specks and partial alpha. A single bright pixel can fail; no whole-image average hides a small cluster.
 
