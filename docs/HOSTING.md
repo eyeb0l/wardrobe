@@ -13,7 +13,11 @@ Manage both addresses under **Vercel → wardrobe → Domains**, connected to **
 3. Connect Neon through the Vercel Marketplace and create a Blob store with **Private** access. Connect both to **Production only** and verify that `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` have that scope.
 4. Add `OPENAI_API_KEY` and any model overrides to **Production only**. Leave `WARDROBE_HOSTED_ENABLED` unset until the data import and access checks below are complete.
 
-The hosted API requires both `WARDROBE_HOSTED_ENABLED=1` and `VERCEL_ENV=production`. Vercel supplies `VERCEL_ENV`; do not set it yourself. Vercel enforces authentication before requests reach the app; there is no in-app login. Protect the Vercel account with a passkey or two-factor authentication.
+The hosted API requires `WARDROBE_HOSTED_ENABLED=1` and `VERCEL_ENV=production`. Preview additionally requires `WARDROBE_PREVIEW_ENABLED=1` and matching `WARDROBE_PREVIEW_NEON_PROJECT_ID`/`NEON_PROJECT_ID` and `WARDROBE_PREVIEW_BLOB_STORE_ID`/`BLOB_STORE_ID` pairs. This makes a mistaken storage connection fail closed. Set the Preview flags only after connecting separate resources, copying data, and verifying that deployment protection covers previews. Vercel supplies `VERCEL_ENV`; do not set it yourself. Vercel enforces authentication before requests reach the app; there is no in-app login. Protect the Vercel account with a passkey or two-factor authentication.
+
+For a Preview copy, connect separate Neon and private Blob resources to **Preview only**. Restore an encrypted cloud backup into those resources so stored Blob URLs point to the Preview store. Copy `OPENAI_API_KEY` and set `OPENAI_VISION_MODEL=gpt-6-luna` in Preview. Set the two expected resource IDs, `WARDROBE_HOSTED_ENABLED=1`, and `WARDROBE_PREVIEW_ENABLED=1` only after the restore succeeds. Preview writes remain in its own resources; refresh the copy manually when needed. Keep both Preview resources private and Vercel Authentication on All Deployments.
+
+For the GPT-6 release, set the existing Production `OPENAI_VISION_MODEL` override to `gpt-6-luna` before creating the new Production deployment. The user-triggered difficult-detection retry is pinned to `gpt-6-sol` in code; it needs no separate environment override. Leave `OPENAI_IMAGE_MODEL`, `OPENAI_IMAGE_QUALITY`, storage credentials and the Preview-only flags as configured. A deployment changes code and environment, not saved garment or outfit images.
 
 ## Copy the existing wardrobe
 

@@ -212,7 +212,7 @@ test("default models complete the import and review flow with ordered PNG refere
   const created = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
   const id = created.jobs[0].id;
   const analysis = h.requests[0].request;
-  assert.equal(analysis.model, "gpt-5.6-luna");
+  assert.equal(analysis.model, "gpt-6-luna");
   assert.equal(analysis.text.format.strict, true);
   assert.equal(analysis.text.format.schema.properties.items.maxItems, 8);
   assert.match(analysis.input[0].content[1].image_url, /^data:image\/png;base64,/);
@@ -234,7 +234,7 @@ test("default models complete the import and review flow with ordered PNG refere
   assert.equal(edits[1].form.get("size"), "1536x1024");
   assert.deepEqual(edits[1].images.map((image) => image.name), ["model.png", "garment.png"]);
   const plan = h.requests.find(entry => entry.type === "setting").request;
-  assert.equal(plan.model, "gpt-5.6-luna");
+  assert.equal(plan.model, "gpt-6-luna");
   assert.equal(plan.input[0].content[0].text, buildModeledSettingPrompt({ metadata: created.jobs[0].metadata }));
   const plannedGarment = Buffer.from(plan.input[0].content[1].image_url.split(",")[1], "base64");
   assert.deepEqual(await sharp(plannedGarment).raw().toBuffer(), await sharp(edits[1].images[1].data).raw().toBuffer(), "scene planning inspects the exact reviewed garment");
@@ -526,7 +526,7 @@ test("import analysis and scene planning reserve text separately from each gener
   assert.deepEqual(reservations, ["text", "image", "text", "image"]);
 });
 
-test("Terra retry reviews full-source candidates without replacing the current crop or spending twice", async t => {
+test("Sol retry reviews full-source candidates without replacing the current crop or spending twice", async t => {
   const reservations = [];
   const h = await harness(t, {}, async kind => reservations.push(kind));
   const originalImage = await productImage(true);
@@ -550,9 +550,9 @@ test("Terra retry reviews full-source candidates without replacing the current c
   assert.equal(h.requests.length, 2);
   assert.deepEqual(reservations, ["text", "text"]);
   const [normal, retry] = h.requests.map(entry => entry.request);
-  assert.equal(normal.model, "gpt-5.6-luna");
+  assert.equal(normal.model, "gpt-6-luna");
   assert.equal(normal.reasoning, undefined);
-  assert.equal(retry.model, "gpt-5.6-terra");
+  assert.equal(retry.model, "gpt-6-sol");
   assert.deepEqual(retry.reasoning, { effort: "medium" });
   assert.equal(retry.max_output_tokens, 16384);
   assert.deepEqual(retry.input, normal.input, "same full original, prompt and image bytes");
@@ -577,7 +577,7 @@ test("Terra retry reviews full-source candidates without replacing the current c
   assert.equal(h.requests.length, 2);
 });
 
-test("keeping the current detection and empty Terra results preserve all existing items", async t => {
+test("keeping the current detection and empty Sol results preserve all existing items", async t => {
   const h = await harness(t);
   h.setAnalysis([dress, { ...dress, name: "Second item", part: "accessories_up" }]);
   const { jobs } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
@@ -597,7 +597,7 @@ test("keeping the current detection and empty Terra results preserve all existin
   assert.equal(h.requests.length, 2, "discarded request cannot be replayed for a second charge");
 });
 
-test("malformed Terra responses fail without replacing the crop and never retry automatically", async t => {
+test("malformed Sol responses fail without replacing the crop and never retry automatically", async t => {
   const h = await harness(t);
   const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
   const base = `/api/import/jobs/${job.id}`;
@@ -617,7 +617,7 @@ test("malformed Terra responses fail without replacing the crop and never retry 
   assert.equal(retried.detectionRetry.candidates.length, 1);
 });
 
-test("quota denial and invalid retry IDs prevent Terra dispatch", async t => {
+test("quota denial and invalid retry IDs prevent Sol dispatch", async t => {
   let calls = 0;
   const h = await harness(t, {}, async () => {
     if (++calls > 1) throw Object.assign(new Error("Daily quota reached"), { status: 429 });
@@ -631,21 +631,24 @@ test("quota denial and invalid retry IDs prevent Terra dispatch", async t => {
   assert.deepEqual((await h.request("GET", base)).stages, job.stages);
 });
 
-test("empty initial detection can explicitly use fixed Terra medium, while model injection is rejected", async t => {
+test("empty initial detection can explicitly use fixed Sol medium, while model injection is rejected", async t => {
   const h = await harness(t, { OPENAI_VISION_MODEL: "custom-default-model" });
   h.setAnalysis([]);
   const imageBase64 = h.source.toString("base64");
   const empty = await h.request("POST", "/api/import/jobs", { imageBase64 });
   assert.equal(empty.noClothingDetected, true);
   assert.equal(h.requests[0].request.model, "custom-default-model");
-  await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "gpt-5.6-sol" }, 400);
+  await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "gpt-6-astra" }, 400);
   h.setAnalysis([dress]);
-  const retry = await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "terra" });
+  const retry = await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "sol" });
   assert.equal(retry.jobs.length, 1);
-  assert.equal(retry.jobs[0].detectionModel, "gpt-5.6-terra");
+  assert.equal(retry.jobs[0].detectionModel, "gpt-6-sol");
   assert.equal(retry.jobs[0].detectionEffort, "medium");
-  assert.equal(h.requests[1].request.model, "gpt-5.6-terra");
+  assert.equal(h.requests[1].request.model, "gpt-6-sol");
   assert.deepEqual(h.requests[1].request.reasoning, { effort: "medium" });
+  const legacy = await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "terra" });
+  assert.equal(legacy.jobs[0].detectionModel, "gpt-6-sol");
+  assert.equal(h.requests[2].request.model, "gpt-6-sol");
 });
 
 test("older detection request IDs remain spent after subsequent retries and restart", async t => {

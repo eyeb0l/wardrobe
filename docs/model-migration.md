@@ -1,6 +1,8 @@
 # Image and vision model migration
 
-The importer defaults to `gpt-image-2.5-sunburst` for cutouts and modeled photos, and `gpt-5.6-luna` for garment detection and modeled-scene planning. Existing library images are never regenerated automatically.
+The importer defaults to `gpt-image-2.5-sunburst` for cutouts and modeled photos, and `gpt-6-luna` for garment detection and modeled-scene planning. Existing library images are never regenerated automatically.
+
+The manual difficult-detection retry uses `gpt-6-sol` at medium reasoning effort. The default vision requests omit `reasoning.effort`, which [OpenAI documents as medium for GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna). Sol is used only when the user chooses **Retry with Sol**; it is not an automatic fallback. The private Preview deployment was checked with a copied wardrobe before this production release. Historical GPT-5.6 evaluations remain linked below as baselines, not claims about GPT-6 quality.
 
 ## Configuration
 
@@ -8,7 +10,7 @@ Set overrides in local `.env` and restart Vite. Hosted configuration uses produc
 
 | Variable | Default / precedence |
 | --- | --- |
-| `OPENAI_VISION_MODEL` | `gpt-5.6-luna`; detection and scene planning |
+| `OPENAI_VISION_MODEL` | `gpt-6-luna`; detection, scene planning, outfit curation, accessories and shopping assessment |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst`; fallback for both image stages |
 | `OPENAI_GARMENT_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for cutouts |
 | `OPENAI_MODELED_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for modeled photos |
@@ -39,7 +41,7 @@ The automated tests mock OpenAI: they verify request formats, model defaults/ove
 For an authorized visual evaluation, use a separate `WARDROBE_DATA_DIR` and explicitly set `WARDROBE_MODEL_REFERENCE` to the intended reference; changing the data directory does not move that default. Keep sources, references and results out of Git, and use the same inputs across runs.
 
 1. Include a simple top, asymmetric garment, printed text/logo, layered outfit, shoes, and a multicolored garment. Repeat each case at least three times.
-2. Compare 5.4 mini and Luna detection on the same sources: correct item count, categories, useful crops, paired footwear, and no fabricated details. An invalid or tight crop can harm extraction regardless of the image model.
+2. Compare GPT-6 Luna and Sol detection against retained GPT-5.6 results on the same sources: correct item count, categories, useful crops, paired footwear, and no fabricated details. An invalid or tight crop can harm extraction regardless of the image model.
 3. For image comparisons, reuse identical approved crops and cutouts so vision differences do not confound the result. Start with identical prompts, planned settings, `high` quality, dimensions and reference order on GPT Image 2 and Sunburst. Preserve pre-migration prompts from Git for the baseline, then compare prompt changes and scene variety separately.
 4. Inspect cutout silhouette, original colors, asymmetry, markings, transparent edges, and missing pieces. Compare modeled identity, exact garment construction, unobstructed details, anatomy, and framing against both references.
 5. Record accepted/rejected results, reasons, latency, retries, and API usage. Compare cost per accepted image rather than assuming identical quality labels imply identical cost or consistency.

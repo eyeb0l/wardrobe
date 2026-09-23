@@ -8,6 +8,7 @@ import { createTask, saveTask, reservePaidCall } from "./task-store.mjs";
 import { generateWardrobe } from "./generation-workflow.mjs";
 import { recoverOutbox } from "./outbox.mjs";
 import { maintenance } from "./maintenance.mjs";
+import { hostedEnabled } from "./hosted-enabled.mjs";
 
 let lastRecovery = 0;
 let imageStore;
@@ -37,9 +38,7 @@ export default async function handler(req, res) {
     }
     return end(chunk, ...args);
   };
-  // Production secrets are never available in a preview. Enable only after
-  // verifying Vercel Authentication protects ALL deployment URLs.
-  if (process.env.WARDROBE_HOSTED_ENABLED !== "1" || process.env.VERCEL_ENV !== "production") {
+  if (!hostedEnabled()) {
     return json(res, 503, { error: "Hosted wardrobe is not enabled for this deployment." });
   }
   const requestUrl = new URL(req.url, "http://localhost");

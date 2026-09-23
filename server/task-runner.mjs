@@ -2,6 +2,7 @@ import { createCloudStore } from "../scripts/cloud-store.mjs";
 import { withStorage } from "../scripts/storage-fs.mjs";
 import { createPlugin } from "./plugins.mjs";
 import { readTask, saveTask, reservePaidCall } from "./task-store.mjs";
+import { hostedEnabled } from "./hosted-enabled.mjs";
 
 export const INTERRUPTED = "Generation was interrupted. Check API usage before retrying; retry starts a new paid request.";
 
@@ -11,7 +12,7 @@ let workerStore;
 const defaultStore = () => workerStore ??= createCloudStore();
 
 export async function executeCloudTask(id, step, { store = defaultStore(), pluginFactory = createPlugin, reserve = reservePaidCall,
-  enabled = () => process.env.WARDROBE_HOSTED_ENABLED === "1" && process.env.VERCEL_ENV === "production",
+  enabled = hostedEnabled,
 } = {}) {
   return store.withLease(() => withStorage(store, async () => {
     const task = await readTask(id);

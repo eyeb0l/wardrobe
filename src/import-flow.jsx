@@ -33,7 +33,7 @@ async function api(path, options) {
 }
 
 function deriveStatus(job) {
-  if (isDetectionRetryRunning(job)) return { tone: "processing", text: "Checking with Terra…" };
+  if (isDetectionRetryRunning(job)) return { tone: "processing", text: "Checking with Sol…" };
   if (job.detectionRetry?.status === "review") return { tone: "ready", text: "New crop ready for review" };
   const crop = job.stages?.crop;
   const garment = job.stages?.garment;
@@ -89,11 +89,12 @@ function ModelReferencePicker({ references, selected, onSelect, onRefresh, disab
 function DetectionRetryReview({ job, busy, checking, onAction }) {
   const retry = job.detectionRetry;
   const candidates = retry?.candidates || [];
+  const resultModelName = retry?.model === "gpt-5.6-terra" ? "Terra" : "Sol";
   const [selectedId, setSelectedId] = useState("");
   useEffect(() => setSelectedId(""), [retry?.id]);
   if (retry?.status === "review") return <div className="import-detection-retry">
     <fieldset className="import-detection-candidates" disabled={busy}>
-      <legend>Terra found {candidates.length} {candidates.length === 1 ? "item" : "items"}</legend>
+      <legend>{resultModelName} found {candidates.length} {candidates.length === 1 ? "item" : "items"}</legend>
       <p className="import-card__detail">{candidates.length ? "Choose the intended item for this import. Your current crop stays visible until you use a result." : "No distinct wearable item was found. You can keep your current crop."}</p>
       <div className="import-detection-options">{candidates.map((candidate) => <label key={candidate.id} className={selectedId === candidate.id ? "is-selected" : ""}>
         <OptimizedImage src={candidate.assetUrl} sizes="120px" alt={candidate.metadata?.name || "Detected item"} />
@@ -106,10 +107,10 @@ function DetectionRetryReview({ job, busy, checking, onAction }) {
     </div>
   </div>;
   return <div className="import-detection-retry">
-    <button className="import-button" disabled={busy || checking} onClick={() => onAction("retry", { requestId: crypto.randomUUID() })}>{checking ? <SpinnerGap size={14} className="import-spinner" /> : <ArrowCounterClockwise size={14} />} {checking ? "Checking with Terra…" : "Retry with Terra"}</button>
-    <p className="import-card__detail" role={checking ? "status" : undefined}>{checking ? "Your current crop is kept while Terra checks the original image." : "For missed items or incomplete crops. Uses paid credits; you review the result before applying it."}</p>
+    <button className="import-button" disabled={busy || checking} onClick={() => onAction("retry", { requestId: crypto.randomUUID() })}>{checking ? <SpinnerGap size={14} className="import-spinner" /> : <ArrowCounterClockwise size={14} />} {checking ? "Checking with Sol…" : "Retry with Sol"}</button>
+    <p className="import-card__detail" role={checking ? "status" : undefined}>{checking ? "Your current crop is kept while Sol checks the original image." : "For missed items or incomplete crops. Uses paid credits; you review the result before applying it."}</p>
     {job.detectionRetryAttempt?.status === "started" && !checking && <p className="import-field-error">The previous check may have been interrupted. Your current crop is kept. Try again when you're ready.</p>}
-    {job.detectionRetryAttempt?.status === "failed" && <p className="import-field-error">{uiErrorMessage(job.detectionRetryAttempt.error, "Terra could not finish. Your current crop is unchanged.")}</p>}
+    {job.detectionRetryAttempt?.status === "failed" && <p className="import-field-error">{uiErrorMessage(job.detectionRetryAttempt.error, "Sol could not finish. Your current crop is unchanged.")}</p>}
   </div>;
 }
 
@@ -370,7 +371,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
         if (lifecycle !== uploadLifecycle.current) break;
         const createdJobs = result.jobs || [result];
         if (!createdJobs.length && result.noClothingDetected) {
-          setNotice({ tone: "complete", text: "No clothing detected", detail: `We couldn’t find a distinct wearable item in ${file.name}. Try Terra or choose a clearer image.`, imageDataUrl, metadata: { name: file.name.replace(/\.[^.]+$/, "") } });
+          setNotice({ tone: "complete", text: "No clothing detected", detail: `We couldn’t find a distinct wearable item in ${file.name}. Try Sol or choose a clearer image.`, imageDataUrl, metadata: { name: file.name.replace(/\.[^.]+$/, "") } });
           setOpen(true);
           continue;
         }
@@ -428,10 +429,10 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
     if (!notice?.imageDataUrl || !beginMutation("undetected")) return;
     setDetectionBusyId("undetected");
     try {
-      const result = await api(API, { method: "POST", body: JSON.stringify({ imageDataUrl: notice.imageDataUrl, metadata: notice.metadata, detectionModel: "terra" }) });
+      const result = await api(API, { method: "POST", body: JSON.stringify({ imageDataUrl: notice.imageDataUrl, metadata: notice.metadata, detectionModel: "sol" }) });
       const createdJobs = result.jobs || [result];
       if (!createdJobs.length && result.noClothingDetected) {
-        setNotice((current) => ({ ...current, detail: "Terra couldn’t find a distinct wearable item either. Try a clearer image, or retry if you want another check." }));
+        setNotice((current) => ({ ...current, detail: "Sol couldn’t find a distinct wearable item either. Try a clearer image, or retry if you want another check." }));
       } else {
         setJobs((current) => [...current, ...createdJobs]);
         setDrafts((current) => ({ ...current, ...Object.fromEntries(createdJobs.map((job) => [job.id, defaultDraft(job)])) }));
@@ -572,8 +573,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
           )}
           {notice?.imageDataUrl && <div className="import-detection-retry import-undetected-retry">
             {jobs.length > 0 && <p className="import-card__detail">{notice.detail}</p>}
-            <button className="import-button" disabled={Boolean(busyId) || uploads.length > 0 || !setup?.ready} onClick={retryUndetected}>{detectionBusyId === "undetected" ? <SpinnerGap size={14} className="import-spinner" /> : <ArrowCounterClockwise size={14} />} {detectionBusyId === "undetected" ? "Checking with Terra…" : "Retry with Terra"}</button>
-            <p className="import-card__detail" role={detectionBusyId === "undetected" ? "status" : undefined}>{detectionBusyId === "undetected" ? "Checking the same uploaded image. Results will be ready for review." : "Check the same image with Terra. Uses paid credits; any detected items come back for your review."}</p>
+            <button className="import-button" disabled={Boolean(busyId) || uploads.length > 0 || !setup?.ready} onClick={retryUndetected}>{detectionBusyId === "undetected" ? <SpinnerGap size={14} className="import-spinner" /> : <ArrowCounterClockwise size={14} />} {detectionBusyId === "undetected" ? "Checking with Sol…" : "Retry with Sol"}</button>
+            <p className="import-card__detail" role={detectionBusyId === "undetected" ? "status" : undefined}>{detectionBusyId === "undetected" ? "Checking the same uploaded image. Results will be ready for review." : "Check the same image with Sol. Uses paid credits; any detected items come back for your review."}</p>
           </div>}
           {error && <p className="import-status is-error" role="alert">{uiErrorMessage(error)}</p>}
           </div>

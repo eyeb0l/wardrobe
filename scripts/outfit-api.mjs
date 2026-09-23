@@ -166,7 +166,7 @@ export function wardrobeOutfitApi(options = {}) {
   let drainPromise = Promise.resolve();
   let serial = Promise.resolve();
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
-  const models = () => ({ vision: setting("OPENAI_VISION_MODEL", "gpt-5.6-luna"), image: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst")) });
+  const models = () => ({ vision: setting("OPENAI_VISION_MODEL", "gpt-6-luna"), image: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst")) });
   const ensureActive = () => { if (disposed) throw fail("The server is restarting. Refresh after it is ready.", 503); };
   const ensureWritable = () => { ensureActive(); if (options.readOnly) throw fail("This outfit request is read-only.", 409); };
   const exclusive = (task) => { const result = serial.then(() => { ensureActive(); return task(); }); serial = result.catch(() => {}); return result; };

@@ -2,7 +2,7 @@
 
 The handbag report exposed a reproducible cleanup bug: global cyan suppression altered legitimate blue fabric and reduced its opacity. The cleanup now identifies the actual key-coloured background and confines colour unmixing to its boundary. Opaque garment interiors and existing transparent cutouts retain their colour and alpha. Matching background in handle openings is removed too. Ambiguous near-key edges remain intact and fail strict cleanup rather than being neutralized.
 
-This changes `scripts/import-job-api.mjs`; production detection remains `gpt-5.6-luna` with reasoning effort omitted. The earlier evaluation compared that behaviour with explicit medium. The fix and [manual Terra medium retry](terra-detection-retry.md) are deployed in [PR #12](https://github.com/eyeb0l/wardrobe/pull/12).
+At the time of [PR #12](https://github.com/eyeb0l/wardrobe/pull/12), production detection used `gpt-5.6-luna` with reasoning effort omitted. The earlier evaluation compared that behaviour with explicit medium. That PR deployed this colour fix and a manual GPT-5.6 Terra medium retry. The current [manual retry](terra-detection-retry.md) uses GPT-6 Sol, while the default uses GPT-6 Luna.
 
 ## Fidelity evidence
 
