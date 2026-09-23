@@ -402,3 +402,47 @@ test("real cloud import and outfit plugins can initialize and serve reads withou
   assert.deepEqual(after, before, "read-only initialization cannot recover, publish, or update files");
   assert.equal(h.blobs.size, 0);
 });
+
+test('detached generation permits other saves, makes duplicate delivery wait, and reserves once', async t => {
+  const h = await harness(t), jobId=randomUUID();
+  const file=`${CLOUD_ROOT}/jobs/${jobId}/job.json`;
+  await h.write(async()=>{await mkdir(`${CLOUD_ROOT}/jobs/${jobId}`,{recursive:true});await writeFile(file,JSON.stringify({stages:{garment:{status:'processing'}}}));});
+  const task=await h.task({kind:'import',jobId,stageName:'garment',taskId:randomUUID()});
+  let release,started; const gate=new Promise(r=>release=r), entered=new Promise(r=>started=r); let reservations=0,dispatches=0;
+  const options={store:h.store,enabled:()=>true,reserve:async()=>{reservations++;},pluginFactory:async(kind,{beforePaidCall,outsideLease})=>({
+    async runTask(){await beforePaidCall('image');await outsideLease(async()=>{dispatches++;started();await gate;await assert.rejects(writeFile(file,'unsafe'),{code:'ESTALE'});});return {skipped:false,job:{stages:{garment:{status:'review'}}}};},
+    async failTask(){assert.fail('Live task must not fail');}
+  })};
+  const running=executeCloudTask(task.id,0,options);await entered;
+  try {
+    const other=h.otherStore();
+    await other.withLease(()=>other.writeFile(`${CLOUD_ROOT}/other-item.json`,'saved'));
+    assert.deepEqual(await executeCloudTask(task.id,0,{...options,store:other}),{busy:true});
+    assert.equal(dispatches,1);assert.equal(reservations,1);
+  }finally{release();}
+  assert.deepEqual(await running,{more:false});assert.equal((await h.storedTask(task.id)).state,'done');
+  assert.equal(await h.store.readFile(`${CLOUD_ROOT}/other-item.json`,'utf8'),'saved');
+});
+
+test('source changes during detached work fence all stale result and error writes', async t => {
+  const h=await harness(t),jobId=randomUUID(),file=`${CLOUD_ROOT}/outfit-jobs/${jobId}/job.json`;
+  await h.write(async()=>{await mkdir(`${CLOUD_ROOT}/outfit-jobs/${jobId}`,{recursive:true});await writeFile(file,'original');});
+  const task=await h.task({kind:'outfit',jobId,taskId:randomUUID()});
+  let failures=0;
+  await assert.rejects(executeCloudTask(task.id,0,{store:h.store,enabled:()=>true,pluginFactory:async(kind,{outsideLease})=>({
+    async runTask(){await outsideLease(async()=>{const other=h.otherStore();await other.withLease(()=>other.writeFile(file,'new revision'));});await writeFile(file,'stale');},
+    async failTask(){failures++;await writeFile(file,'stale failure');}
+  })}),{code:'ESTALE'});
+  assert.equal(failures,0);assert.equal(await h.store.readFile(file,'utf8'),'new revision');
+});
+
+test('expired cleanup resumes for free while an expired paid step is never replayed', async t => {
+  const h=await harness(t),jobId=randomUUID(),file=`${CLOUD_ROOT}/jobs/${jobId}/job.json`;
+  await h.write(async()=>{await mkdir(`${CLOUD_ROOT}/jobs/${jobId}`,{recursive:true});await writeFile(file,JSON.stringify({stages:{garment:{status:'cleaning'}}}));});
+  const task=await h.task({kind:'import',jobId,stageName:'garment',taskId:randomUUID()});
+  await h.write(()=>saveTask({...task,state:'running',owner:randomUUID(),activeUntil:'2020-01-01T00:00:00Z'}));
+  let cleanups=0;
+  const options={store:h.store,enabled:()=>true,reserve:()=>assert.fail('Cleanup must not reserve paid calls'),pluginFactory:async()=>({async runTask(){cleanups++;return {skipped:false,job:{stages:{garment:{status:'review'}}}};},async failTask(){assert.fail('Cleanup can resume');}})};
+  assert.deepEqual(await executeCloudTask(task.id,0,options),{more:false});
+  assert.deepEqual(await executeCloudTask(task.id,0,options),{more:false});assert.equal(cleanups,1);
+});

@@ -1,6 +1,6 @@
 # Tinted edges and cleanup review
 
-This follow-up addresses residual magenta fringe and dropped preview updates. It is implemented on `codex/chroma-edge-cleanup`; it has not been deployed.
+This historical follow-up addressed residual magenta fringe and dropped preview updates. The subsequent [automatic cleanup workflow](automatic-garment-cleanup.md) supersedes the mandatory cleanup-review stage described below.
 
 Cleanup now compares foreground samples across all search directions, tolerates noisy key blends, avoids amplifying colour noise at low opacity, and removes tiny detached key-coloured specks. Corrections stay within the existing boundary band. Opaque interiors and already-transparent input remain protected; a garment edge resembling the key is still inherently ambiguous.
 

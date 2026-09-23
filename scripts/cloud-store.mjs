@@ -186,9 +186,22 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
   const db = database ?? neonDatabase(databaseUrl);
   const getBlob = async () => blob ?? import("@vercel/blob");
   let store;
+  const acquireLease = async (waitMs, signal) => {
+    const token = randomUUID(), deadline = performance.now() + waitMs;
+    for (;;) {
+      signal?.throwIfAborted();
+      const acquired = await db.query(`UPDATE wardrobe_storage_lease SET token = $1::uuid,
+        expires_at = clock_timestamp() + interval '${LEASE_SECONDS} seconds'
+        WHERE id = 1 AND expires_at <= clock_timestamp() RETURNING token`, [token]);
+      if (acquired.length) return token;
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw error("EBUSY", CLOUD_ROOT, "Another wardrobe operation is still running");
+      await delay(Math.min(200, remaining), undefined, { signal });
+    }
+  };
   const owned = () => {
     const owner = leaseContext.getStore();
-    if (owner?.store !== store || owner.closed || owner.lost) throw error("ESTALE", CLOUD_ROOT, "An active cloud storage lease is required");
+    if (owner?.store !== store || owner.closed || owner.lost || owner.suspended) throw error("ESTALE", CLOUD_ROOT, "An active cloud storage lease is required");
     return owner;
   };
   const mutate = async (operation, args) => {
@@ -373,39 +386,49 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     },
     async initialize() { await db.transaction(CLOUD_SCHEMA_SQL.map((text) => ({ text }))); },
     async assertLease() { await mutate("assert", {}); },
+    async withoutLease(callback, validate) {
+      const owner = owned();
+      if (typeof validate !== "function") throw new Error("Detached work requires a revision validator");
+      await store.assertLease();
+      owner.suspended = true;
+      await owner.stopHeartbeat();
+      const released = await db.query("UPDATE wardrobe_storage_lease SET token = NULL, expires_at = '-infinity' WHERE id = 1 AND token = $1::uuid AND expires_at > clock_timestamp() RETURNING id", [owner.token]);
+      if (owner.lost || !released.length) { owner.lost = true; throw error("ESTALE", CLOUD_ROOT); }
+      let result, failure;
+      try { result = await callback(); } catch (error) { failure = error; }
+      try {
+        // A new token fences any asynchronous operation from the old lease.
+        owner.token = await acquireLease(30_000);
+        owner.suspended = false;
+        owner.startHeartbeat();
+        await validate();
+        await store.assertLease();
+      } catch (error) {
+        owner.lost = true;
+        throw error;
+      }
+      if (failure) throw failure;
+      return result;
+    },
     async withLease(callback, { waitMs = 0, signal } = {}) {
       signal?.throwIfAborted();
       const inherited = leaseContext.getStore();
       if (inherited?.store === store) { await store.assertLease(); return callback(); }
-      const token = randomUUID();
-      const deadline = performance.now() + waitMs;
-      // Only acquisition is retried. Once the callback starts, errors must
-      // propagate without replaying mutations or paid API requests.
-      for (;;) {
-        signal?.throwIfAborted();
-        const acquired = await db.query(`UPDATE wardrobe_storage_lease SET token = $1::uuid,
-          expires_at = clock_timestamp() + interval '${LEASE_SECONDS} seconds'
-          WHERE id = 1 AND expires_at <= clock_timestamp() RETURNING token`, [token]);
-        if (acquired.length) break;
-        const remaining = deadline - performance.now();
-        if (remaining <= 0) throw error("EBUSY", CLOUD_ROOT, "Another wardrobe operation is still running");
-        await delay(Math.min(200, remaining), undefined, { signal });
-      }
-      const owner = { store, token, lost: false, closed: false };
-      let heartbeat;
-      let renewing;
+      const owner = { store, token: await acquireLease(waitMs, signal), lost: false, closed: false, suspended: false };
+      let heartbeat, renewing;
       const renew = () => {
-        if (renewing || owner.closed) return;
+        if (renewing || owner.closed || owner.suspended) return;
         renewing = db.query(`UPDATE wardrobe_storage_lease SET expires_at = clock_timestamp() + interval '${LEASE_SECONDS} seconds'
-          WHERE id = 1 AND token = $1::uuid AND expires_at > clock_timestamp() RETURNING token`, [token])
-          .then((rows) => { if (!rows.length) owner.lost = true; })
+          WHERE id = 1 AND token = $1::uuid AND expires_at > clock_timestamp() RETURNING token`, [owner.token])
+          .then(rows => { if (!rows.length) owner.lost = true; })
           .catch(() => { owner.lost = true; })
           .finally(() => { renewing = undefined; });
       };
+      owner.startHeartbeat = () => { heartbeat = setInterval(renew, heartbeatMs); heartbeat.unref?.(); };
+      owner.stopHeartbeat = async () => { clearInterval(heartbeat); if (renewing) await renewing; };
       try {
         signal?.throwIfAborted();
-        heartbeat = setInterval(renew, heartbeatMs);
-        heartbeat.unref?.();
+        owner.startHeartbeat();
         return await leaseContext.run(owner, async () => {
           const result = await callback();
           await store.assertLease();
@@ -413,9 +436,8 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
         });
       } finally {
         owner.closed = true;
-        clearInterval(heartbeat);
-        if (renewing) await renewing;
-        await db.query("UPDATE wardrobe_storage_lease SET token = NULL, expires_at = '-infinity' WHERE id = 1 AND token = $1::uuid", [token]);
+        await owner.stopHeartbeat();
+        await db.query("UPDATE wardrobe_storage_lease SET token = NULL, expires_at = '-infinity' WHERE id = 1 AND token = $1::uuid", [owner.token]);
       }
     },
     async readFile(file, options) {

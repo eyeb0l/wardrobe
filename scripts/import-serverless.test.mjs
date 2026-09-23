@@ -94,7 +94,9 @@ test("cloud approvals enqueue durable tasks and startup never starts paid image 
   assert.deepEqual(await h.plugin.runTask({ ...h.tasks[0], attempt: 2 }), { skipped: true });
   assert.deepEqual(await h.plugin.runTask({ ...h.tasks[0], generationId: "old-generation" }), { skipped: true });
   const first = await h.plugin.runTask(h.tasks[0]);
-  assert.equal(first.job.stages.garment.status, "review");
+  assert.equal(first.job.stages.garment.status, "cleaning");
+  await h.restart();
+  assert.equal((await h.plugin.runTask(h.tasks[0])).job.stages.garment.status, "review");
   assert.equal(first.job.stages.garment.attempts, 1);
   assert.equal(first.job.stages.modeled.status, "pending");
   assert.deepEqual(await h.plugin.runTask(h.tasks[0]), { skipped: true });
@@ -137,6 +139,7 @@ test("HTTP success waits for durable scheduling and failed scheduling remains ma
   assert.equal(retry.status, 202);
   assert.notEqual(h.tasks[0].taskId, failedTask.taskId);
   assert.deepEqual(await h.plugin.runTask(failedTask), { skipped: true });
+  assert.equal((await h.plugin.runTask(h.tasks[0])).job.stages.garment.status, "cleaning");
   assert.equal((await h.plugin.runTask(h.tasks[0])).job.stages.garment.status, "review");
 });
 
@@ -158,6 +161,7 @@ test("crash recovery fails only the matching attempt and permits a new explicit 
   assert.equal((await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/regenerate`, {})).status, 409);
   assert.deepEqual(await h.plugin.failTask(h.tasks[0]), { skipped: true }, "old failures cannot overwrite a new task");
   assert.deepEqual(await h.plugin.runTask(h.tasks[0]), { skipped: true });
+  assert.equal((await h.plugin.runTask(h.tasks[1])).job.stages.garment.status, "cleaning");
   assert.equal((await h.plugin.runTask(h.tasks[1])).job.stages.garment.status, "review");
   assert.equal(h.requests.length, 2);
 });
@@ -217,6 +221,7 @@ test("hosted manual uploads reject active work and invalidate old task delivery 
   const job = await h.createJob();
   const base = `/api/import/jobs/${job.id}/stages`;
   await h.request("POST", `${base}/crop/approve`);
+  await h.plugin.runTask(h.tasks[0]);
   await h.plugin.runTask(h.tasks[0]);
   await h.request("POST", `${base}/garment/approve`);
   const oldTask = h.tasks[1];
