@@ -49,7 +49,7 @@ Use the [backup guide](docs/BACKUPS.md) for cloud backups and recovery, and the 
 
 The importer detects up to eight visible clothing items per photo with the Responses API, then creates product cutouts and modeled previews with the Images API. Review each stage before approval. It supports drag-and-drop, paste, metadata editing, regeneration and manual modeled-photo uploads.
 
-For difficult detections, choose **Retry with Terra** in crop review or after a no-clothing result. This paid retry uses Terra at medium effort; review its candidates before replacing the crop. Luna remains the default. See [retry behaviour and limits](docs/terra-detection-retry.md).
+For difficult detections, choose **Retry with Sol** in crop review or after a no-clothing result. This paid retry uses Sol at medium effort; review its candidates before replacing the crop. Luna remains the default. See [retry behaviour and limits](docs/terra-detection-retry.md).
 
 Cutout cleanup handles colour spill at detected background boundaries while preserving garment interiors. When review is needed, previews update automatically; use light/dark backgrounds and zoom to inspect the edges. Optional strength adjustments stay under **Adjust cleanup**. Acceptance uses the exact displayed preview. Saved images are not changed retroactively.
 
@@ -118,7 +118,7 @@ Agents setting up Wardrobe should establish whether the user wants Codex-assiste
 | Variable | Default / purpose |
 | --- | --- |
 | `OPENAI_API_KEY` | Required for web API generation and analysis |
-| `OPENAI_VISION_MODEL` | `gpt-5.6-luna`; detection, planning, Shopping and accessory advice |
+| `OPENAI_VISION_MODEL` | `gpt-6-luna`; detection, planning, Shopping and accessory advice |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst`; default image model |
 | `OPENAI_GARMENT_MODEL` | Overrides the image model for cutouts |
 | `OPENAI_MODELED_MODEL` | Overrides the image model for modeled pieces and outfits |

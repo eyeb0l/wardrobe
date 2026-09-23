@@ -19,8 +19,8 @@ const DECISIONS = new Set(["approve", "reject"]);
 const PARTS = new Set(["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const DEFAULT_IMAGE_MODEL = "gpt-image-2.5-sunburst";
-const DEFAULT_VISION_MODEL = "gpt-5.6-luna";
-const RETRY_VISION_MODEL = "gpt-5.6-terra";
+const DEFAULT_VISION_MODEL = "gpt-6-luna";
+const RETRY_VISION_MODEL = "gpt-6-sol";
 const RETRY_VISION_EFFORT = "medium";
 const DETECTION_OUTPUT_LIMIT = 16_384;
 const REQUEST_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -579,14 +579,14 @@ async function openAIAnalyze({ beforePaidCall, key, baseUrl, model, effort, imag
   const parsed = JSON.parse(outputText);
   if (!Array.isArray(parsed.items)) throw new Error("OpenAI analysis returned an invalid clothing list");
   if (effort) {
-    if (result.status && result.status !== "completed") throw new Error("Terra detection did not finish. Your current crop has been kept.");
+    if (result.status && result.status !== "completed") throw new Error("Sol detection did not finish. Your current crop has been kept.");
     validateDetection(parsed);
   }
   return { items: parsed.items, isCleanProductShot: parsed.isCleanProductShot === true };
 }
 
 function validateDetection(value) {
-  const invalid = () => { throw Object.assign(new Error("Terra returned an invalid detection result. Your current crop has been kept."), { status: 502 }); };
+  const invalid = () => { throw Object.assign(new Error("Sol returned an invalid detection result. Your current crop has been kept."), { status: 502 }); };
   if (typeof value.isCleanProductShot !== "boolean" || value.items.length > 8) invalid();
   for (const item of value.items) {
     if (!item || typeof item.name !== "string" || !item.name.trim() || !PARTS.has(item.part)
@@ -679,7 +679,7 @@ export function wardrobeImportApi(options = {}) {
     if (job.detectionRetryAttempt?.id === requestId || job.internal.detectionRequestIds?.includes(requestId)) {
       throw Object.assign(new Error("This retry was already attempted. Check the current result before starting another retry."), { status: 409 });
     }
-    if (job.detectionRetry) throw Object.assign(new Error("Choose a Terra result or keep the current crop before retrying again."), { status: 409 });
+    if (job.detectionRetry) throw Object.assign(new Error("Choose a Sol result or keep the current crop before retrying again."), { status: 409 });
     const key = setting("OPENAI_API_KEY");
     if (!key) throw Object.assign(new Error("OPENAI_API_KEY is not configured"), { status: 503 });
     const dir = path.join(jobsDir, job.id);
@@ -710,7 +710,7 @@ export function wardrobeImportApi(options = {}) {
       // No crop, metadata or downstream stage is changed on a failed retry.
       delete next.detectionRetry;
       next.detectionRetryAttempt.status = "failed";
-      next.detectionRetryAttempt.error = "Terra could not finish detection. Your current crop has been kept.";
+      next.detectionRetryAttempt.error = "Sol could not finish detection. Your current crop has been kept.";
       await saveJob(next);
       throw Object.assign(new Error(next.detectionRetryAttempt.error), { status: error.status || 502 });
     }
@@ -1103,15 +1103,15 @@ export function wardrobeImportApi(options = {}) {
           return json(res, 503, { error: `Setup required: add ${missing}, then restart the app.` });
         }
         const input = await requestBody(req);
-        if (input.detectionModel !== undefined && input.detectionModel !== "terra") {
+        if (input.detectionModel !== undefined && input.detectionModel !== "sol" && input.detectionModel !== "terra") {
           throw Object.assign(new Error("Unknown detection model option."), { status: 400 });
         }
-        const terra = input.detectionModel === "terra";
-        const detectionModel = terra ? RETRY_VISION_MODEL : setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL);
+        const sol = input.detectionModel === "sol" || input.detectionModel === "terra";
+        const detectionModel = sol ? RETRY_VISION_MODEL : setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL);
         const image = decodeImage(input);
         const normalizedImage = await normalizeImage(image.data);
         const key = setting("OPENAI_API_KEY");
-        const analysis = await openAIAnalyze({ beforePaidCall: options.beforePaidCall, timeoutMs: terra ? Math.min(timeoutMs ?? 210_000, 210_000) : timeoutMs, key, baseUrl: apiBaseUrl(), model: detectionModel, ...(terra ? { effort: RETRY_VISION_EFFORT } : {}), image: normalizedImage, mime: "image/png" });
+        const analysis = await openAIAnalyze({ beforePaidCall: options.beforePaidCall, timeoutMs: sol ? Math.min(timeoutMs ?? 210_000, 210_000) : timeoutMs, key, baseUrl: apiBaseUrl(), model: detectionModel, ...(sol ? { effort: RETRY_VISION_EFFORT } : {}), image: normalizedImage, mime: "image/png" });
         const detected = analysis.items.map(normalizeMetadata);
         const canUseOriginal = await recommendOriginal(normalizedImage, analysis);
         const jobs = [];
@@ -1127,7 +1127,7 @@ export function wardrobeImportApi(options = {}) {
           const cropStage = { ...stageState(), status: "review", assetUrl: `${ASSET_ROOT}/${id}/${cropFile}`, updatedAt: now };
           const job = { id, status: "active", metadata, canUseOriginal, stages: { crop: cropStage, garment: stageState(), modeled: stageState() }, createdAt: now, updatedAt: now, internal: { originalFile, cropFile, originalMime: "image/png" } };
           job.detectionModel = detectionModel;
-          if (terra) job.detectionEffort = RETRY_VISION_EFFORT;
+          if (sol) job.detectionEffort = RETRY_VISION_EFFORT;
           job.originalAssetUrl = `${ASSET_ROOT}/${id}/${originalFile}`;
           await saveJob(job); jobs.push(publicJob(job));
         }
@@ -1163,7 +1163,7 @@ export function wardrobeImportApi(options = {}) {
         const next = structuredClone(job);
         if (action === "detection/accept") {
           const candidate = retry.candidates.find(item => item.id === input.candidateId);
-          if (!candidate) throw Object.assign(new Error("Choose an available Terra detection."), { status: 400 });
+          if (!candidate) throw Object.assign(new Error("Choose an available Sol detection."), { status: 400 });
           next.metadata = structuredClone(candidate.metadata);
           next.canUseOriginal = candidate.canUseOriginal;
           next.internal.cropFile = path.basename(candidate.assetUrl);
@@ -1177,7 +1177,7 @@ export function wardrobeImportApi(options = {}) {
         return json(res, 200, publicJob(next));
       }
       if (job.detectionRetry && req.method === "POST" && (action === "stages/crop/use-original" || /^stages\/crop\/(approve|reject)$/.test(action))) {
-        throw Object.assign(new Error("Choose a Terra result or keep the current crop first."), { status: 409 });
+        throw Object.assign(new Error("Choose a Sol result or keep the current crop first."), { status: 409 });
       }
       if (!action && req.method === "DELETE") {
         if (running.has(`${job.id}:modeled`) || running.has(`${job.id}:garment`)) return json(res, 409, { error: "Wait for generation to finish before removing this job." });

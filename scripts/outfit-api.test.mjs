@@ -15,7 +15,7 @@ test("configuration uses current model precedence, custom data root and numbered
   const h = await harness(t);
   const config = await h.request("GET", `${API}/config`);
   assert.equal(config.ready, true);
-  assert.deepEqual(config.models, { vision: "gpt-5.6-luna", image: "gpt-image-2.5-sunburst" });
+  assert.deepEqual(config.models, { vision: "gpt-6-luna", image: "gpt-image-2.5-sunburst" });
   assert.deepEqual(config.counts, { upperbody: 6, lowerbody: 4, wholebody_up: 1, shoes: 1, accessories_up: 1 });
   assert.equal(config.availableCombinations, 18);
   assert.equal(config.maxCount, 12);
@@ -41,7 +41,7 @@ for (const [overrides, imageModel] of [
   const edit = h.requests.find((entry) => entry.kind === "edit");
   assert.equal(edit.form.get("model"), imageModel);
   assert.equal(edit.form.get("quality"), "high");
-  assert.equal(h.requests[0].request.model, overrides.OPENAI_VISION_MODEL || "gpt-5.6-luna");
+  assert.equal(h.requests[0].request.model, overrides.OPENAI_VISION_MODEL || "gpt-6-luna");
 });
 
 test("curation receives labeled visual sheets and selected references are sent in exact order", async (t) => {
