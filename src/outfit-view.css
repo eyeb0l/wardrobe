@@ -133,7 +133,8 @@
 .outfit-progress-line { width: 180px; height: 2px; background: var(--line); position: relative; overflow: hidden; }
 .outfit-progress-line::after { content: ""; position: absolute; width: 50%; height: 100%; background: var(--ink); animation: outfit-progress 1.6s ease-in-out infinite alternate; }
 @keyframes outfit-progress { from { transform: translateX(-25%); } to { transform: translateX(125%); } }
-@media (min-width: 1800px) { .wardrobe-site-nav { max-width: 1688px; margin-inline: auto; } }
+@media (min-width: 1800px) { .wardrobe-site-nav--contained { max-width: 1688px; margin-inline: auto; } }
+@media (min-width: 521px) and (max-width: 580px) { .wardrobe-site-nav:not(.wardrobe-site-nav--contained) { margin-inline: 24px; } }
 @media (max-width: 1180px) { .wardrobe-site-nav { margin-inline: 34px; } .outfit-page { padding-inline: 34px; } .outfit-grid { gap: 30px 18px; } .outfit-detail-copy { padding: 24px; } }
 @media (max-width: 960px) { .outfit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .outfit-detail-layout { grid-template-columns: 1fr; } .outfit-detail-photo { width: min(100%, 670px); margin-inline: auto; } .outfit-pieces-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .outfit-detail-copy { padding: 26px 30px; } }
 @media (max-width: 860px) { .wardrobe-site-nav { min-height: 72px; margin-inline: 24px; } .outfit-page { padding-inline: 24px; } .outfit-page-heading { padding-top: 28px; align-items: flex-start; } .outfit-page-heading > button { margin-top: 30px; } .outfit-page-heading h1 { font-size: 35px; } .outfit-page-heading > div > p:last-child { max-width: 270px; } }
