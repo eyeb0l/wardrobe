@@ -844,6 +844,10 @@ button { font: inherit; }
   }
 }
 
+@media (max-width: 580px) {
+  .gallery-header { padding-inline: 18px; }
+}
+
 @media (max-width: 520px) {
   .gallery-header { padding: max(24px, env(safe-area-inset-top)) 18px 0; }
   .piece-count { font-size: 12px; }

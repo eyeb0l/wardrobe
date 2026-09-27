@@ -624,7 +624,7 @@ export function App() {
 
   return (
     <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
-      <nav className={`wardrobe-site-nav${["/outfits", "/shopping"].includes(route) ? " wardrobe-site-nav--contained" : ""}`} aria-label="Main navigation">
+      <nav className="wardrobe-site-nav" aria-label="Main navigation">
         <a href="/" onClick={(event) => navigate(event, "/")} aria-current={!["/outfits", "/shopping"].includes(route) ? "page" : undefined}>Wardrobe</a>
         <a href="/outfits" onClick={(event) => navigate(event, "/outfits")} aria-current={route === "/outfits" ? "page" : undefined}>Outfits</a>
         <a href="/shopping" onClick={(event) => navigate(event, "/shopping")} aria-current={route === "/shopping" ? "page" : undefined}>Shopping</a>
