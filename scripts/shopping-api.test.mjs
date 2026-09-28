@@ -512,3 +512,77 @@ test("shopping reserves text before dispatch and reports an exhausted text allow
   assert.equal(result.error, "Text allowance reached");
   assert.equal(h.requests.length, 1, "blocked request never reaches the provider");
 });
+
+const gaps = (overrides = {}) => ({
+  summary: "A darker tailored bottom would give your lighter tops another option.",
+  suggestions: [{ name: "Dark tailored trousers", reason: "The saved bottoms are casual; a tailored cut adds a different silhouette.", styleNotes: "Wear with ITEM 1 for a simple contrast.", itemIds: ["top-1"] }],
+  ...overrides,
+});
+
+test("gap suggestions use all authorized garment photos without a candidate or person reference and reserve text quota", async (t) => {
+  const reservations = [];
+  const h = await harness(t, { beforePaidCall: (kind) => reservations.push(kind), response: () => Response.json({ output_text: JSON.stringify(gaps()) }) });
+  await rm(path.join(h.root, "identity.png"));
+  await rm(path.join(h.dataDir, "model-reference-2.png"));
+  const result = await h.request("POST", `${API}/gaps`, { wardrobeItems: h.items });
+  assert.equal(result.wardrobeCount, 14);
+  assert.equal(result.suggestions[0].styleNotes, "Wear with top-1 for a simple contrast.");
+  assert.deepEqual(reservations, ["text"]);
+  assert.equal(h.requests.length, 1);
+  const { request } = h.requests[0];
+  assert.equal(request.store, false);
+  assert.equal(request.model, h.settings.OPENAI_VISION_MODEL);
+  assert.equal(request.text.format.name, "wardrobe_shopping_gaps");
+  const content = request.input[0].content;
+  assert.equal(content.filter((part) => part.type === "input_image").length, Math.ceil(h.items.length / 12));
+  for (const item of h.items) assert.ok(content[0].text.includes(item.id));
+  assert.ok(!content[0].text.includes(h.root));
+  assert.equal(h.imageReads.length, h.items.length);
+});
+
+test("gaps allow no recommendation but reject invented pairings, duplicate suggestions and oversized output", async (t) => {
+  const h = await harness(t);
+  const run = (value, status) => {
+    h.setResponse(() => Response.json({ output_text: JSON.stringify(value) }));
+    return h.request("POST", `${API}/gaps`, { wardrobeItems: h.items }, status);
+  };
+  assert.deepEqual((await run(gaps({ suggestions: [] }), 200)).suggestions, []);
+  const suggestion = gaps().suggestions[0];
+  for (const suggestions of [
+    [{ ...suggestion, itemIds: ["unowned-piece"] }],
+    [{ ...suggestion, itemIds: [] }],
+    [{ ...suggestion, itemIds: ["top-1", "top-1"] }],
+    [{ ...suggestion, styleNotes: "Wear with ITEM 999." }],
+    [{ ...suggestion, reason: "" }],
+    [suggestion, suggestion],
+    [suggestion, suggestion, suggestion, suggestion],
+  ]) await run(gaps({ suggestions }), 502);
+  h.setResponse(() => Response.json({ output_text: "not JSON" }));
+  await h.request("POST", `${API}/gaps`, { wardrobeItems: h.items }, 502);
+});
+
+test("gaps fail before paid dispatch on too little evidence, unauthorized inventory, corrupt photos or cross-site requests", async (t) => {
+  const h = await harness(t);
+  await h.request("POST", `${API}/gaps`, { wardrobeItems: h.items.slice(0, 2) }, 400);
+  await h.request("POST", `${API}/gaps`, { wardrobeItems: h.items.map((item) => ({ ...item, id: `unknown-${item.id}` })) }, 400);
+  await h.request("POST", `${API}/gaps`, { wardrobeItems: h.items }, 403, { origin: "https://foreign.invalid" });
+  await writeFile(path.join(h.dataDir, "imported", "top-1.png"), "broken image");
+  await h.request("POST", `${API}/gaps`, { wardrobeItems: h.items }, 503);
+  assert.equal(h.requests.length, 0);
+});
+
+test("gap suggestions share the Shopping concurrency guard and quota failures never dispatch", async (t) => {
+  let release;
+  const h = await harness(t, { response: () => new Promise((resolve) => { release = () => resolve(Response.json({ output_text: JSON.stringify(gaps()) })); }) });
+  const pending = h.request("POST", `${API}/gaps`, { wardrobeItems: h.items });
+  const deadline = Date.now() + 3000;
+  while (!release && Date.now() < deadline) await delay(5);
+  assert.ok(release, "the provider was reached before the deadline");
+  await h.analyze({}, 409);
+  await h.request("POST", `${API}/gaps`, { wardrobeItems: h.items }, 409);
+  release();
+  await pending;
+  const limited = await harness(t, { beforePaidCall: () => { throw Object.assign(new Error("Monthly text limit reached"), { status: 429 }); } });
+  await limited.request("POST", `${API}/gaps`, { wardrobeItems: limited.items }, 429);
+  assert.equal(limited.requests.length, 0);
+});

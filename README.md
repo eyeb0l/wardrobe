@@ -87,7 +87,9 @@ Image generations also collect private [refusal and retry telemetry](docs/GENERA
 
 ## Shopping assistant
 
-Open **Shopping** or `/shopping`, choose/drop/paste a listing screenshot or garment photo, select a model reference, and optionally add the occasion, price or fit you have in mind. **Check this piece** returns a recommendation, styling considerations, overlap and combinations with owned pieces. Unclear evidence may produce **A closer look is needed**; photographs alone cannot establish exact sizing, fabric quality or value.
+Open **Shopping** or `/shopping` and expand **What’s missing?** (collapsed by default). **Find my gaps** suggests up to three useful additions, with a short explanation, styling notes and the owned pieces to wear them with. It compares the saved wardrobe photos and details, avoids near-duplicates, and can return fewer suggestions when no clear gap stands out. At least three readable pieces and an API key are required; no shopping upload or person reference is needed. It runs only when requested and uses the same text-analysis quota as other Shopping checks. Suggestions remain through tab switches and are hidden when the wardrobe changes until you refresh them.
+
+To assess a particular piece, choose/drop/paste a listing screenshot or garment photo, select a model reference, and optionally add the occasion, price or fit you have in mind. **Check this piece** returns a recommendation, styling considerations, overlap and combinations with owned pieces. Unclear evidence may produce **A closer look is needed**; photographs alone cannot establish exact sizing, fabric quality or value.
 
 Shopping accepts the source formats and limits above, but always prepares a JPEG locally at a maximum 1,600-pixel edge and under 2 MB, removing embedded metadata such as EXIF location. HEIC uses native decoding when available and a lazily loaded local decoder otherwise. The server validates and normalizes the image again.
 
