@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowRight, Plus, X } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, Plus, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { prepareShoppingImage } from "./shopping-image.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
@@ -36,6 +36,95 @@ function Photo({ src, alt, className = "", sizes = "(max-width: 580px) 33vw, 160
   const [failedSource, setFailedSource] = useState(null);
   if (!src || failedSource === src) return <div className={`shopping-photo-fallback ${className}`} role="img" aria-label={alt || "Reference photo unavailable"}>Photo unavailable</div>;
   return <OptimizedImage src={src} alt={alt} className={className} onError={() => setFailedSource(src)} sizes={sizes} />;
+}
+
+function WardrobeGaps({ wardrobeItems, itemsById, loading, wardrobeError, config, configLoading, configError, analyzing, onBusyChange }) {
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const controller = useRef(null);
+  const fingerprint = JSON.stringify(wardrobeItems);
+  const latestFingerprint = useRef(fingerprint);
+  latestFingerprint.current = fingerprint;
+  const id = useId();
+  const stale = result && result.fingerprint !== fingerprint;
+  const problem = wardrobeError ? "Your wardrobe couldn't be loaded. Reload to try again."
+    : !loading && wardrobeItems.length < 3 ? "Add at least three pieces to your wardrobe to find useful gaps."
+    : !configLoading && (configError || !config?.hasApiKey) ? "Shopping suggestions aren't available right now. Refresh Shopping settings below to try again." : "";
+
+  useEffect(() => {
+    // An inventory edit invalidates any in-flight comparison, including changes
+    // made in the Wardrobe tab while Shopping remains mounted but hidden.
+    controller.current?.abort();
+    controller.current = null;
+    setBusy(false);
+    setError("");
+    onBusyChange(false);
+    return () => { controller.current?.abort(); controller.current = null; };
+  }, [fingerprint, onBusyChange]);
+
+  const findGaps = async () => {
+    if (controller.current || busy || analyzing || loading || configLoading || problem) return;
+    const requestController = new AbortController();
+    controller.current = requestController;
+    const submitted = fingerprint;
+    setBusy(true);
+    onBusyChange(true);
+    setError("");
+    try {
+      const value = await request("/api/shopping/gaps", {
+        method: "POST", signal: requestController.signal,
+        body: JSON.stringify({ wardrobeItems }),
+      });
+      if (!Array.isArray(value.suggestions) || value.suggestions.length > 3 || typeof value.summary !== "string"
+        || value.suggestions.some((suggestion) => !suggestion || ["name", "reason", "styleNotes"].some((key) => typeof suggestion[key] !== "string")
+          || !Array.isArray(suggestion.itemIds) || !suggestion.itemIds.length || suggestion.itemIds.some((itemId) => !itemsById.has(itemId)))) {
+        throw new Error("The suggestions were incomplete. Please try again.");
+      }
+      if (!requestController.signal.aborted && latestFingerprint.current === submitted) setResult({ ...value, fingerprint: submitted });
+    } catch (failure) {
+      if (!requestController.signal.aborted) setError(failure.message);
+    } finally {
+      if (controller.current === requestController) {
+        controller.current = null;
+        setBusy(false);
+        onBusyChange(false);
+      }
+    }
+  };
+
+  return <section className="shopping-gaps" aria-labelledby={`${id}-title`}>
+    <details>
+      <summary className="shopping-gaps-toggle"><h2 id={`${id}-title`}>What’s missing?</h2><CaretDown size={18} aria-hidden="true" /></summary>
+      <div className="shopping-gaps-content">
+    <div className="shopping-gaps-heading">
+      <p>Up to three thoughtful additions to make more of what you own.</p>
+      <button type="button" className="shopping-secondary" onClick={findGaps} disabled={busy || analyzing || loading || configLoading || !!problem}>
+        {busy ? "Finding the gaps…" : result ? "Refresh suggestions" : "Find my gaps"}<ArrowRight size={16} aria-hidden="true" />
+      </button>
+    </div>
+    {problem ? <p className="shopping-small">{problem}</p> : null}
+    {!result && !problem && !busy ? <p className="shopping-small shopping-gaps-disclosure">Uses AI to compare your saved wardrobe photos and details. Nothing to upload.</p> : null}
+    {busy ? <div className="shopping-gaps-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-small">Looking for useful new combinations and checking for similar pieces. This can take a minute.</p></div> : null}
+    {error ? <p className="shopping-error" role="alert">{uiErrorMessage(error)}</p> : null}
+    {stale ? <p className="shopping-small" role="status">Your wardrobe has changed. Refresh suggestions for an updated shortlist.</p> : null}
+    {result && !stale && !loading && !wardrobeError ? <div aria-live="polite">
+      <p className="shopping-gaps-summary">{result.summary}</p>
+      <div className="shopping-gap-grid">{result.suggestions.map((suggestion, index) => <article className="shopping-gap" key={index}>
+        <span className="shopping-gap-number" aria-hidden="true">0{index + 1}</span>
+        <h3>{suggestion.name}</h3>
+        <p>{suggestion.reason}</p>
+        <h4>How to wear it</h4><p>{suggestion.styleNotes}</p>
+        <div className="shopping-gap-pieces">{suggestion.itemIds.map((itemId) => {
+          const item = itemsById.get(itemId);
+          return <figure key={itemId}><Photo src={item?.thumbnail || item?.image} alt="" sizes="64px" /><figcaption>{item?.name || "Wardrobe piece"}</figcaption></figure>;
+        })}</div>
+      </article>)}</div>
+      <p className="shopping-small shopping-gaps-footnote">Based on {result.wardrobeCount} saved pieces. A starting point, not a shopping list you need to complete.</p>
+    </div> : null}
+      </div>
+    </details>
+  </section>;
 }
 
 function Assessment({ result, itemsById, headingRef, titleId }) {
@@ -84,6 +173,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   const [dragging, setDragging] = useState(false);
   const [notes, setNotes] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
+  const [findingGaps, setFindingGaps] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
   const [result, setResult] = useState(null);
   const fileInput = useRef(null);
@@ -118,7 +208,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   latestWardrobe.current = wardrobeFingerprint;
   const setupProblem = configLoading ? "" : configError ? uiErrorMessage(configError) : setupMessage(config);
   const wardrobeProblem = wardrobeError ? "Your wardrobe couldn't be loaded. Reload the page to try again." : !loading && !items.length ? "Add a few pieces in the Wardrobe tab first so this check can compare with what you own." : "";
-  const canAnalyze = !!prepared && !preparing && !analyzing && !configLoading && !setupProblem && !loading && !wardrobeProblem && !!selectedReference;
+  const canAnalyze = !findingGaps && !!prepared && !preparing && !analyzing && !configLoading && !setupProblem && !loading && !wardrobeProblem && !!selectedReference;
 
   const refreshConfig = useCallback(async () => {
     configController.current?.abort();
@@ -285,6 +375,9 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
       <h1>Worth adding?</h1>
       <p>See how a new piece could suit you and work with what you own.</p>
     </header>
+
+    <WardrobeGaps wardrobeItems={wardrobeItems} itemsById={itemsById} loading={loading} wardrobeError={wardrobeError}
+      config={config} configLoading={configLoading} configError={configError} analyzing={analyzing} onBusyChange={setFindingGaps} />
 
     <form className="shopping-form" onSubmit={analyze}>
       <div className="shopping-workspace">
