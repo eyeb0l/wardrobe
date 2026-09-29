@@ -1,6 +1,6 @@
 # Vision model evaluation
 
-**Historical GPT-5.6 evaluation protocol (2026-09-20).** The app now defaults to `gpt-6-luna` for its five vision workloads, with a user-triggered `gpt-6-sol` detection retry; see [model migration](model-migration.md). This document preserves the earlier GPT-5.6 test inputs, prices and conclusions. At the time of the evaluation, import detection, modeled-photo scene planning, outfit curation, accessory suggestions and shopping assessment defaulted to `gpt-5.6-luna` through `OPENAI_VISION_MODEL`. The Responses requests omitted `reasoning.effort`, so Luna's documented default was medium. Deployed overrides were not inspected in that evaluation.
+**Historical GPT-5.6 evaluation protocol (2026-09-20).** The app now defaults to `gpt-6-luna` for its five vision workloads, with a user-triggered `gpt-6.1-sol` detection retry; see [model migration](model-migration.md). This document preserves the earlier GPT-5.6 test inputs, prices and conclusions. At the time of the evaluation, import detection, modeled-photo scene planning, outfit curation, accessory suggestions and shopping assessment defaulted to `gpt-5.6-luna` through `OPENAI_VISION_MODEL`. The Responses requests omitted `reasoning.effort`, so Luna's documented default was medium. Deployed overrides were not inspected in that evaluation.
 
 ## Reproduce the offline screening pilot
 

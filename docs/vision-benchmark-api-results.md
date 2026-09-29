@@ -1,6 +1,6 @@
 # Wardrobe vision API evaluation
 
-**Historical GPT-5.6 results (2026-09-20).** This report covers the initial evaluation. Its recommendation applies to the compared GPT-5.6 configurations; the current app defaults to GPT-6 Luna and offers a manual GPT-6 Sol detection retry. See [model migration](model-migration.md) and the [detection-rescue follow-up](chroma-cleanup-and-detection-rescue.md) for the later Terra medium results and cumulative spending.
+**Historical GPT-5.6 results (2026-09-20).** This report covers the initial evaluation. Its recommendation applies to the compared GPT-5.6 configurations; the current app defaults to GPT-6 Luna and offers a manual GPT-6.1 Sol detection retry. See [model migration](model-migration.md) and the [detection-rescue follow-up](chroma-cleanup-and-detection-rescue.md) for the later Terra medium results and cumulative spending.
 
 Completed on 2026-09-20: 300 planned API attempts, 292 returned responses, eight unresolved transport failures, and no outstanding active calls or ungraded returned answers. Approved API cap: US$10 including failures. Recorded usage is **$1.626180137**, with a conservative total upper bound of **$1.759296937** including every uncertain call. At this phase’s close, **$8.240703063** of the cap remained; production settings and the hosted collection were unchanged.
 

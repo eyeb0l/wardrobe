@@ -557,7 +557,7 @@ test("Sol retry reviews full-source candidates without replacing the current cro
   const [normal, retry] = h.requests.map(entry => entry.request);
   assert.equal(normal.model, "gpt-6-luna");
   assert.equal(normal.reasoning, undefined);
-  assert.equal(retry.model, "gpt-6-sol");
+  assert.equal(retry.model, "gpt-6.1-sol");
   assert.deepEqual(retry.reasoning, { effort: "medium" });
   assert.equal(retry.max_output_tokens, 16384);
   assert.deepEqual(retry.input, normal.input, "same full original, prompt and image bytes");
@@ -647,13 +647,13 @@ test("empty initial detection can explicitly use fixed Sol medium, while model i
   h.setAnalysis([dress]);
   const retry = await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "sol" });
   assert.equal(retry.jobs.length, 1);
-  assert.equal(retry.jobs[0].detectionModel, "gpt-6-sol");
+  assert.equal(retry.jobs[0].detectionModel, "gpt-6.1-sol");
   assert.equal(retry.jobs[0].detectionEffort, "medium");
-  assert.equal(h.requests[1].request.model, "gpt-6-sol");
+  assert.equal(h.requests[1].request.model, "gpt-6.1-sol");
   assert.deepEqual(h.requests[1].request.reasoning, { effort: "medium" });
   const legacy = await h.request("POST", "/api/import/jobs", { imageBase64, detectionModel: "terra" });
-  assert.equal(legacy.jobs[0].detectionModel, "gpt-6-sol");
-  assert.equal(h.requests[2].request.model, "gpt-6-sol");
+  assert.equal(legacy.jobs[0].detectionModel, "gpt-6.1-sol");
+  assert.equal(h.requests[2].request.model, "gpt-6.1-sol");
 });
 
 test("older detection request IDs remain spent after subsequent retries and restart", async t => {

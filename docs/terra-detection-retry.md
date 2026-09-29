@@ -1,8 +1,8 @@
 # Manual Sol detection retry
 
-The manual retry flow originated in [PR #12](https://github.com/eyeb0l/wardrobe/pull/12). That release used GPT-5.6 Terra; the current model is GPT-6 Sol. The file name is retained so existing documentation links continue to work.
+The manual retry flow originated in [PR #12](https://github.com/eyeb0l/wardrobe/pull/12). That release used GPT-5.6 Terra; the current model is GPT-6.1 Sol. The file name is retained so existing documentation links continue to work.
 
-Crop review now offers **Retry with Sol**. It rechecks the original photo with `gpt-6-sol` at **medium** reasoning effort and holds up to eight candidate crops for review. Select the intended item and choose **Use selected item**, or **Keep current crop**. This updates only that import's crop and detected metadata; sibling imports stay untouched. The crop still needs its normal approval before garment generation. The UI explains that retries use paid API credits.
+Crop review now offers **Retry with Sol**. It rechecks the original photo with `gpt-6.1-sol` at **medium** reasoning effort and holds up to eight candidate crops for review. Select the intended item and choose **Use selected item**, or **Keep current crop**. This updates only that import's crop and detected metadata; sibling imports stay untouched. The crop still needs its normal approval before garment generation. The UI explains that retries use paid API credits.
 
 The no-clothing message also offers **Retry with Sol**, using the prepared upload retained in the current page. Its new detections enter the ordinary crop-review queue. Reloading that empty-result page does not retain the upload; an existing import's retry candidates do survive reloads.
 
@@ -13,7 +13,7 @@ Initial detection uses the configured default (`gpt-6-luna` by default), with re
 - `POST /api/import/jobs/:id/detection/retry` accepts a UUID `requestId`. Only an active, unapproved crop with pending downstream stages can retry. Results return in `detectionRetry`; the current crop and metadata stay unchanged.
 - `POST /api/import/jobs/:id/detection/accept` requires the current `retryId` and a valid `candidateId`. Selection updates metadata and the immutable crop asset reference, then returns to crop review.
 - `POST /api/import/jobs/:id/detection/discard` requires the current `retryId` and retains the original result.
-- Initial upload accepts `detectionModel: "sol"` and the former `"terra"` option for older clients; both use `gpt-6-sol`. Arbitrary model names are rejected.
+- Initial upload accepts `detectionModel: "sol"` and the former `"terra"` option for older clients; both use `gpt-6.1-sol`. Arbitrary model names are rejected.
 
 Sol uses the production detection prompt/schema and original image, a 16,384-token output cap, and a provider deadline no longer than 210 seconds. Responses are validated before candidate creation. The existing text/vision quota hook runs before dispatch. Hosted routes retain origin checks and the shared writer lease; local job mutations are serialized.
 
