@@ -1,0 +1,12 @@
+.wardrobe-image-check {
+  border-top: 1px solid rgb(97 80 67 / 16%);
+  padding-top: 1rem;
+  margin-block: .75rem;
+  font-size: .875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.wardrobe-image-check p { margin-block: .5rem; }
+.wardrobe-image-check ul { padding-left: 1.2rem; margin-block: .5rem; }
+.wardrobe-image-check li { margin-block: .4rem; }
+.wardrobe-image-check li[data-state="concern"] { color: #95442d; }

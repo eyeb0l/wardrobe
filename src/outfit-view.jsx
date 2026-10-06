@@ -6,6 +6,7 @@ import { createViewResource } from "./view-resource.mjs";
 import { OutfitFinder, OwnedItemSwaps } from "./outfit-discovery.jsx";
 import { discoveryFingerprint, orderDiscovery } from "../shared/outfit-discovery.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
+import { ImageCheck } from "./image-check.jsx";
 import "./outfit-view.css";
 
 const API = "/api/outfits";
@@ -217,7 +218,7 @@ function GenerateForm({ config, configError, refreshing, onRefresh, busy, error,
   </form>;
 }
 
-function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob, visible = true }) {
+function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob, visible = true, imageChecksReady = false }) {
   const [cropping, setCropping] = useState(false);
   const outfits = job.outfits || [];
   const [selectedId, setSelectedId] = useState(() => outfits.find((outfit) => ["review", "failed"].includes(outfit.status))?.id || outfits[0]?.id || null);
@@ -250,7 +251,7 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob, visible 
         <div className="outfit-review-actions">
           {selected.status === "failed" ? <p className="outfit-error">{uiErrorMessage(selected.error, "This image couldn't be created. Retry to generate it again.")}</p> : null}
           {["planned", "generating"].includes(selected.status) ? <p className="outfit-small" role="status">{selected.status === "generating" ? "Creating this photo…" : "This photo is next in line."}</p> : null}
-          {canReview ? <><p className="outfit-small">Check your likeness, every piece, and the fit against the references.</p><div className="outfit-action-row"><button className="outfit-primary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "approve")}><Check size={17} aria-hidden="true" />Accept into collection</button><button className="outfit-secondary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "reject")}>Reject</button></div></> : null}
+          {canReview ? <><p className="outfit-small">Check your likeness, every piece, and the fit against the references.</p><ImageCheck endpoint={`${API}/jobs/${job.id}/outfits/${selected.id}/check`} fingerprint={JSON.stringify([job.updatedAt, selected.image, selected.status, [...itemsById.values()].map(item => [item.id, item.revision, item.image])])} enabled={imageChecksReady} active={visible} disabled={busy || cropping || running(job)} /><div className="outfit-action-row"><button className="outfit-primary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "approve")}><Check size={17} aria-hidden="true" />Accept into collection</button><button className="outfit-secondary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "reject")}>Reject</button></div></> : null}
           {selected.status === "accepted" ? <p className="outfit-added"><Check size={17} aria-hidden="true" />Added to your collection.</p> : null}
           {selected.status === "rejected" ? <p className="outfit-small">Rejected. This look is not in your collection.</p> : null}
           {nextReview && ["accepted", "rejected"].includes(selected.status) ? <button className="outfit-secondary" type="button" onClick={() => select(nextReview.id)}>Next to review <ArrowRight size={16} aria-hidden="true" /></button> : null}
@@ -434,6 +435,6 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
     {previousJobs.length ? <details className="outfit-history"><summary>Previous generations <span>({previousJobs.length})</span></summary>{previousJobs.map((job) => <JobRow key={job.id} job={job} onOpen={openJob} />)}</details> : null}
     {active && modal?.type === "generate" ? <OutfitModal title="Generate outfits" className="outfit-generate-modal" onClose={closeModal}><GenerateForm config={config} configError={configError} refreshing={refreshingConfig} onRefresh={refreshConfig} busy={!!busyKey} error={actionError} onSubmit={startGeneration} /></OutfitModal> : null}
     {active && selectedOutfit ? <OutfitModal title={selectedOutfit.name} onClose={closeModal}><OutfitDetails outfit={selectedOutfit} itemsById={itemsById} visible={visible}>{discoveryConfig?.ready ? <OwnedItemSwaps key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} fingerprint={fingerprint} active={visible} /> : null}</OutfitDetails></OutfitModal> : null}
-    {active && selectedJob ? <OutfitModal title={`${selectedJob.count} outfit ${selectedJob.count === 1 ? "idea" : "ideas"}`} className="outfit-review-modal" onClose={closeModal}><ReviewJob key={selectedJob.id} job={selectedJob} itemsById={itemsById} busy={!!busyKey} error={actionError} onAction={outfitAction} onRetryJob={retryJob} visible={visible} /></OutfitModal> : null}
+    {active && selectedJob ? <OutfitModal title={`${selectedJob.count} outfit ${selectedJob.count === 1 ? "idea" : "ideas"}`} className="outfit-review-modal" onClose={closeModal}><ReviewJob key={selectedJob.id} job={selectedJob} itemsById={itemsById} busy={!!busyKey} error={actionError} onAction={outfitAction} onRetryJob={retryJob} visible={visible} imageChecksReady={config?.imageChecks?.ready} /></OutfitModal> : null}
   </main>;
 }

@@ -18,10 +18,10 @@ const storageError = (file, detail) => Object.assign(new Error(`${file}: ${detai
 // the filesystem's per-component length limit.
 const temporarySibling = (file) => path.join(path.dirname(file), `.outfit-write-${randomUUID()}.tmp`);
 
-export async function atomicJson(file, value) {
+export async function atomicJson(file, value, { mode } = {}) {
   const temporary = temporarySibling(file);
   try {
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", ...(mode === undefined ? {} : { mode }) });
     await rename(temporary, file);
   } finally { await rm(temporary, { force: true }); }
 }

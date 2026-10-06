@@ -69,7 +69,9 @@ Modeled-photo and Shopping uploads use their own preparation rules below.
 
 Open **Outfits** or `/outfits` to browse photographs, styling notes and the exact wardrobe pieces used. Choose **Generate outfits**, request 1–12 looks, add optional styling direction, and select a model reference. Planning uses garment images and metadata; each combination gets a square modeled photograph.
 
-Optional **Find a saved look** searches your accepted outfits with a brief such as “dinner, slightly overdressed, but not corporate.” Refine the matches toward understated or statement looks, or favour pieces that appear in fewer saved outfits. Open a saved look and use **Change one piece** to compare replacement cutouts from your own wardrobe. Suggestions do not alter the saved outfit or generate photographs. Enable these features with the server-only TypeSafe key and flag described in [Outfit discovery](docs/OUTFIT_DISCOVERY.md).
+Optional **Find a saved look** searches your accepted outfits with a brief such as “dinner, slightly overdressed, but not corporate.” Refine the matches toward understated or statement looks, or favour pieces that appear in fewer saved outfits. Open a saved look and use **Change one piece** to compare replacement cutouts from your own wardrobe. Suggestions do not alter the saved outfit or generate photographs. Search and swaps examine saved photographs and garment cutouts through OpenAI Decisions. Optional **Check crop quality** and **Check photo against pieces** flag concerns for your review without accepting or regenerating anything. Enable these features with the existing server-only OpenAI key and flag described in [Outfit discovery](docs/OUTFIT_DISCOVERY.md).
+
+Use the [Decisions evaluation runner](docs/DECISIONS_EVALUATION.md) to prepare a private 25-case pilot, compare judgments with human labels, replay thresholds and measure usage. It defaults to offline planning; live runs require an explicit call limit. Runtime Decisions usage is recorded separately from generation telemetry, including cached work, refusals and unknown interrupted calls.
 
 The web generator requires exactly one top and one bottom per look, with at most one outer layer, one pair of shoes and one accessory. It currently excludes dresses. Top-and-bottom pairs must differ from saved looks and active candidates; changing optional pieces does not make a pair new. Generation requires an API key, a reference and enough unused pairs.
 
@@ -126,8 +128,8 @@ Agents setting up Wardrobe should establish whether the user wants Codex-assiste
 | `OPENAI_MODELED_MODEL` | Overrides the image model for modeled pieces and outfits |
 | `OPENAI_IMAGE_QUALITY` | `high` |
 | `OPENAI_API_BASE_URL` | `https://api.openai.com/v1` |
-| `WARDROBE_JEV_ENABLED` | `0`; set to `1` to show saved-outfit discovery and owned-item swaps |
-| `TYPESAFE_API_KEY` | Separate server-only TypeSafe credential; Jev is pinned to `jev-1.13.0` |
+| `WARDROBE_DECISIONS_ENABLED` | `0`; set to `1` for image-aware saved-look search, owned-piece swaps and optional image checks |
+| `OPENAI_DECISIONS_MODEL` | `gpt-6-luna`; uses the existing server-only `OPENAI_API_KEY` |
 | `WARDROBE_DATA_DIR` | `data`; local storage directory |
 | `WARDROBE_MODEL_REFERENCE` | `data/model-reference.png`; local default identity reference |
 

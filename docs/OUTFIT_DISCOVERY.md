@@ -1,64 +1,75 @@
-# Saved-outfit discovery with Jev
+# Image-aware discovery and checks with OpenAI Decisions
 
-The optional discovery feature reuses accepted outfits and existing garment cutouts. It adds:
-
-- **Find a saved look** on Outfits: enter a mood or occasion and browse matching saved photographs and their existing notes.
-- **Best match / More understated / More statement** and **Favour pieces in fewer saved looks**: reorder the same judgments locally without another request. Saved appearances are not actual wearing history.
-- **Change one piece** in a saved look: select a piece and describe the change. Compare up to six owned alternatives in that category beside the original photo. Other pieces remain fixed; the saved outfit is never modified.
-
-Detection, Shopping assessments, scene planning, accessory prose and image generation retain their existing providers and approval workflows.
+Wardrobe uses the [Decisions API](https://developers.openai.com/api/reference/resources/decisions/methods/create) for small, constrained visual judgments. This replaces the TypeSafe Jev adapter. Decisions receives actual saved photographs and garment cutouts alongside bounded metadata.
 
 ## Enable
 
-In ignored local `.env` configuration, set these server-only values and restart Vite:
+Use the existing server-only OpenAI key and set:
 
 ```dotenv
-WARDROBE_JEV_ENABLED=1
-TYPESAFE_API_KEY=your-typesafe-key
+WARDROBE_DECISIONS_ENABLED=1
+OPENAI_DECISIONS_MODEL=gpt-6-luna
 ```
 
-For hosted use, set both in Vercel **Production only**, keep All Deployments authentication enabled, and redeploy. Do not add a `VITE_` prefix or commit credentials. The flag defaults off. With the flag on but no key, browsing remains available and the finder explains that discovery is unavailable. A provider failure restores ordinary browsing; **Browse all** also clears results at any time.
+The flag defaults off. `OPENAI_API_KEY` and the existing `OPENAI_API_BASE_URL` configuration are shared with other OpenAI features. No new credential or SDK dependency is required. Do not prefix these variables with `VITE_`, expose the key to the browser or commit secrets. The old `WARDROBE_JEV_ENABLED` and `TYPESAFE_API_KEY` variables are unused; they do not enable Decisions or provide a fallback provider.
 
-## API and data boundaries
+For hosted use, add the new flag to the intended deployment environment and redeploy while retaining All Deployments authentication. Enabling a flag is separate from verifying API access. The public reference lists Decisions as a beta API; account access, actual latency, visual quality and Decisions billing must be checked in a separately authorized bounded live evaluation. Offline fixtures prove integration contracts, not model accuracy or savings.
 
-`scripts/jev.mjs` uses native fetch with the [TypeSafe HTTP API](https://docs.typesafe.ai/api) at `POST https://api.typesafe.ai/v1/systemone`. It pins the [documented model](https://docs.typesafe.ai/models) `jev-1.13.0`. The key never reaches the browser.
+## Saved-look search and owned-piece swaps
 
-`scripts/outfit-discovery-api.mjs` exposes:
+- **Find a saved look** searches accepted looks against an occasion or mood. Each candidate includes its saved photo and the actual cutouts of its selected garments.
+- **Best match / More understated / More striking** and **Favour pieces in fewer saved looks** reorder the existing judgments locally. Saved appearances are not wearing history.
+- **Change one piece** compares up to six owned alternatives in the same category. Decisions sees the original outfit photo, original piece, fixed-piece cutouts and candidate cutouts. Its prompt explicitly distinguishes the existing photograph from the proposed replacement. It does not generate a preview or change the saved look.
 
 | Route | Request / result |
 | --- | --- |
-| `GET /api/outfits/discovery/config` | `{ enabled, ready }`; no credentials |
-| `POST /api/outfits/discovery/rank` | `{ brief }`; scores every eligible accepted outfit |
-| `POST /api/outfits/discovery/swaps` | `{ brief, outfitId, garmentId }`; scores available same-category pieces outside that outfit |
+| `GET /api/outfits/discovery/config` | `{ enabled, ready }`; no credential |
+| `POST /api/outfits/discovery/rank` | `{ brief }`; scores all eligible accepted looks |
+| `POST /api/outfits/discovery/swaps` | `{ brief, outfitId, garmentId }`; scores available same-category owned alternatives |
 
-POSTs require same-origin JSON, a nonempty brief of at most 500 characters and a body of at most 4 KiB. Inputs never provide the candidate inventory: the server reads current records. Hidden/deleted pieces, missing cutouts and unavailable saved photographs are excluded. Only accepted outfits whose complete membership is still available are eligible. Saved outfits that cannot be searched remain accessible through ordinary browsing.
+POSTs require same-origin JSON, a nonempty brief of at most 500 characters and a body of at most 4 KiB. The server reads current inventory; requests cannot supply arbitrary source files or candidate records. Hidden/deleted garments, missing cutouts and unavailable saved photos are excluded. All selected pieces must still exist.
 
-TypeSafe receives the brief, bounded names, categories, tags, approximate colour names, outfit occasions and styling notes; swap requests also include the original and fixed pieces. Hex colours are converted in code. No photograph bytes, image URLs, identity references, internal prompts, or arbitrary record fields are sent. Metadata reads and contained-file checks precede scoring without downloading garment or outfit images.
+OpenAI receives the brief, bounded names/categories/tags/approximate colour names, occasions, styling notes and labeled visual evidence. Private storage URLs, local paths, credentials, identity-reference files, generation prompts and arbitrary internal record fields are omitted. The selected photos themselves can depict the user. Images are sent as inline JPEG data URLs, as required by Decisions; they are never fetched through caller-provided URLs.
 
-Each candidate gets a comparable suitability Score, an understated-to-statement Score and a separate sufficient/unknown evidence Choice. IDs come from server candidates. Responses must contain valid numeric values and the pinned model. The API returns `rankings`, `rankedIds`, `unknownCount`, `candidateCount`, `cached`, and `inputTokens`. Confidence is retained as a model signal, not displayed as a guarantee of a good outfit. An evidence answer of `unknown` never becomes a forced recommendation.
+Three named choice questions judge suitability, evidence sufficiency and statement level for each candidate. Suitability choices map to ordinal weights `0, 1/3, 2/3, 1`; statement choices map to `0, 1/2, 1`. Probability-weighted values preserve comparable continuous rankings without relying on undocumented score-scale behavior. IDs always come from server candidates. A refusal in any question, an unknown evidence answer or evidence confidence below `0.6` makes that candidate unknown.
 
-The initial display heuristic includes sufficient-evidence candidates with normalized suitability at least `0.5`. Style preference adds up to `0.2`, and lower saved usage adds up to `0.15`, to the sorting value without rescuing unsuitable/unknown candidates. These are product defaults, not empirically calibrated fashion-quality thresholds. Zero qualifying candidates produces an explicit no-match state.
+The existing display threshold requires sufficient evidence and suitability at least `0.5`. Local style preferences add up to `0.2`, and lower saved usage adds up to `0.15`, only for sorting already qualifying candidates. These values are uncalibrated product heuristics. Empty results remain an explicit no-match state. Errors preserve ordinary browsing.
 
-## Cost, caching and freshness
+## Optional image checks
 
-- Up to 12 candidates per request; all candidates are covered, with no silent shortlist. Each provider payload is bounded to 55,000 UTF-8 bytes, including at most 24,000 state bytes. Oversized payloads fail with an explanatory browsing fallback.
-- The whole interaction has a 12-second provider-work deadline. Completed batches can be reused if a later batch times out. No automatic paid retries. A disconnected browser stops subsequent batches; an already dispatched batch can finish and populate the shared cache.
-- A bounded process-local cache holds up to 64 batch results for 15 minutes. Its key includes the brief, model, question version, current wardrobe/collection metadata, file availability, data directory and a hash incorporating the server credential. It survives fresh plugin instances in a warm process, but cold starts can make new calls. Nothing is persisted to library manifests or browser storage.
-- Duplicate in-flight batches share work. At most two distinct provider requests run per process. Hosted requests retain the existing cloud writer lease.
-- Each actual hosted batch reserves one existing text API allowance immediately before dispatch. Cache hits, identical in-flight callers and empty candidate sets reserve none. Failed/uncertain dispatches still count. Local development has the same behaviour as other local model APIs: no hosted daily quota enforcement.
-- `inputTokens` reports newly billed provider input tokens when supplied, zero for cached work, or null if unavailable. It is not a currency estimate or a durable usage ledger.
-- The server rereads metadata and availability after scoring; a changed snapshot returns 409. The browser cancels stale requests and invalidates results when wardrobe or collection metadata changes. Removing a piece or editing a saved brief never leaves old results presented as current matches.
+Checks run only when the user clicks a button. Opening, polling, generation, crop approval and photo acceptance do not invoke Decisions automatically.
+
+| Control and route | Evidence and judgments |
+| --- | --- |
+| **Check crop quality**; `POST /api/import/jobs/:id/preflight` | Original source and current detected crop; item completeness, selection clarity and visible detail |
+| **Check photo against pieces**; `POST /api/outfits/jobs/:id/outfits/:outfitId/check` | Current review photo and every selected garment cutout; fidelity, visibility, anatomy, framing and extra pieces |
+
+These routes accept an empty JSON object, require a current review state, and retain the existing origin, authentication and quota boundaries. They return `{ checks, status, cached, inputTokens, usage, model }` with independent `clear / concern / unknown` judgments. Per-question refusals and confidence below `0.75` become unknown. The combined status is `needs-review`, `uncertain` or `no-obvious-issues`; none is an acceptance decision.
+
+Plain black/brown tights, invisible basics and plain neutral shoes when no shoe reference was supplied remain permitted by the outfit rubric. Identity matching, exact fit and hidden details remain human review responsibilities. Checks do not approve, reject, crop, regenerate, change metadata or persist advice in manifests. The existing detection API still supplies garment names, categories, colours, tags and bounding boxes.
+
+## Bounds, freshness and cost controls
+
+- Discovery covers every candidate in batches of 12. A shared deadline of 12 seconds includes image preparation and provider work. A later failure can reuse completed cached batches on an explicit retry; no automatic paid retries occur.
+- Source images are limited to 30 MiB and 50 million decoded pixels. Preparation rotates, flattens transparent cutouts onto white, strips metadata and resizes to at most 768 by 768 pixels. It preserves originals. Provider bodies are limited to 8 MiB; discovery metadata to 24,000 UTF-8 bytes. Image evidence is labeled explicitly.
+- The shared client validates exact model, answer count/order/names/types, allowed choices and probability distributions. Provider errors are sanitized. Timeouts bound fetch and response parsing even if a transport ignores abort.
+- A process cache holds up to 64 validated result sets for 15 minutes. Keys incorporate purpose/version, model, endpoint, a credential hash, metadata and actual prepared visual evidence. Duplicate in-flight calls share work; at most two distinct requests run per process.
+- A separate image-preparation cache holds up to 64 entries and 16 MiB. Hosted cache identity comes from a fresh immutable Blob lookup; mutable local files are hashed from bytes. Warm hosted repeats can reuse prepared images without downloading originals again. Cold starts can repeat work.
+- Each actual hosted dispatch reserves one existing text API allowance. Cache hits and duplicate callers reserve none. Failed or uncertain dispatches count. `inputTokens` reports newly dispatched input usage, zero for cached work, or null when absent. Private `decision-usage/` records retain all supplied counters and distinguish provider, cache and shared callers; interruptions and missing counters remain unknown. Usage logging never persists visual advice or changes an approval.
+- Provider work uses the existing lease-release hook when supplied, then checks current metadata, review state and image identities after reacquiring ownership. A changed/deleted image or record returns 409 instead of stale advice. Disconnected discovery requests stop subsequent batches; already dispatched work may finish and populate the cache.
 
 ## Validation
 
 ```sh
-node --test scripts/jev.test.mjs scripts/outfit-discovery.test.mjs
+node --test scripts/decisions.test.mjs scripts/outfit-discovery.test.mjs scripts/decision-review.test.mjs scripts/import-job-api.test.mjs
 npm test
 npm run check
 npm run build:vercel
 git diff --check
 ```
 
-Contract tests use provider fixtures and cover request shape, cache reuse/invalidation, quotas, timeouts, invalid responses, unknown evidence, deletion during inference, fixed-piece swaps, payload bounds and batching. Browser checks should cover results, refinements without repeat calls, Browse all, empty states, errors, swaps, and narrow viewports.
+Use synthetic fixtures for contract, cache, quota, timeout, refusal, origin, deletion/replacement and review-state tests. Browser verification should cover image checks, search, refinements without another request, swaps, empty/error states and phone widths.
 
-Before treating the feature as quality-validated, run live Jev on representative accepted looks and your own briefs. Compare actual top matches, missed alternatives and unknown handling; record token usage and end-to-end latency. Contract and UI tests alone do not establish styling quality, image-generation savings or correctness of the initial display threshold.
+Before relying on the model judgments, compare live outputs with human-reviewed representative cases. Measure missed defects, unnecessary flags, ranking usefulness, input usage and latency. Keep uncertain cases visible and human acceptance in place; do not skip fuller audits or enable automatic rejection based only on fixture tests.
+
+The [Decisions evaluation runner](DECISIONS_EVALUATION.md) prepares a private 25-case scaffold, shares the production image-review rubric, freezes run inputs and human labels, replays calibration thresholds offline, and reports complete usage with rate-based cost ranges. `npm run decisions:eval` is offline unless `--run` and a call cap are explicitly supplied. Runtime usage can be summarized with `npm run decisions:usage -- --target local|cloud`.

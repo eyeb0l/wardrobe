@@ -4,7 +4,7 @@ import path from "node:path";
 import * as fs from "node:fs/promises";
 import { wardrobeDiscoveryApi } from "./outfit-discovery-api.mjs";
 import { harness } from "./test-helpers/outfit-harness.mjs";
-import { jevResponse } from "./test-helpers/jev-response.mjs";
+import { decisionsResponse, decisionMetadata } from "./test-helpers/decisions-response.mjs";
 import { withStorage } from "./storage-fs.mjs";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -14,12 +14,12 @@ async function setup(t, options = {}) {
   const h = await harness(t);
   await h.close();
   const calls = [], charges = [];
-  const env = { WARDROBE_DATA_DIR: h.dataDir, WARDROBE_JEV_ENABLED: "1", TYPESAFE_API_KEY: "fake-test-key", ...options.env };
+  const env = { WARDROBE_DATA_DIR: h.dataDir, WARDROBE_DECISIONS_ENABLED: "1", OPENAI_API_KEY: "fake-test-key", ...options.env };
   const make = () => wardrobeDiscoveryApi({ env, timeoutMs: options.timeoutMs, beforePaidCall: async (kind) => { charges.push(kind); }, fetch: async (url, init) => {
-    assert.equal(url, "https://api.typesafe.ai/v1/systemone");
+    assert.equal(url, "https://api.openai.com/v1/decisions");
     const body = JSON.parse(init.body); calls.push(body);
     if (options.fetch) return options.fetch(body);
-    return Response.json(jevResponse(body));
+    return Response.json(decisionsResponse(body));
   } });
   let plugin = make();
   await plugin.configResolved({ root: h.root });
@@ -27,10 +27,10 @@ async function setup(t, options = {}) {
   return { ...h, calls, charges, request, get plugin() { return plugin; }, config: () => h.requestPlugin(plugin, "GET", `${API}/config`), restart: async () => { plugin = make(); await plugin.configResolved({ root: h.root }); } };
 }
 
-test("metadata-only discovery survives hosted instances, counts dispatches and invalidates edits", async (t) => {
+test("image-aware discovery survives hosted instances, counts dispatches and invalidates edits", async (t) => {
   const h = await setup(t);
   const reads = [];
-  const store = { ...fs, readFile: async (file, ...args) => { reads.push(file); assert.ok(file.endsWith(".json"), "no garment or outfit image bytes are downloaded"); return fs.readFile(file, ...args); } };
+  const store = { ...fs, readFile: async (file, ...args) => { reads.push(file); return fs.readFile(file, ...args); } };
   const before = await fs.readFile(path.join(h.dataDir, "outfits.json"), "utf8");
   assert.deepEqual(await h.config(), { enabled: true, ready: true });
   const result = await withStorage(store, () => h.request());
@@ -38,8 +38,9 @@ test("metadata-only discovery survives hosted instances, counts dispatches and i
   assert.equal(result.inputTokens, 123);
   assert.deepEqual(h.charges, ["text"]);
   const sent = JSON.stringify(h.calls[0]);
-  assert.doesNotMatch(sent, /\/api\/import|data:image|model-reference|#[a-f\d]{6}/i);
-  assert.equal(h.calls[0].state.candidates[0].garments[0].category, "top");
+  assert.match(sent, /data:image\/jpeg;base64/);
+  assert.doesNotMatch(sent, /\/api\/import|model-reference|fake-test-key/);
+  assert.equal(decisionMetadata(h.calls[0]).candidates[0].garments[0].category, "top");
   assert.ok(reads.length > 0);
   await h.restart();
   assert.equal((await h.request()).cached, true);
@@ -61,8 +62,8 @@ test("swaps only propose owned alternatives in the chosen category and keep the 
   const result = await h.request("swaps", { brief: "Less formal", outfitId: "original-1", garmentId: "top-1" });
   assert.equal(result.candidateCount, 5);
   assert.ok(result.rankedIds.every((id) => /^top-[2-6]$/.test(id)));
-  assert.deepEqual(h.calls[0].state.context.fixedPieces.map(({ id }) => id), ["bottom-1"]);
-  assert.equal(h.calls[0].state.context.original.id, "top-1");
+  assert.deepEqual(decisionMetadata(h.calls[0]).context.fixedPieces.map(({ id }) => id), ["bottom-1"]);
+  assert.equal(decisionMetadata(h.calls[0]).context.original.id, "top-1");
   await h.request("swaps", { brief: "Dinner", outfitId: "not-saved", garmentId: "top-1" }, 409);
   await h.request("swaps", { brief: "Dinner", outfitId: "original-1", garmentId: "top-6" }, 400);
   assert.equal(h.calls.length, 1);
@@ -72,7 +73,7 @@ test("deletions during an in-flight search never publish stale recommendations",
   let reached, release;
   const started = new Promise((resolve) => { reached = resolve; });
   const gate = new Promise((resolve) => { release = resolve; });
-  const h = await setup(t, { fetch: async (body) => { reached(); await gate; return Response.json(jevResponse(body)); } });
+  const h = await setup(t, { fetch: async (body) => { reached(); await gate; return Response.json(decisionsResponse(body)); } });
   const pending = h.request("rank", { brief: "Dinner" }, 409);
   await started;
   await fs.unlink(path.join(h.dataDir, "imported", "top-1.png"));
@@ -84,10 +85,9 @@ test("deletions during an in-flight search never publish stale recommendations",
 
 test("empty inventory, unknown evidence and weak matches have explicit empty results", async (t) => {
   const h = await setup(t, { fetch: async (body) => {
-    const value = jevResponse(body);
-    for (const key of Object.keys(value.answers)) {
-      if (key.startsWith("evidence")) value.answers[key].choice = "unknown";
-      if (key.startsWith("match")) value.answers[key].score = .3;
+    const value = decisionsResponse(body);
+    for (const answer of value.answers) {
+      if (answer.name.startsWith("evidence")) answer.choice = "unknown";
     }
     return Response.json(value);
   } });
@@ -106,7 +106,7 @@ test("feature gates, origins, methods and input limits are enforced before paid 
   for (const body of [[], null, "not json", { brief: "" }, { brief: "x".repeat(501) }]) await h.request("rank", body, 400);
   await h.request("rank", { brief: "x".repeat(5000) }, 413);
   assert.equal(h.calls.length, 0);
-  const disabled = await setup(t, { env: { WARDROBE_JEV_ENABLED: "0" } });
+  const disabled = await setup(t, { env: { WARDROBE_DECISIONS_ENABLED: "0" } });
   assert.deepEqual(await disabled.config(), { enabled: false, ready: false });
   await disabled.request("rank", { brief: "Dinner" }, 503);
   assert.equal(disabled.calls.length, 0);
@@ -118,7 +118,7 @@ test("large collections are fully scored in bounded batches and reuse cached bat
   await fs.writeFile(path.join(h.dataDir, "outfits.json"), JSON.stringify({ version: 1, outfits }));
   const result = await h.request();
   assert.equal(result.candidateCount, 30); assert.equal(result.rankings.length, 30);
-  assert.deepEqual(h.calls.map((call) => call.state.candidates.length), [12, 12, 6]);
+  assert.deepEqual(h.calls.map((call) => decisionMetadata(call).candidates.length), [12, 12, 6]);
   assert.equal(h.charges.length, 3);
   const repeated = await h.request();
   assert.equal(repeated.cached, true); assert.equal(repeated.inputTokens, 0);
@@ -131,7 +131,7 @@ test("a disconnected browser never dispatches the remaining batches", async (t) 
   const gate = new Promise((resolve) => { release = resolve; });
   const done = new Promise((resolve) => { finished = resolve; });
   const closed = new Promise((resolve) => { disconnected = resolve; });
-  const h = await setup(t, { fetch: async (body) => { reached(); await gate; return Response.json(jevResponse(body)); } });
+  const h = await setup(t, { fetch: async (body) => { reached(); await gate; return Response.json(decisionsResponse(body)); } });
   const outfits = Array.from({ length: 30 }, (_, index) => ({ ...h.originals[index % 6], id: `many-${index}` }));
   await fs.writeFile(path.join(h.dataDir, "outfits.json"), JSON.stringify({ version: 1, outfits }));
   let handler;
