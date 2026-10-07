@@ -3,7 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { decide, hashEvidence, DECISIONS_MODEL, validateDecisionAnswers } from "./decisions.mjs";
 import { prepareEvidence, evidenceUnchanged } from "./decision-images.mjs";
-import { imageCheckRequest, imageCheckRubric, formatImageChecks, IMAGE_CHECK_CONFIDENCE } from "./decision-checks.mjs";
+import { imageCheckRequest, imageCheckRubric, formatImageChecks, IMAGE_CHECK_CONFIDENCE, IMAGE_CHECK_VERSION } from "./decision-checks.mjs";
 import { defaultDecisionPricing, validateDecisionPricing, summarizeDecisionUsage } from "./decision-usage.mjs";
 
 export class EvaluationError extends Error {}
@@ -118,13 +118,13 @@ async function containedEvidence(base, entries) {
   }));
 }
 
-async function prepareSchedule(manifest, base, model) {
+async function prepareSchedule(manifest, base, model, rubricVersion) {
   const items = []; let totalBytes = 0;
   for (const item of manifest.cases) {
     if (!item.evidence.length) { items.push({ ...item, requestHash: null, input: null, preparationMs: 0 }); continue; }
     const started = Date.now(), entries = await containedEvidence(base, item.evidence), images = await prepareEvidence(entries);
     insist(await evidenceUnchanged(images), "Evaluation evidence changed while preparing the run.");
-    const request = { model, ...imageCheckRequest(item.kind, { images, metadata: item.metadata }) };
+    const request = { model, ...imageCheckRequest(item.kind, { images, metadata: item.metadata, rubricVersion }) };
     const bytes = Buffer.byteLength(JSON.stringify(request)); totalBytes += bytes;
     insist(bytes <= 8 * 1024 * 1024 && totalBytes <= 64 * 1024 * 1024, "Evaluation evidence exceeds the per-request or 64 MiB suite limit. Select fewer cases.");
     items.push({ ...item, requestHash: hashEvidence(request), input: request, preparationMs: Date.now() - started,
@@ -134,12 +134,12 @@ async function prepareSchedule(manifest, base, model) {
 }
 
 const percentile = (values, fraction) => values.length ? [...values].sort((a, b) => a - b)[Math.max(0, Math.ceil(values.length * fraction) - 1)] : null;
-function scoreCases(cases, attempts, threshold) {
+function scoreCases(cases, attempts, threshold, rubricVersion) {
   const byCheck = new Map(), rows = [];
   for (const item of cases) {
     const attempt = attempts[item.id], result = attempt?.result;
-    const predictions = result ? formatImageChecks(item.kind, result, threshold).checks : [];
-    const checks = imageCheckRubric(item.kind).map(check => {
+    const predictions = result ? formatImageChecks(item.kind, result, threshold, rubricVersion).checks : [];
+    const checks = imageCheckRubric(item.kind, rubricVersion).map(check => {
       const expected = item.expected[check.name], predicted = predictions.find(prediction => prediction.id === check.name)?.state ?? null;
       const key = `${item.kind}:${check.name}`;
       if (!byCheck.has(key)) byCheck.set(key, { kind: item.kind, id: check.name, labeled: 0, evaluated: 0, unevaluated: 0,
@@ -166,12 +166,12 @@ function scoreCases(cases, attempts, threshold) {
 }
 
 export function summarizeDecisionEvaluation(ledger) {
-  const attempts = Object.values(ledger.attempts), cases = ledger.cases;
+  const attempts = Object.values(ledger.attempts), cases = ledger.cases, rubricVersion = ledger.rubricVersion ?? IMAGE_CHECK_VERSION;
   const records = attempts.flatMap(attempt => attempt.usageRecord ? [attempt.usageRecord] : attempt.state !== "blocked" ? [{ source: "provider", dispatchState: "unknown", outcome: attempt.state === "failed" ? "failed" : "unknown", model: ledger.model }] : []);
   const timings = records.map(record => record.elapsedMs).filter(value => Number.isFinite(value));
   const preparation = cases.filter(item => item.requestHash).map(item => item.preparationMs);
   const combined = cases.flatMap(item => Number.isFinite(ledger.attempts[item.id]?.usageRecord?.elapsedMs) ? [item.preparationMs + ledger.attempts[item.id].usageRecord.elapsedMs] : []);
-  return { version: 1, generatedAt: now(), model: ledger.model, manifestHash: ledger.manifestHash, rubricHash: ledger.rubricHash,
+  return { version: 1, generatedAt: now(), model: ledger.model, rubricVersion, manifestHash: ledger.manifestHash, rubricHash: ledger.rubricHash,
     maxCalls: ledger.maxCalls, requestedCases: cases.length, pendingLabelsOrImages: cases.filter(item => !item.ready).map(item => item.id),
     providerUsage: summarizeDecisionUsage(records, ledger.pricing),
     latencyMs: { count: timings.length, median: percentile(timings, .5), p95: percentile(timings, .95),
@@ -179,14 +179,15 @@ export function summarizeDecisionEvaluation(ledger) {
       combined: { count: combined.length, median: percentile(combined, .5), p95: percentile(combined, .95) },
       note: "Request wall time includes quota and logging. Combined time adds measured image preparation; it is not a hosted end-to-end benchmark. p95 is exploratory for small samples." },
     defaultThreshold: ledger.threshold,
-    calibration: [...new Set([.5, .6, ledger.threshold, .85, .9])].sort((a, b) => a - b).map(threshold => scoreCases(cases.filter(item => item.split === "calibration"), ledger.attempts, threshold)),
-    confirmation: scoreCases(cases.filter(item => item.split === "confirmation"), ledger.attempts, ledger.threshold),
+    calibration: [...new Set([.5, .6, ledger.threshold, .85, .9])].sort((a, b) => a - b).map(threshold => scoreCases(cases.filter(item => item.split === "calibration"), ledger.attempts, threshold, rubricVersion)),
+    confirmation: scoreCases(cases.filter(item => item.split === "confirmation"), ledger.attempts, ledger.threshold, rubricVersion),
     note: "Only human-reviewed labels are ground truth. Unknowns and refusals require review. Provider failures remain unevaluated. This report does not authorize audit skipping or automatic acceptance." };
 }
 
 export function renderDecisionEvaluation(report) {
   const base = report.calibration.find(item => item.threshold === report.defaultThreshold);
   const lines = ["# Decisions image evaluation", "", `Model: ${report.model}. Current review threshold: ${report.defaultThreshold}.`, "",
+    `Rubric version: ${report.rubricVersion}.`, "",
     `${report.requestedCases} selected cases; ${report.pendingLabelsOrImages.length} still need images or human labels.`, "",
     `Provider calls: ${report.providerUsage.providerCalls}; failures: ${report.providerUsage.failed}; unfinished: ${report.providerUsage.unfinished}.`, "",
     `Observed input tokens: ${report.providerUsage.usage.inputTokens.observed}; calls with unknown input usage: ${report.providerUsage.usage.inputTokens.unknownCalls}.`, "",
@@ -202,9 +203,10 @@ export function renderDecisionEvaluation(report) {
   return lines.join("\n");
 }
 
-export async function runDecisionEvaluation({ manifestPath, outDir, run = false, maxCalls, caseIds, split, pricing,
+export async function runDecisionEvaluation({ manifestPath, outDir, run = false, maxCalls, caseIds, split, pricing, rubricVersion = IMAGE_CHECK_VERSION,
   env = process.env, fetch: fetchImpl = fetch, onProgress = () => {} }) {
   insist(manifestPath && outDir, "Specify --manifest and --out.");
+  imageCheckRubric("outfit-review", rubricVersion);
   insist(maxCalls === undefined || (Number.isSafeInteger(maxCalls) && maxCalls > 0 && maxCalls <= 100), "--max-calls must be 1..100.");
   insist(!run || (Number.isSafeInteger(maxCalls) && maxCalls > 0 && maxCalls <= 100), "Live evaluation requires --max-calls 1..100.");
   const model = env.OPENAI_DECISIONS_MODEL?.trim() || DECISIONS_MODEL;
@@ -218,8 +220,8 @@ export async function runDecisionEvaluation({ manifestPath, outDir, run = false,
   insist(manifest.cases.length, "The case selection is empty.");
   if (run) insist(manifest.cases.every(item => item.ready), "Selected cases need complete human labels, a review date and image evidence before live evaluation.");
   const selectedPricing = pricing ? validateDecisionPricing(pricing, model) : defaultDecisionPricing(model, endpoint);
-  const schedule = await prepareSchedule(manifest, path.dirname(path.resolve(manifestPath)), model);
-  const manifestHash = hashEvidence(manifest), rubricHash = hashEvidence([IMAGE_CHECK_CONFIDENCE, imageCheckRequest("outfit-review", { images: [], metadata: {} }), imageCheckRequest("preflight", { images: [], metadata: {} })]);
+  const schedule = await prepareSchedule(manifest, path.dirname(path.resolve(manifestPath)), model, rubricVersion);
+  const manifestHash = hashEvidence(manifest), rubricHash = hashEvidence([IMAGE_CHECK_CONFIDENCE, imageCheckRequest("outfit-review", { images: [], metadata: {}, rubricVersion }), imageCheckRequest("preflight", { images: [], metadata: {}, rubricVersion })]);
   outDir = path.resolve(outDir);
   await privateDirectory(outDir);
   const lock = path.join(outDir, ".runner-lock");
@@ -228,10 +230,10 @@ export async function runDecisionEvaluation({ manifestPath, outDir, run = false,
     const ledgerPath = path.join(outDir, "ledger.json");
     const stored = await json(ledgerPath, null);
     const cases = schedule.map(({ input, evidence, metadata, ...item }) => item);
-    const descriptor = { manifestHash, rubricHash, model, threshold: IMAGE_CHECK_CONFIDENCE, endpointHash: hashEvidence(endpoint), pricing: selectedPricing, cases };
+    const descriptor = { manifestHash, rubricHash, rubricVersion, model, threshold: IMAGE_CHECK_CONFIDENCE, endpointHash: hashEvidence(endpoint), pricing: selectedPricing, cases };
     const ledger = stored || { version: 1, ...descriptor, maxCalls: maxCalls ?? null, attempts: {}, createdAt: now() };
     if (stored) {
-      insist(ledger.version === 1 && ledger.manifestHash === manifestHash && ledger.rubricHash === rubricHash && ledger.model === model
+      insist(ledger.version === 1 && (ledger.rubricVersion ?? IMAGE_CHECK_VERSION) === rubricVersion && ledger.manifestHash === manifestHash && ledger.rubricHash === rubricHash && ledger.model === model
         && ledger.threshold === IMAGE_CHECK_CONFIDENCE
         && ledger.endpointHash === descriptor.endpointHash && hashEvidence(ledger.pricing) === hashEvidence(selectedPricing)
         && hashEvidence(ledger.cases.map(({ preparationMs, ...item }) => item)) === hashEvidence(cases.map(({ preparationMs, ...item }) => item)), "Frozen run changed. Preserve it and choose a new output directory.");
@@ -239,7 +241,7 @@ export async function runDecisionEvaluation({ manifestPath, outDir, run = false,
         && object(attempt) && ["dispatching", "succeeded", "refused", "failed", "blocked"].includes(attempt.state)
         && attempt.requestHash === cases.find(item => item.id === id).requestHash
         && (!["succeeded", "refused"].includes(attempt.state) || attempt.result)), "Evaluation ledger is invalid; preserve and repair it before continuing.");
-      try { for (const [id, attempt] of Object.entries(ledger.attempts)) if (attempt.result) validateDecisionAnswers(attempt.result, imageCheckRubric(cases.find(item => item.id === id).kind).map(item => item.question), model); }
+      try { for (const [id, attempt] of Object.entries(ledger.attempts)) if (attempt.result) validateDecisionAnswers(attempt.result, imageCheckRubric(cases.find(item => item.id === id).kind, rubricVersion).map(item => item.question), model); }
       catch { throw new EvaluationError("Recorded answers are invalid; preserve and repair the ledger before continuing."); }
       if (run && ledger.maxCalls !== null) insist(ledger.maxCalls === maxCalls, "A resumed run must keep its original call limit.");
       if (run && ledger.maxCalls === null) ledger.maxCalls = maxCalls;

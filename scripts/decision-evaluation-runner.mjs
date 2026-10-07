@@ -5,7 +5,7 @@ import { initializeDecisionEvaluation, runDecisionEvaluation, EvaluationError } 
 
 const help = `Decisions image evaluation (offline by default)
   npm run decisions:eval -- --init data/decisions-evaluation/dataset
-  npm run decisions:eval -- --manifest PATH --out PRIVATE_RUN_DIR [--cases ID,ID] [--split calibration|confirmation]
+  npm run decisions:eval -- --manifest PATH --out PRIVATE_RUN_DIR [--cases ID,ID] [--split calibration|confirmation] [--rubric-version 1|2]
   npm run decisions:eval -- --manifest PATH --out PRIVATE_RUN_DIR --run --max-calls 25 [--pricing PRICING_JSON]
 
 Use the existing OPENAI_API_KEY through the environment or Node's --env-file.
@@ -19,12 +19,15 @@ export function parseEvaluationArgs(args) {
   for (let index = 0; index < args.length; index++) {
     const key = args[index];
     if (["--help", "--run"].includes(key)) { result[key.slice(2)] = true; continue; }
-    if (!["--init", "--manifest", "--out", "--max-calls", "--cases", "--split", "--pricing"].includes(key)
+    if (!["--init", "--manifest", "--out", "--max-calls", "--cases", "--split", "--pricing", "--rubric-version"].includes(key)
       || !args[index + 1] || args[index + 1].startsWith("--")) throw new EvaluationError("Unknown argument or missing value. Use --help.");
     const value = args[++index];
-    const name = { "--manifest": "manifestPath", "--out": "outDir", "--max-calls": "maxCalls", "--cases": "caseIds" }[key] || key.slice(2);
+    const name = { "--manifest": "manifestPath", "--out": "outDir", "--max-calls": "maxCalls", "--cases": "caseIds", "--rubric-version": "rubricVersion" }[key] || key.slice(2);
     if (name === "maxCalls") {
       if (!/^[0-9]+$/.test(value)) throw new EvaluationError("--max-calls must be an integer.");
+      result[name] = Number(value);
+    } else if (name === "rubricVersion") {
+      if (!["1", "2"].includes(value)) throw new EvaluationError("--rubric-version must be 1 or 2.");
       result[name] = Number(value);
     } else result[name] = name === "caseIds" ? value.split(",") : value;
   }

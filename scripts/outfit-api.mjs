@@ -9,7 +9,7 @@ import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishCandidateImage } from "./outfit-storage.mjs";
 import { acquireOutfitStoreLock } from "./outfit-store-lock.mjs";
 import { decisionsConfig, hashEvidence } from "./decisions.mjs";
-import { checkDecisionImages } from "./decision-checks.mjs";
+import { checkDecisionImages, imageCheckConfig } from "./decision-checks.mjs";
 import { decisionUsageLog } from "./decision-usage.mjs";
 
 const API = "/api/outfits";
@@ -421,7 +421,7 @@ export function wardrobeOutfitApi(options = {}) {
     const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
     const hasModelReference = refs.length > 0;
     const availableCombinations = Math.max(0, counts.upperbody * counts.lowerbody - (await usedPairs(items)).size);
-    return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), counts, maxCount: 12, availableCombinations, models: models(), imageChecks: decisionsConfig({ ...process.env, ...options.env }) };
+    return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), counts, maxCount: 12, availableCombinations, models: models(), imageChecks: imageCheckConfig("outfit-review", { ...process.env, ...options.env }) };
   }
 
   async function apiRequest(endpoint, init, telemetry, beforeTelemetry) {

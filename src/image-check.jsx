@@ -31,7 +31,7 @@ export function ImageCheck({ endpoint, fingerprint, enabled, disabled = false, a
   const result = current?.result;
   return <div className="wardrobe-image-check">
     <button type="button" className={kind === "preflight" ? "import-button" : "outfit-secondary"} disabled={disabled || !active || current?.busy} onClick={run}>{current?.busy ? "Checking image…" : kind === "preflight" ? "Check crop quality" : "Check photo against pieces"}</button>
-    <p className={kind === "preflight" ? "import-card__detail" : "outfit-small"}>{kind === "preflight" ? "Checks the detected crop against the original image. " : "Optional image check. "}Uses paid credits; you make the final decision.</p>
+    <p className={kind === "preflight" ? "import-card__detail" : "outfit-small"}>{kind === "preflight" ? "Checks the detected crop against the original image. " : "Optional image check; it can miss garment or anatomy problems. "}Uses paid credits; you make the final decision.</p>
     {current?.error ? <p role="alert" className={kind === "preflight" ? "import-field-error" : "outfit-error"}>{current.error}</p> : null}
     {result ? <div role="status" aria-live="polite">
       <p>{result.status === "no-obvious-issues" ? "No obvious issues found. Compare the image yourself before accepting." : result.status === "needs-review" ? "Some details need a closer look." : "The check is uncertain. Review these details yourself."}</p>

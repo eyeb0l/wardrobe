@@ -72,6 +72,8 @@ Each provider request reserves allowance immediately before dispatch under the w
 
 Set the server-only `WARDROBE_DECISIONS_ENABLED=1` flag in the intended environment, then redeploy, to enable image-aware saved-look search, owned-item swaps and optional crop/photo checks. It reuses `OPENAI_API_KEY`; `OPENAI_DECISIONS_MODEL` defaults to `gpt-6-luna`. The feature is off by default. Keep All Deployments authentication enabled. The existing authentication gate, writer lease and text quota reservations protect these endpoints. See [Outfit discovery](OUTFIT_DISCOVERY.md) for visual evidence, limits and validation. The old Jev flag and TypeSafe key are unused. Disable the new flag and redeploy to remove the controls without changing wardrobe data.
 
+For the guarded outfit-review candidate, set `WARDROBE_DECISIONS_OUTFIT_RUBRIC_VERSION=2` in **Preview only**, after verifying the existing isolated Preview storage and protection flags. It additionally requires `VERCEL_ENV=preview` and `WARDROBE_PREVIEW_ENABLED=1`; Vercel supplies `VERCEL_ENV`. Outfit checks use the full photo and selected cutouts in one five-question request. Crop checks and other environments retain version 1. The selected version is exposed as `imageChecks.rubricVersion` by `/api/outfits/config`. Human acceptance and fuller audits remain independent of these suggestions; no check runs automatically.
+
 ## Release code and retain data
 
 Run `npm test` and `npm run build:vercel` before release. Push reviewed code to the connected production branch, or make a Vercel CLI source deployment from the project checkout. `build:vercel` builds the frontend, hosted API, and workflows together.

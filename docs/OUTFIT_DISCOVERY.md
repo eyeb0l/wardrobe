@@ -46,6 +46,16 @@ Checks run only when the user clicks a button. Opening, polling, generation, cro
 
 These routes accept an empty JSON object, require a current review state, and retain the existing origin, authentication and quota boundaries. They return `{ checks, status, cached, inputTokens, usage, model }` with independent `clear / concern / unknown` judgments. Per-question refusals and confidence below `0.75` become unknown. The combined status is `needs-review`, `uncertain` or `no-obvious-issues`; none is an acceptance decision.
 
+### Preview outfit-review candidate
+
+For the isolated, protected Preview environment, set the server-only `WARDROBE_DECISIONS_OUTFIT_RUBRIC_VERSION=2` alongside `WARDROBE_DECISIONS_ENABLED=1`. Selection additionally requires Vercel's `VERCEL_ENV=preview` and the existing `WARDROBE_PREVIEW_ENABLED=1`. The outfit config's `imageChecks.rubricVersion` and check responses report the selected version. Production, local development, and crop checks retain version 1 even if the candidate selector is present. Removing the selector returns Preview outfit checks to version 1.
+
+The candidate asks all five questions together over the complete review photo and selected garment cutouts. It adds no neckline crops or automatic region selection. Its wording separates garment redesign from missing/hidden pieces and additional pieces, and names structural garment differences more explicitly. The confidence cutoff remains 0.75. Results are suggestions shown only after the existing manual Check photo against pieces action; they never approve, reject, regenerate, alter metadata or bypass fuller audits.
+
+The small live synthetic comparison found preserved garment-detail answers when batching the questions, while extra close-ups introduced uncertainty. Earlier cases still contained high-confidence missed defects, including a duplicated hand and competing garments. Human review remains necessary, including after a no-obvious-issues result. These observations support guarded Preview use rather than automatic acceptance or audit triage.
+
+During normal Preview use, preserve new cases privately and label their visible checks before evaluating a frozen candidate with the [evaluation runner](DECISIONS_EVALUATION.md). Include matching photos, subtle garment differences, anatomy failures and competing garments; keep derivatives in the same source family. Existing runtime usage records measure dispatch, failures, refusal outcomes and costs, but do not collect human accuracy labels or prove defect detection. No background quality checks or automatic paid retries are added.
+
 Plain black/brown tights, invisible basics and plain neutral shoes when no shoe reference was supplied remain permitted by the outfit rubric. Identity matching, exact fit and hidden details remain human review responsibilities. Checks do not approve, reject, crop, regenerate, change metadata or persist advice in manifests. The existing detection API still supplies garment names, categories, colours, tags and bounding boxes.
 
 ## Bounds, freshness and cost controls

@@ -135,6 +135,33 @@ test("frozen runs reject changed images, labels, rubric descriptors or call caps
   await assert.rejects(runDecisionEvaluation(config), /Frozen run changed/);
 });
 
+test("candidate rubric is opt-in, binds frozen runs and keeps legacy runs replayable", async t => {
+  const h = await fixture(t, [caseRecord("private-case", { notes: "PRIVATE RUBRIC GUIDE" })]);
+  let request, calls = 0;
+  const fetch = async (_, init) => { calls++; request = JSON.parse(init.body); return Response.json(responseFor(request)); };
+  const original = await runDecisionEvaluation({ ...h, run: true, maxCalls: 1, fetch });
+  const oldQuestions = request.questions;
+  const legacy = JSON.parse(await readFile(original.ledgerPath, "utf8"));
+  delete legacy.rubricVersion;
+  await writeFile(original.ledgerPath, JSON.stringify(legacy));
+  const replay = await runDecisionEvaluation({ ...h, fetch });
+  assert.equal(replay.rubricVersion, 1); assert.equal(replay.newProviderCalls, 0);
+  assert.deepEqual(replay.calibration, original.calibration);
+  await assert.rejects(runDecisionEvaluation({ ...h, run: true, maxCalls: 1, rubricVersion: 2, fetch }), /Frozen run changed/);
+  assert.equal(calls, 1);
+  const candidate = await runDecisionEvaluation({ ...h, outDir: path.join(h.dir, "candidate"), run: true, maxCalls: 1, rubricVersion: 2, fetch });
+  assert.equal(candidate.rubricVersion, 2); assert.notEqual(candidate.rubricHash, original.rubricHash);
+  assert.notDeepEqual(request.questions, oldQuestions);
+  assert.deepEqual(request.questions.map(q => q.name), oldQuestions.map(q => q.name));
+  assert.deepEqual(request.questions, imageCheckRequest("outfit-review", { images: [], metadata: {}, rubricVersion: 2 }).questions);
+  assert.doesNotMatch(JSON.stringify(request), /PRIVATE RUBRIC GUIDE|humanReviewed|expected|private-case/);
+  const candidateLedger = JSON.parse(await readFile(candidate.ledgerPath, "utf8"));
+  assert.equal(candidateLedger.rubricVersion, 2);
+  assert.deepEqual(summarizeDecisionEvaluation(candidateLedger).calibration, candidate.calibration);
+  await assert.rejects(runDecisionEvaluation({ ...h, rubricVersion: 3, fetch }), /rubric version/);
+  assert.equal(calls, 2);
+});
+
 test("manifest prevents family leakage, escaping paths, missing piece evidence and arbitrary metadata", async t => {
   const a = caseRecord("one"), b = caseRecord("two", { family: "one", split: "confirmation" });
   assert.throws(() => validateEvaluationManifest({ version: 1, name: "suite", cases: [a, b] }), /Related case families/);
@@ -163,6 +190,8 @@ test("call cap, ledger lock and corrupt saved answers fail closed", async t => {
 test("CLI help and strict arguments do not perform live work", () => {
   assert.deepEqual(parseEvaluationArgs(["--manifest", "suite.json", "--out", "run", "--cases", "a,b", "--run", "--max-calls", "2"]), { manifestPath: "suite.json", outDir: "run", caseIds: ["a", "b"], run: true, maxCalls: 2 });
   assert.throws(() => parseEvaluationArgs(["--run", "--max-calls", "NaN"])); assert.throws(() => parseEvaluationArgs(["--init", "new", "--run"]));
+  assert.deepEqual(parseEvaluationArgs(["--rubric-version", "2"]), { rubricVersion: 2 });
+  for (const value of ["0", "3", "02", "NaN"]) assert.throws(() => parseEvaluationArgs(["--rubric-version", value]), /rubric-version/);
   const child = spawnSync(process.execPath, ["scripts/decision-evaluation-runner.mjs", "--help"], { encoding: "utf8" });
   assert.equal(child.status, 0); assert.match(child.stdout, /offline by default/); assert.equal(child.stderr, "");
   assert.ok(validateEvaluationManifest(evaluationTemplate()).cases.every(item => !item.ready));

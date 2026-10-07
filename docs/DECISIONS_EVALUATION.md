@@ -91,6 +91,19 @@ Reports contain per-check confusion matrices and denominator counts, plus each c
 
 The calibration report replays thresholds 0.50, 0.60, the frozen production threshold (currently 0.75), 0.85 and 0.90 using saved validated answers; no additional API calls are needed. Confirmation stays at the frozen production threshold. Repeating the same runner command without `--run` regenerates reports offline, retains historical usage and reports zero **new** provider calls. Each cohort reports independent family counts and flags fewer than 30 families as a small sample. The 25-case pilot is for initial calibration, not a statistically strong assurance of quality.
 
+### Compare a versioned rubric
+
+App calls and evaluation runs default to rubric version 1. Version 2 is an explicit candidate: it separates visible redesign, missing pieces and added items, and gives more specific neckline, anatomy, framing and crop-selection instructions. Protected Preview outfit checks may opt in through `WARDROBE_DECISIONS_OUTFIT_RUBRIC_VERSION=2`, with `VERCEL_ENV=preview` and `WARDROBE_PREVIEW_ENABLED=1`; crop checks and other environments retain version 1. Preview uses the full image and five questions, with human acceptance and fuller audits retained. Select the candidate in the evaluation runner with `--rubric-version 2` in a **new** output directory; the threshold remains 0.75. The ledger binds the rubric version and question hash, and rejects resuming a run with a different rubric. Older ledgers without a version retain version 1 semantics when replayed.
+
+```sh
+npm run decisions:eval -- \
+  --manifest data/decisions-evaluation/dataset/suite.json \
+  --out data/decisions-evaluation/plans/rubric-v2 \
+  --split calibration --rubric-version 2
+```
+
+This example stays offline. Evaluating a revision does not activate it in the app. Preserve human labels and source families, include unchanged examples to measure warnings, and exclude previously evaluated confirmation cases from prompt tuning. Results on reused calibration evidence are exploratory; a revised rubric needs new independent confirmation evidence.
+
 Latency includes request wall time, measured image preparation and their sum. The combined value is not a hosted end-to-end benchmark. p95 is exploratory at this sample size. Include useful successes, subtle failures and ambiguous examples; do not select only obvious errors or tune on the confirmation set. Inspect individual mistakes alongside the aggregate report.
 
 ## Complete usage and cost accounting
