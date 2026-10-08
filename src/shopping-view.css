@@ -84,7 +84,7 @@
 .shopping-overlap-match figcaption { min-width: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .shopping-overlap-name, .shopping-overlap-status { display: block; }
 .shopping-overlap-status { margin-top: 4px; color: var(--muted); font-size: 11px; }
-.shopping-overlap-status.is-close { color: var(--accent); }
+.shopping-decision-note { margin-top: 14px; }
 .shopping-watch-outs ul { padding-left: 18px; margin: 0; }
 .shopping-watch-outs li + li { margin-top: 7px; }
 .shopping-pairings { margin-top: 35px; padding-top: 26px; border-top: 1px solid var(--line); }

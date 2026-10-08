@@ -129,21 +129,25 @@ function WardrobeGaps({ wardrobeItems, itemsById, loading, wardrobeError, config
 
 function VisualOverlap({ comparison, itemsById }) {
   if (!comparison) return null;
-  if (comparison.state === "unavailable") return <p className="shopping-small shopping-overlap-note" role="status">The individual-photo comparison couldn’t finish. The written assessment is still available; overlap remains unconfirmed.</p>;
-  if (comparison.state === "not-shortlisted") return <p className="shopping-small shopping-overlap-note">No close possibilities were shortlisted for individual-photo comparison. This doesn’t rule out overlap elsewhere in your wardrobe.</p>;
+  if (comparison.state !== "checked") return null;
   if (comparison.state !== "checked" || !Array.isArray(comparison.matches)) return null;
-  const labels = { "close-overlap": "Close overlap", different: "Meaningfully different", unclear: "Unclear" };
+  const labels = {
+    silhouette: { similar: "Similar silhouette", different: "Different silhouette", unclear: "Silhouette unclear" },
+    colour: { similar: "Similar colour/pattern", different: "Different colour/pattern", unclear: "Colour/pattern unclear" },
+    styling: { similar: "Similar styling possibilities", different: "Different styling possibilities", unclear: "Styling possibilities unclear" },
+  };
   return <div className="shopping-overlap">
-    <p className="shopping-small shopping-overlap-note">Individual photos checked for {comparison.matches.length} shortlisted {comparison.matches.length === 1 ? "piece" : "pieces"}. Other pieces haven’t been compared individually.</p>
-    <div className="shopping-overlap-matches">{comparison.matches.map(({ itemId, status }) => {
+    <p className="shopping-small shopping-overlap-note">Individual photos checked for {comparison.matches.length} shortlisted {comparison.matches.length === 1 ? "piece" : "pieces"}. Other pieces haven’t been compared individually. Styling possibilities are suggestions to consider.</p>
+    <div className="shopping-overlap-matches">{comparison.matches.map(match => {
+      const { itemId } = match;
       const item = itemsById.get(itemId);
       if (!item) return null;
       return <figure className="shopping-overlap-match" key={itemId}>
         <Photo src={item.thumbnail || item.image} alt={item.name || "Owned garment"} />
-        <figcaption><span className="shopping-overlap-name">{item.name || "Owned garment"}</span><span className={`shopping-overlap-status${status === "close-overlap" ? " is-close" : ""}`}>{labels[status] || labels.unclear}</span></figcaption>
+        <figcaption><span className="shopping-overlap-name">{item.name || "Owned garment"}</span>{Object.entries(labels).map(([axis, values]) => <span key={axis} className="shopping-overlap-status">{values[match[axis]] || values.unclear}</span>)}</figcaption>
       </figure>;
     })}</div>
-    {comparison.matches.some(match => match.status === "unclear") ? <p className="shopping-small shopping-overlap-note">Unclear means the images don’t support a confident comparison. Check those details before deciding.</p> : null}
+    {comparison.matches.some(match => [match.silhouette, match.colour, match.styling].includes("unclear")) ? <p className="shopping-small shopping-overlap-note">Unclear means the images don’t support a confident comparison on that detail.</p> : null}
   </div>;
 }
 
@@ -156,6 +160,7 @@ function Assessment({ result, itemsById, headingRef, titleId }) {
       <p className="shopping-eyebrow">{assessment.itemName || "Your potential addition"}</p>
       <h2 id={titleId} ref={headingRef} tabIndex={-1}>{VERDICTS[assessment.verdict] || VERDICTS.unclear}</h2>
       <p className="shopping-assessment-summary">{assessment.summary}</p>
+      {result.shoppingDecision?.state === "unavailable" ? <p className="shopping-small shopping-decision-note" role="status">The recommendation check couldn’t finish. This assessment stays uncertain.</p> : result.shoppingDecision?.state === "unclear" ? <p className="shopping-small shopping-decision-note" role="status">The photos and context don’t support a confident recommendation yet.</p> : null}
       {context ? <p className="shopping-small shopping-assessment-context">Compared with {context.wardrobeCount} {context.wardrobeCount === 1 ? "wardrobe piece" : "wardrobe pieces"}{context.modelReferenceLabel ? ` and ${context.modelReferenceLabel}` : ""}.</p> : null}
     </header>
     <div className="shopping-assessment-details">
