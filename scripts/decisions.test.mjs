@@ -5,6 +5,7 @@ import { rankWithDecisions, rankingQuestions } from "./decision-ranking.mjs";
 import { orderDiscovery, discoveryFingerprint } from "../shared/outfit-discovery.mjs";
 import { colourName } from "./outfit-discovery-api.mjs";
 import { decisionsResponse } from "./test-helpers/decisions-response.mjs";
+import { setImmediate as nextTurn } from "node:timers/promises";
 
 const env = { WARDROBE_DECISIONS_ENABLED: "1", OPENAI_API_KEY: "test-key" };
 const options = (namespace, overrides = {}) => ({ namespace, env, brief: "Dinner", context: { mode: "saved outfits" }, candidates: [{ id: "outfit-1", name: "Navy dinner look", visualEvidence: ["candidate_0"] }],
@@ -48,6 +49,94 @@ test("disabled, empty, oversized and quota-blocked requests never dispatch", asy
 test("timeouts bound fetch and body even when the transport ignores abort", async () => {
   await assert.rejects(rankWithDecisions(options("fetch-timeout", { timeoutMs: 5, fetch: async () => new Promise(() => {}) })), { status: 504 });
   await assert.rejects(rankWithDecisions(options("body-timeout", { timeoutMs: 5, fetch: async () => ({ ok: true, json: async () => new Promise(() => {}) }) })), { status: 504 });
+});
+
+test("shared queue caps provider work at two, serializes quota and deduplicates queued work", async () => {
+  const gates = Array.from({ length: 5 }, () => Promise.withResolvers());
+  const started = gates.map(() => Promise.withResolvers());
+  let active = 0, peak = 0, reserving = 0, reservationPeak = 0, charges = 0, calls = 0;
+  const configs = gates.map((gate, index) => options(`queue-${index}`, {
+    beforePaidCall: async () => {
+      reservationPeak = Math.max(reservationPeak, ++reserving);
+      const count = charges;
+      await nextTurn();
+      charges = count + 1; reserving--;
+    },
+    fetch: async (_, init) => {
+      calls++; peak = Math.max(peak, ++active); started[index].resolve();
+      try {
+        await gate.promise;
+        if (index === 1) return new Response("unavailable", { status: 503 });
+        return Response.json(decisionsResponse(JSON.parse(init.body)));
+      } finally { active--; }
+    },
+  }));
+  const requests = configs.map(config => rankWithDecisions(config));
+  const shared = rankWithDecisions(configs[4]);
+  const settled = Promise.allSettled([...requests, shared]);
+  await Promise.all(started.slice(0, 2).map(item => item.promise));
+  assert.equal(calls, 2); assert.equal(charges, 2);
+  gates[1].resolve(); // A failure must release its slot for queued work.
+  await started[2].promise;
+  gates[2].resolve(); await started[3].promise;
+  gates[3].resolve(); await started[4].promise;
+  gates[4].resolve(); gates[0].resolve();
+  const outcomes = await settled;
+  assert.equal(outcomes[1].status, "rejected");
+  assert.equal(outcomes[5].value.cached, true);
+  assert.deepEqual([peak, reservationPeak, charges, calls], [2, 1, 5, 5]);
+});
+
+test("queued requests expire without quota or dispatch and leave the queue usable", async t => {
+  const gate = Promise.withResolvers(), started = Promise.withResolvers();
+  let calls = 0, charges = 0;
+  const held = [0, 1].map(index => rankWithDecisions(options(`queue-held-${index}`, {
+    fetch: async (_, init) => {
+      if (++calls === 2) started.resolve();
+      await gate.promise;
+      return Response.json(decisionsResponse(JSON.parse(init.body)));
+    },
+  })));
+  const settled = Promise.allSettled(held);
+  t.after(async () => { gate.resolve(); await settled; });
+  await started.promise;
+  const logs = [];
+  await assert.rejects(rankWithDecisions(options("queue-expired", {
+    timeoutMs: 10, beforePaidCall: async () => { charges++; }, usageLog: async record => logs.push(record),
+    fetch: async () => { calls++; throw new Error("Expired work must not dispatch"); },
+  })), { status: 504 });
+  assert.deepEqual([calls, charges], [2, 0]);
+  assert.equal(logs.at(-1).dispatchState, "not-sent");
+  assert.equal(logs.at(-1).failure, "timeout");
+  gate.resolve(); await Promise.all(held);
+  await rankWithDecisions(options("queue-after-expiry"));
+});
+
+test("queued callers release their writer lease and free a slot when reacquisition detects stale evidence", async t => {
+  const gate = Promise.withResolvers(), started = Promise.withResolvers(), waitingOutside = Promise.withResolvers();
+  let calls = 0, quota = 0;
+  const held = [0, 1].map(index => rankWithDecisions(options(`lease-queue-held-${index}`, {
+    fetch: async (_, init) => { if (++calls === 2) started.resolve(); await gate.promise; return Response.json(decisionsResponse(JSON.parse(init.body))); },
+  })));
+  const settled = Promise.allSettled(held);
+  t.after(async () => { gate.resolve(); await settled; });
+  await started.promise;
+  const stale = rankWithDecisions(options("lease-queue-stale", {
+    beforePaidCall: async () => { quota++; },
+    outsideLease: async callback => { waitingOutside.resolve(); await callback(); throw Object.assign(new Error("Evidence changed"), { status: 409 }); },
+    fetch: async () => assert.fail("Stale queued evidence must not dispatch"),
+  }));
+  const rejected = assert.rejects(stale, { status: 409 });
+  await waitingOutside.promise; gate.resolve(); await Promise.all(held); await rejected;
+  assert.equal(quota, 0);
+  // If reacquisition lost the release callback, the shared limit would leave
+  // only one usable slot and the second request below could not start.
+  const bothStarted = Promise.withResolvers(), finish = Promise.withResolvers(); let active = 0;
+  const next = [0, 1].map(index => rankWithDecisions(options(`lease-queue-after-${index}`, {
+    timeoutMs: 1000, fetch: async (_, init) => { if (++active === 2) { bothStarted.resolve(); finish.resolve(); } await finish.promise; return Response.json(decisionsResponse(JSON.parse(init.body))); },
+  })));
+  t.after(() => finish.resolve());
+  await Promise.all(next); await bothStarted.promise;
 });
 
 test("provider failures and malformed distributions are sanitized and never cached", async () => {

@@ -39,6 +39,9 @@ export async function prepareDecisionImage(file) {
     // White preserves holes in transparent cutouts without sending alpha or
     // display transforms. Rotate before sizing and strip EXIF metadata.
     const image = await prepareDecisionBytes(bytes);
+    // Parallel batches may finish preparing the same file while we decode it.
+    // Reuse that entry without counting its bytes twice against the cache cap.
+    if (prepared.has(key)) return { ...prepared.get(key), file };
     const value = { identity, ...image };
     const size = Buffer.byteLength(value.image_url);
     while (prepared.size && (prepared.size >= 64 || cacheBytes + size > MAX_CACHE_BYTES)) {

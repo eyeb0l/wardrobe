@@ -4,8 +4,33 @@ import { emptyDecisionUsage, normalizeDecisionUsage, newDecisionUsageId } from "
 export const DECISIONS_MODEL = "gpt-6-luna";
 export const hashEvidence = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const cache = new Map(), pending = new Map();
+let activeRequests = 0, preflight = Promise.resolve();
+const requestQueue = [];
 const fail = (message, status = 503) => Object.assign(new Error(message), { status });
 const probability = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+
+// The two-request limit is shared by every Decisions caller in this process.
+// Queue time consumes the caller's timeout; expired work never reserves quota.
+function acquireRequest(signal) {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      const index = requestQueue.indexOf(entry);
+      if (index !== -1) requestQueue.splice(index, 1);
+      reject(signal.reason);
+    };
+    const entry = () => {
+      signal.removeEventListener("abort", onAbort);
+      activeRequests++;
+      resolve(() => {
+        activeRequests--;
+        requestQueue.shift()?.();
+      });
+    };
+    if (signal.aborted) return reject(signal.reason);
+    if (activeRequests < 2) entry();
+    else { requestQueue.push(entry); signal.addEventListener("abort", onAbort, { once: true }); }
+  });
+}
 
 export function decisionsConfig(env = process.env) {
   const enabled = env.WARDROBE_DECISIONS_ENABLED === "1";
@@ -79,26 +104,36 @@ export async function decide({ input, questions, namespace, version = 1, env = p
   if (cacheMode === "default" && cache.has(key)) return reuse(cache.get(key).value, "cache");
   if (cacheMode === "default" && pending.has(key)) {
     record.attemptId = pending.get(key).attemptId;
-    // The first request must reacquire its lease before it can settle. A
-    // duplicate must release its own lease while waiting for that result.
+    // A duplicate releases its writer lease while the first request completes.
     const shared = pending.get(key);
     try { return await reuse(await outsideLease(() => shared), "shared"); }
     catch (error) { Object.assign(record, { source: "shared", outcome: "failed", failure: "shared-request-failed", usage: emptyDecisionUsage() }); finished(); await log(); throw error; }
   }
-  if (pending.size >= 2) { Object.assign(record, { outcome: "blocked", failure: "concurrency-limit" }); finished(); await log(); throw fail("Image suggestions are busy. Try again shortly.", 429); }
   const pendingKey = cacheMode === "bypass" ? id : key;
   const work = (async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
-    let onAbort;
+    let onAbort, release;
     try {
+      if (activeRequests >= 2) {
+        // Queued callers must let active calls reacquire their writer leases.
+        // Capture the slot inside the callback so a stale-revision error after
+        // reacquisition still releases it in finally.
+        await outsideLease(async () => { release = await acquireRequest(controller.signal); });
+      } else release = await acquireRequest(controller.signal);
       controller.signal.throwIfAborted();
-      await beforePaidCall?.("text");
-      controller.signal.throwIfAborted();
-      // Write a conservative dispatch intent while the writer lease is held.
-      // An interrupted process leaves an unknown attempt, never a free call.
-      record.dispatchState = "unknown";
-      await log();
+      // Quota callbacks may read/update the same usage record. Keep reservation
+      // and dispatch intent serial while the expensive provider work overlaps.
+      const reservation = preflight.then(async () => {
+        controller.signal.throwIfAborted();
+        await beforePaidCall?.("text");
+        controller.signal.throwIfAborted();
+        // An interrupted process leaves an unknown attempt, never a free call.
+        record.dispatchState = "unknown";
+        await log();
+      });
+      preflight = reservation.catch(() => {});
+      await reservation;
       const result = await outsideLease(async () => {
         const aborted = new Promise((_, reject) => {
           onAbort = () => reject(fail("The image check took too long. Please try again.", 504));
@@ -142,10 +177,11 @@ export async function decide({ input, questions, namespace, version = 1, env = p
       record.outcome = record.dispatchState === "sent" ? "failed" : "blocked";
       if (record.dispatchState !== "sent") record.dispatchState = "not-sent";
       record.failure = controller.signal.aborted ? "timeout" : record.failure || "before-dispatch";
-      throw error;
+      throw controller.signal.aborted ? fail("The image check took too long. Please try again.", 504) : error;
     } finally {
       clearTimeout(timer); controller.signal.removeEventListener("abort", onAbort);
       finished(); await log();
+      release?.();
     }
   })();
   work.attemptId = id;
