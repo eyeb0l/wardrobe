@@ -20,7 +20,7 @@ const assessment = (overrides = {}) => ({
   watchOuts: ["Check the shoulder fit in person."], pairings: [{ itemIds: ["bottom-1"], reason: "The lighter trousers balance the darker top." }], ...overrides,
 });
 
-async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decisionResponse, overlapTimeoutMs } = {}) {
+async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decisionResponse, overlapTimeoutMs, verdictTimeoutMs } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-shopping-test-"));
   const dataDir = path.join(root, "custom-data");
   await mkdir(path.join(dataDir, "imported"), { recursive: true });
@@ -59,8 +59,7 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
       const request = JSON.parse(options.body);
       decisionRequests.push({ request, options });
       if (decisionResponse) return decisionResponse(request, options);
-      return Response.json({ model: request.model, answers: request.questions.map(question => ({ name: question.name, type: "choice", choice: "close-overlap", confidence: .9,
-        probabilities: question.choices.map(({ value }) => ({ value, probability: value === "close-overlap" ? .9 : .05 })) })) });
+      return decisionAnswers(request);
     }
     assert.equal(url, "https://shopping-test.invalid/v1/responses", "tests never call a real provider");
     assert.equal(options.headers.Authorization, "Bearer shopping-test-key");
@@ -70,7 +69,7 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
     if (providerResponse) return providerResponse(request, options);
     return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(assessment()) }] }] });
   };
-  const makePlugin = () => wardrobeShoppingApi({ env: settings, fetch: fetchMock, timeoutMs, beforePaidCall, overlapTimeoutMs });
+  const makePlugin = () => wardrobeShoppingApi({ env: settings, fetch: fetchMock, timeoutMs, beforePaidCall, overlapTimeoutMs, verdictTimeoutMs });
   let plugin = makePlugin();
   await plugin.configResolved({ root });
   const middleware = (instance, preview = false) => {
@@ -595,73 +594,97 @@ test("gap suggestions share the Shopping concurrency guard and quota failures ne
   assert.equal(limited.requests.length, 0);
 });
 
+
 const overlapEnv = { WARDROBE_DECISIONS_ENABLED: "1", WARDROBE_DECISIONS_SHOPPING_OVERLAP_ENABLED: "1" };
-const shortlisted = ids => async () => Response.json({ output_text: JSON.stringify(assessment({ overlapItemIds: ids })) });
-const overlapAnswers = (request, rows) => Response.json({ model: request.model, answers: request.questions.map((question, index) => {
-  const [choice, confidence = .9, probability = .9] = rows[index];
+const explain = (request, overrides = {}) => Response.json({ output_text: JSON.stringify(assessment({
+  verdict: request.text.format.schema.properties.verdict.enum[0], summary: request.text.format.schema.properties.summary.enum?.[0] || assessment().summary, overlap: request.text.format.schema.properties.overlap.enum?.[0] || assessment().overlap, ...overrides,
+})) });
+const shortlisted = (ids, overrides = {}) => async request => request.text.format.name === "wardrobe_shopping_shortlist"
+  ? Response.json({ output_text: JSON.stringify({ itemName: "Champagne midi skirt", overlapItemIds: ids }) }) : explain(request, overrides);
+const decisionAnswers = (request, values = {}) => Response.json({ model: request.model, answers: request.questions.map(question => {
+  const selected = values[question.name] || [question.name === "shopping_verdict" ? "consider" : question.choices[0].value];
+  const [choice, confidence = .9, probability = .9] = selected;
   return choice === "refusal" ? { name: question.name, type: "refusal" } : { name: question.name, type: "choice", choice, confidence,
-    probabilities: question.choices.map(({ value }) => ({ value, probability: value === choice ? probability : (1 - probability) / 2 })) };
+    probabilities: question.choices.map(({ value }) => ({ value, probability: value === choice ? probability : (1 - probability) / (question.choices.length - 1) })) };
 }) });
 
-test("visual overlap sends only candidate and authorized individual shortlist images, reuses cache and records private usage", async t => {
+test("Shopping compares dimensions, obtains the verdict, then explains the fixed judgments with all owned context", async t => {
   let reservations = 0;
-  const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-3", "top-1", "dress-1"]), beforePaidCall: () => { reservations++; },
-    decisionResponse: request => overlapAnswers(request, [["close-overlap"], ["different"], ["unclear"]]) });
+  const stages = [];
+  const h = await harness(t, { env: overlapEnv, beforePaidCall: () => { reservations++; },
+    response: async request => { stages.push(request.text.format.name); return shortlisted(["top-3", "top-1", "dress-1"])(request); },
+    decisionResponse: request => { stages.push(request.questions[0].name); return decisionAnswers(request, {
+      colour_1: ["different"], styling_1: ["different"], silhouette_2: ["different"], colour_2: ["unclear"], styling_3: ["refusal"],
+    }); },
+  });
   const result = await h.analyze();
-  assert.deepEqual(result.assessment, assessment(), "the written recommendation is not overwritten by a comparison");
-  assert.deepEqual(result.visualOverlap, { state: "checked", matches: [
-    { itemId: "top-3", status: "close-overlap" }, { itemId: "top-1", status: "different" }, { itemId: "dress-1", status: "unclear" },
-  ] });
-  assert.equal(reservations, 2, "one Responses call and one bounded Decisions call each reserve text quota");
-  const { request } = h.decisionRequests[0];
-  assert.equal(request.model, "gpt-6-luna");
-  assert.equal(request.questions.length, 3);
-  assert.ok(request.questions.every(question => typeof question.instructions === "string" && !Object.hasOwn(question, "question")));
-  assert.match(request.questions[0].instructions, /Shared color or garment category alone is insufficient/);
-  const images = request.input[0].content.filter(part => part.type === "input_image");
-  const normalized = bytes => sharp(bytes, { limitInputPixels: 50_000_000, animated: false }).rotate().resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true }).flatten({ background: "#ffffff" }).jpeg({ quality: 85 }).toBuffer();
-  assert.equal(images.length, 4);
-  const candidate = await sharp(h.candidate).rotate().resize(1600, 1600, { fit: "inside", withoutEnlargement: true }).flatten({ background: "#ffffff" }).jpeg({ quality: 85 }).toBuffer();
-  assert.deepEqual(Buffer.from(images[0].image_url.split(",")[1], "base64"), await normalized(candidate));
-  for (const [index, id] of ["top-3", "top-1", "dress-1"].entries()) {
-    assert.deepEqual(Buffer.from(images[index + 1].image_url.split(",")[1], "base64"), await normalized(await readFile(path.join(h.dataDir, "imported", `${id}.png`))));
+  assert.deepEqual(stages, ["wardrobe_shopping_shortlist", "silhouette_1", "shopping_evidence", "wardrobe_shopping_assessment"]);
+  assert.deepEqual(result.shoppingDecision, { verdict: "consider", state: "decided", evidence: "sufficient" });
+  assert.equal(result.assessment.verdict, "consider");
+  assert.deepEqual(result.visualOverlap.matches, [
+    { itemId: "top-3", silhouette: "similar", colour: "different", styling: "different" },
+    { itemId: "top-1", silhouette: "different", colour: "unclear", styling: "similar" },
+    { itemId: "dress-1", silhouette: "similar", colour: "similar", styling: "unclear" },
+  ]);
+  assert.match(result.assessment.overlap, /similar silhouette, meaningfully different colour or pattern, and distinct styling possibilities/);
+  assert.match(result.assessment.overlap, /not an exhaustive wardrobe comparison/);
+  assert.equal(reservations, 4, "each of the two Responses and two Decisions calls reserves text quota");
+  const shortlist = h.requests[0].request;
+  assert.deepEqual(Object.keys(shortlist.text.format.schema.properties), ["itemName", "overlapItemIds"]);
+  assert.equal(shortlist.input[0].content.filter(part => part.type === "input_image").length, 3, "shortlisting needs no person reference");
+  const comparison = h.decisionRequests[0].request;
+  assert.equal(comparison.model, "gpt-6-luna");
+  assert.equal(comparison.questions.length, 9);
+  assert.equal(comparison.input[0].content.filter(part => part.type === "input_image").length, 4);
+  const verdict = h.decisionRequests[1].request;
+  assert.equal(verdict.input[0].content.filter(part => part.type === "input_image").length, 4, "verdict sees candidate, person and both full sheets");
+  const final = h.requests[1].request;
+  assert.deepEqual(final.text.format.schema.properties.verdict.enum, ["consider"]);
+  assert.deepEqual(final.text.format.schema.properties.overlap.enum, [result.assessment.overlap]);
+  assert.deepEqual(final.text.format.schema.properties.summary.enum, [result.assessment.summary]);
+  assert.match(result.assessment.summary, /similar silhouette, meaningfully different colour or pattern/);
+  assert.match(final.input[0].content[0].text, /do not choose a new verdict or override it/);
+  assert.match(final.input[0].content[0].text, /"silhouette":"similar","colour":"different","styling":"different"/);
+  for (const request of [shortlist, comparison, verdict, final]) {
+    assert.ok(!JSON.stringify(request).includes(h.root));
+    assert.ok(!JSON.stringify(request).includes("shopping-test-key"));
   }
-  assert.ok(!JSON.stringify(request).includes(h.root));
-  assert.ok(!JSON.stringify(request).includes("shopping-test-key"));
   assert.deepEqual((await h.analyze()).visualOverlap, result.visualOverlap);
-  assert.equal(h.decisionRequests.length, 1, "identical individual comparisons reuse the validated shared client cache");
-  assert.equal(reservations, 3, "the second written assessment still consumes its own quota");
-  const records = await fileSystem.readdir(path.join(h.dataDir, "decision-usage"));
-  const usage = await Promise.all(records.map(file => readFile(path.join(h.dataDir, "decision-usage", file), "utf8")));
-  assert.ok(usage.some(value => JSON.parse(value).source === "cache"));
-  for (const value of usage) {
-    assert.equal(JSON.parse(value).purpose, "shopping-overlap");
-    assert.ok(!value.includes("image_url") && !value.includes("top-3") && !value.includes(h.root));
+  assert.equal(h.decisionRequests.length, 2, "validated comparisons and verdict reuse their separate caches");
+  assert.equal(reservations, 6, "the second shortlist and explanation reserve quota; cached decisions do not");
+  await h.analyze({ notes: "Check the intended skirt for work" });
+  assert.equal(h.decisionRequests.length, 4, "changed intended-garment notes invalidate both cached judgments");
+});
+
+test("the assistant cannot override either the Decisions verdict or structured overlap explanation", async t => {
+  for (const overrides of [{ verdict: "good-addition" }, { summary: "Definitely buy it; the owned piece is an exact match." }, { overlap: "The skirt is a close match in every way." }]) {
+    const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"], overrides) });
+    await h.analyze({}, 502);
+    assert.equal(h.requests.length, 2);
+    assert.equal(h.decisionRequests.length, 2);
   }
-  await h.analyze({ notes: "Check the intended dress" });
-  assert.equal(h.decisionRequests.length, 2, "changed intended-garment notes invalidate cached comparisons");
 });
 
-test("low confidence, low winning probability and refusals all stay unclear", async t => {
-  const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1", "top-2", "top-3"]),
-    decisionResponse: request => overlapAnswers(request, [["different", .74], ["close-overlap", .95, .6], ["refusal"]]) });
-  assert.deepEqual((await h.analyze()).visualOverlap.matches.map(row => row.status), ["unclear", "unclear", "unclear"]);
-});
-
-test("empty shortlist and disabled Shopping flag never dispatch Decisions", async t => {
+test("an empty shortlist still gets a whole-wardrobe Decisions verdict; disabled Shopping stays unchanged", async t => {
   const empty = await harness(t, { env: overlapEnv, response: shortlisted([]) });
-  assert.deepEqual((await empty.analyze()).visualOverlap, { state: "not-shortlisted", matches: [] });
-  assert.equal(empty.decisionRequests.length, 0);
+  const result = await empty.analyze();
+  assert.deepEqual(result.visualOverlap, { state: "not-shortlisted", matches: [] });
+  assert.equal(result.assessment.verdict, "consider");
+  assert.equal(empty.decisionRequests.length, 1);
+  assert.equal(empty.decisionRequests[0].request.questions[0].name, "shopping_evidence");
+  assert.match(result.assessment.overlap, /does not establish that there is no overlap/);
   const disabled = await harness(t, { env: { ...overlapEnv, WARDROBE_DECISIONS_SHOPPING_OVERLAP_ENABLED: "0" } });
-  assert.ok(!Object.hasOwn((await disabled.analyze()), "visualOverlap"));
+  assert.deepEqual((await disabled.analyze()).assessment, assessment());
   assert.equal(disabled.decisionRequests.length, 0);
+  assert.equal(disabled.requests.length, 1);
 });
 
 for (const ids of [["top-1", "top-1"], ["invented-1"], ["top-1", "top-2", "top-3", "top-4"]]) {
-  test(`invalid overlap shortlist is rejected before Decisions: ${ids.join(",")}`, async t => {
+  test(`invalid comparison shortlist blocks later paid stages: ${ids.join(",")}`, async t => {
     const h = await harness(t, { env: overlapEnv, response: shortlisted(ids) });
     await h.analyze({}, 502);
     assert.equal(h.decisionRequests.length, 0);
+    assert.equal(h.requests.length, 1);
   });
 }
 
@@ -673,54 +696,73 @@ test("hidden owned IDs cannot be shortlisted from a forged browser image URL", a
   assert.ok(!h.requests[0].request.text.format.schema.properties.overlapItemIds.items.enum.includes("top-1"));
 });
 
-for (const mode of ["http-error", "malformed", "timeout", "quota"]) {
-  test(`individual comparison ${mode} keeps written advice without leaking errors or retrying`, async t => {
-    let reservations = 0;
-    const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]), overlapTimeoutMs: 15,
-      beforePaidCall: () => { if (++reservations === 2 && mode === "quota") throw new Error("PRIVATE quota/path/key"); },
-      decisionResponse: async () => mode === "timeout" ? new Promise(() => {}) : mode === "malformed" ? Response.json({ model: "gpt-6-luna", answers: [] }) : Response.json({ error: "PRIVATE provider/key/path" }, { status: 429 }) });
+for (const selected of [["skip", .74], ["good-addition", .95, .6], ["refusal"], ["unclear"]]) {
+  test(`uncertain verdict ${selected.join(",")} constrains the assistant to unclear`, async t => {
+    const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]),
+      decisionResponse: request => decisionAnswers(request, { shopping_verdict: selected }) });
     const result = await h.analyze();
-    assert.deepEqual(result.assessment, assessment());
-    assert.deepEqual(result.visualOverlap, { state: "unavailable", matches: [] });
-    assert.ok(!JSON.stringify(result).includes("PRIVATE"));
-    assert.equal(h.decisionRequests.length, mode === "quota" ? 0 : 1);
+    assert.equal(result.assessment.verdict, "unclear");
+    assert.equal(result.shoppingDecision.state, "unclear");
+    assert.deepEqual(h.requests[1].request.text.format.schema.properties.verdict.enum, ["unclear"]);
   });
 }
 
-test("changed original images before comparison prevent dispatch; after comparison discard evidence", async t => {
-  const h = await harness(t, { env: overlapEnv, response: async () => {
-    await writeFile(path.join(h.dataDir, "imported", "top-1.png"), await sharp({ create: { width: 70, height: 90, channels: 3, background: "red" } }).png().toBuffer());
-    return Response.json({ output_text: JSON.stringify(assessment({ overlapItemIds: ["top-1"] })) });
-  } });
-  assert.equal((await h.analyze()).visualOverlap.state, "unavailable");
-  assert.equal(h.decisionRequests.length, 0);
-  const changed = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]), decisionResponse: async request => {
-    await writeFile(path.join(changed.dataDir, "imported", "top-1.png"), "changed");
-    return overlapAnswers(request, [["close-overlap"]]);
-  } });
-  assert.equal((await changed.analyze()).visualOverlap.state, "unavailable");
+for (const mode of ["http-error", "malformed", "timeout", "quota"]) {
+  test(`verdict ${mode} produces an explicit uncertain explanation without silently retaining an assistant verdict`, async t => {
+    let reservations = 0;
+    const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]), verdictTimeoutMs: mode === "timeout" ? 30 : 12_000,
+      beforePaidCall: () => { if (++reservations === 3 && mode === "quota") throw new Error("PRIVATE quota/path/key"); },
+      decisionResponse: async request => request.questions[0].name !== "shopping_evidence" ? decisionAnswers(request)
+        : mode === "timeout" ? new Promise(() => {}) : mode === "malformed" ? Response.json({ model: "gpt-6-luna", answers: [] }) : Response.json({ error: "PRIVATE provider/key/path" }, { status: 429 }) });
+    const result = await h.analyze();
+    assert.equal(result.assessment.verdict, "unclear");
+    assert.equal(result.shoppingDecision.state, "unavailable");
+    assert.ok(!JSON.stringify(result).includes("PRIVATE"));
+    assert.equal(h.decisionRequests.length, mode === "quota" ? 1 : 2);
+    assert.equal(h.requests.length, 2);
+  });
+}
+
+test("a failed comparison stays unconfirmed while the independently supported verdict can still be consider", async t => {
+  const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]), decisionResponse: async request =>
+    request.questions[0].name === "shopping_evidence" ? decisionAnswers(request) : Response.json({}, { status: 429 }) });
+  const result = await h.analyze();
+  assert.deepEqual(result.visualOverlap, { state: "unavailable", matches: [] });
+  assert.equal(result.assessment.verdict, "consider");
+  assert.match(result.assessment.overlap, /remain unconfirmed/);
 });
 
-test("removing a shortlisted garment during Decisions suppresses its match", async t => {
-  const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]), decisionResponse: async request => {
-    await writeFile(path.join(h.dataDir, "library.json"), JSON.stringify(h.items.filter(item => item.id !== "top-1")));
-    return overlapAnswers(request, [["close-overlap"]]);
-  } });
-  assert.deepEqual((await h.analyze()).visualOverlap, { state: "unavailable", matches: [] });
-});
+for (const asset of ["shortlisted", "other-owned", "person", "library"]) {
+  for (const phase of ["shortlist", "comparison", "verdict", "explanation"]) {
+    test(`${asset} changes during ${phase} fail the entire assessment with 409`, async t => {
+      const mutate = async () => asset === "library" ? writeFile(path.join(h.dataDir, "library.json"), JSON.stringify(h.items.slice(1)))
+        : writeFile(asset === "person" ? path.join(h.root, "identity.png") : path.join(h.dataDir, "imported", `${asset === "shortlisted" ? "top-1" : "shoe-1"}.png`), "changed");
+      const h = await harness(t, { env: overlapEnv, response: async request => {
+        if ((request.text.format.name === "wardrobe_shopping_shortlist" && phase === "shortlist") || (request.text.format.name === "wardrobe_shopping_assessment" && phase === "explanation")) await mutate();
+        return shortlisted(["top-1"])(request);
+      }, decisionResponse: async request => {
+        if ((request.questions[0].name === "shopping_evidence" && phase === "verdict") || (request.questions[0].name !== "shopping_evidence" && phase === "comparison")) await mutate();
+        return decisionAnswers(request);
+      } });
+      await h.analyze({}, 409);
+      assert.equal(h.requests.length, phase === "explanation" ? 2 : 1);
+      assert.equal(h.decisionRequests.length, phase === "shortlist" ? 0 : phase === "comparison" ? 1 : 2);
+    });
+  }
+}
 
-test("closing Shopping aborts the individual-photo provider request", async t => {
+test("shutdown during the final explanation aborts the request without publishing an earlier recommendation", async t => {
   let started;
   const dispatched = new Promise(resolve => { started = resolve; });
-  const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]), decisionResponse: (_, options) => new Promise((resolve, reject) => {
-    started(); options.signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
-  }) });
+  const h = await harness(t, { env: overlapEnv, response: async (request, options) => {
+    if (request.text.format.name === "wardrobe_shopping_shortlist") return shortlisted(["top-1"])(request);
+    started(); return new Promise((resolve, reject) => options.signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+  } });
   const result = h.analyze({}, 503);
   await dispatched;
   h.close();
-  // Plugin disposal intentionally returns a restarting status, rather than a
-  // usable comparison from a disconnected/replaced owner.
   await result;
-  assert.equal(h.decisionRequests.length, 1);
-  assert.equal(h.decisionRequests[0].options.signal.aborted, true);
+  assert.equal(h.requests.length, 2);
+  assert.equal(h.requests[1].options.signal.aborted, true);
+  assert.equal(h.decisionRequests.length, 2);
 });
