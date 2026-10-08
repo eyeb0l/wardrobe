@@ -79,7 +79,10 @@ export async function decide({ input, questions, namespace, version = 1, env = p
   if (cacheMode === "default" && cache.has(key)) return reuse(cache.get(key).value, "cache");
   if (cacheMode === "default" && pending.has(key)) {
     record.attemptId = pending.get(key).attemptId;
-    try { return await reuse(await pending.get(key), "shared"); }
+    // The first request must reacquire its lease before it can settle. A
+    // duplicate must release its own lease while waiting for that result.
+    const shared = pending.get(key);
+    try { return await reuse(await outsideLease(() => shared), "shared"); }
     catch (error) { Object.assign(record, { source: "shared", outcome: "failed", failure: "shared-request-failed", usage: emptyDecisionUsage() }); finished(); await log(); throw error; }
   }
   if (pending.size >= 2) { Object.assign(record, { outcome: "blocked", failure: "concurrency-limit" }); finished(); await log(); throw fail("Image suggestions are busy. Try again shortly.", 429); }

@@ -9,6 +9,7 @@ import { generateWardrobe } from "./generation-workflow.mjs";
 import { recoverOutbox } from "./outbox.mjs";
 import { maintenance } from "./maintenance.mjs";
 import { hostedEnabled } from "./hosted-enabled.mjs";
+import { outsideRequestLease } from "./request-lease.mjs";
 
 let lastRecovery = 0;
 let imageStore;
@@ -80,17 +81,7 @@ export default async function handler(req, res) {
     }
     plugin = await createPlugin(kind, {
       readOnly, beforePaidCall: reservePaidCall,
-      outsideLease: async callback => {
-        // Manual edge adjustments use immutable source bytes. Publish only if
-        // the same job revision is still current after processing.
-        const match = pathname.match(/^\/api\/import\/jobs\/([a-f0-9-]{36})\/stages\/garment\/cleanup-preview$/i);
-        if (!match) return callback();
-        const file = `${DATA_ROOT}/jobs/${match[1]}/job.json`;
-        const revision = await readFile(file, "utf8");
-        return store.withoutLease(callback, async () => {
-          if (revision !== await readFile(file, "utf8")) throw Object.assign(new Error("The item changed. Reload its latest preview."), { code: "ESTALE", status: 409 });
-        });
-      },
+      outsideLease: callback => outsideRequestLease(store, pathname, callback),
       scheduleTask: async (payload) => {
         const task = await createTask(payload);
         try {

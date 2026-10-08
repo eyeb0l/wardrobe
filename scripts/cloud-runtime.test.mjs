@@ -8,6 +8,9 @@ import { currentStorage, mkdir, readFile, withStorage, writeFile } from "./stora
 import { createPlugin } from "../server/plugins.mjs";
 import { executeCloudTask, INTERRUPTED } from "../server/task-runner.mjs";
 import { createTask, readTask, saveTask } from "../server/task-store.mjs";
+import { outsideRequestLease } from "../server/request-lease.mjs";
+import { decide } from "./decisions.mjs";
+import { decisionsResponse } from "./test-helpers/decisions-response.mjs";
 
 async function harness(t) {
   // All persistence is an embedded test database and private in-memory blobs.
@@ -434,6 +437,102 @@ test('source changes during detached work fence all stale result and error write
     async failTask(){failures++;await writeFile(file,'stale failure');}
   })}),{code:'ESTALE'});
   assert.equal(failures,0);assert.equal(await h.store.readFile(file,'utf8'),'new revision');
+});
+
+for (const kind of ["crop", "outfit", "cleanup"]) {
+  const route = id => kind === "outfit" ? `/api/outfits/jobs/${id}/outfits/look-1/check`
+    : `/api/import/jobs/${id}/${kind === "crop" ? "preflight" : "stages/garment/cleanup-preview"}`;
+  const jobFile = id => `${CLOUD_ROOT}/${kind === "outfit" ? "outfit-jobs" : "jobs"}/${id}/job.json`;
+
+  test(`${kind} checks release the hosted lease for unrelated saves and reacquire before writing`, async t => {
+    const h = await harness(t), id = randomUUID(), file = jobFile(id);
+    await h.write(async () => {
+      await mkdir(file.slice(0, file.lastIndexOf("/")), { recursive: true });
+      await writeFile(file, "original");
+    });
+    let release, started;
+    const gate = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { started = resolve; });
+    const running = h.write(async () => {
+      const result = await outsideRequestLease(h.store, route(id), async () => {
+        started();
+        await gate;
+        await assert.rejects(writeFile(file, "unsafe"), { code: "ESTALE" });
+        return "checked";
+      });
+      await writeFile(`${CLOUD_ROOT}/result.json`, result);
+    });
+    await entered;
+    try {
+      const other = h.otherStore();
+      await other.withLease(() => other.writeFile(`${CLOUD_ROOT}/other-item.json`, "saved"));
+    } finally { release(); await running; }
+    assert.equal(await h.store.readFile(file, "utf8"), "original");
+    assert.equal(await h.store.readFile(`${CLOUD_ROOT}/result.json`, "utf8"), "checked");
+  });
+
+  test(`${kind} checks discard stale results after manual changes or deletion`, async t => {
+    const h = await harness(t);
+    for (const action of ["accepted", "rejected", "deleted"]) {
+      const id = randomUUID(), file = jobFile(id);
+      await h.write(async () => {
+        await mkdir(file.slice(0, file.lastIndexOf("/")), { recursive: true });
+        await writeFile(file, "review");
+      });
+      await assert.rejects(h.write(async () => {
+        try {
+          await outsideRequestLease(h.store, route(id), async () => {
+            const other = h.otherStore();
+            await other.withLease(() => action === "deleted" ? other.rm(file) : other.writeFile(file, action));
+            return "late result";
+          });
+          assert.fail("A stale check must not return its result");
+        } catch (error) {
+          await assert.rejects(writeFile(file, "stale error write"), { code: "ESTALE" });
+          throw error;
+        }
+      }), { code: "ESTALE", status: 409 });
+      if (action === "deleted") await assert.rejects(h.store.readFile(file), { code: "ENOENT" });
+      else assert.equal(await h.store.readFile(file, "utf8"), action);
+    }
+  });
+}
+
+test("duplicate hosted image checks release both leases and share one paid request", async t => {
+  const h = await harness(t), id = randomUUID();
+  const pathname = `/api/outfits/jobs/${id}/outfits/look-1/check`;
+  await h.write(async () => {
+    await mkdir(`${CLOUD_ROOT}/outfit-jobs/${id}`, { recursive: true });
+    await writeFile(`${CLOUD_ROOT}/outfit-jobs/${id}/job.json`, "review");
+  });
+  let release, started, sharedStarted, calls = 0, reservations = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const entered = new Promise(resolve => { started = resolve; });
+  const sharedEntered = new Promise(resolve => { sharedStarted = resolve; });
+  const run = (store, onDetached = () => {}) => store.withLease(() => withStorage(store, () => decide({
+    namespace: id, env: { WARDROBE_DECISIONS_ENABLED: "1", OPENAI_API_KEY: "test-key" },
+    input: "fixture", questions: [{ type: "predicate", name: "clear" }],
+    beforePaidCall: async () => { await store.assertLease(); reservations++; },
+    usageLog: async () => { await store.assertLease(); },
+    outsideLease: callback => outsideRequestLease(store, pathname, () => { onDetached(); return callback(); }),
+    fetch: async (_, init) => {
+      calls++; started(); await gate;
+      return Response.json(decisionsResponse(JSON.parse(init.body)));
+    },
+  })));
+  const first = run(h.store);
+  await entered;
+  const duplicate = run(h.otherStore(), sharedStarted);
+  let results;
+  try {
+    await sharedEntered;
+    const other = h.otherStore();
+    await other.withLease(() => other.writeFile(`${CLOUD_ROOT}/other-item.json`, "saved"));
+  } finally { release(); results = await Promise.all([first, duplicate]); }
+  assert.equal(results[0].cached, false);
+  assert.equal(results[1].cached, true);
+  assert.equal(calls, 1);
+  assert.equal(reservations, 1);
 });
 
 test('expired cleanup resumes for free while an expired paid step is never replayed', async t => {
