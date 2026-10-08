@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { outfitContactSheets, contactThumbnail } from "./outfit-api.mjs";
 
 import { gapsSchema, validateGaps, gapsPrompt } from "./shopping-gaps.mjs";
+import { compareShoppingOverlap, shoppingOverlapReady, overlapImageHash } from "./shopping-overlap.mjs";
 
 const API = "/api/shopping";
 const PARTS = ["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"];
@@ -82,9 +83,10 @@ async function candidateImage(value) {
   } catch { throw fail("The image could not be read. Use a JPEG photo under 64 megapixels."); }
 }
 
-function assessmentSchema(ids) {
+function assessmentSchema(ids, visualOverlap = false) {
   const string = (maxLength) => ({ type: "string", minLength: 1, maxLength });
-  return { type: "object", additionalProperties: false, required: ["itemName", "verdict", "summary", "personalFit", "wardrobeFit", "overlap", "watchOuts", "pairings"], properties: {
+  return { type: "object", additionalProperties: false, required: ["itemName", "verdict", "summary", "personalFit", "wardrobeFit", "overlap", "watchOuts", "pairings", ...(visualOverlap ? ["overlapItemIds"] : [])], properties: {
+    ...(visualOverlap ? { overlapItemIds: { type: "array", maxItems: 3, items: { type: "string", enum: ids } } } : {}),
     itemName: string(120), verdict: { type: "string", enum: VERDICTS }, summary: string(800), personalFit: string(1200), wardrobeFit: string(1200), overlap: string(1000),
     watchOuts: { type: "array", maxItems: 6, items: string(350) },
     pairings: { type: "array", maxItems: 4, items: { type: "object", additionalProperties: false, required: ["itemIds", "reason"], properties: {
@@ -228,18 +230,21 @@ export function wardrobeShoppingApi(options = {}) {
     }
   }
 
-  async function prepareWardrobe(items, available, controller, requireComplete = false) {
+  async function prepareWardrobe(items, available, controller, requireComplete = false, collectHashes = false) {
     let sheets;
     // Only submitted, server-authorized garments become inputs. Decode once
     // into small tiles, excluding corrupt originals before numbering the sheets.
     // Keeping tiles instead of all originals also avoids byte-cache thrashing.
     const thumbnails = new Map();
+    const sourceHashes = new Map();
     const prepared = [];
     for (const item of items) {
       for (const file of available.get(item.id).candidates) {
         ensureRequest(controller);
         try {
-          thumbnails.set(item.id, await contactThumbnail(await readFile(file)));
+          const bytes = await readFile(file);
+          thumbnails.set(item.id, await contactThumbnail(bytes));
+          if (collectHashes) sourceHashes.set(item.id, overlapImageHash(bytes));
           prepared.push({ ...item, file });
           break;
         } catch { /* Try a later record for the same ID if its first image is corrupt. */ }
@@ -253,7 +258,7 @@ export function wardrobeShoppingApi(options = {}) {
       sheets = await outfitContactSheets(items, thumbnails);
     } catch (error) { if (error.status) throw error; throw fail("A local reference image could not be read. Refresh your wardrobe and try again.", 503); }
     ensureRequest(controller);
-    return { items, sheets };
+    return { items, sheets, sourceHashes };
   }
 
   async function suggestGaps(body, controller) {
@@ -295,7 +300,9 @@ export function wardrobeShoppingApi(options = {}) {
     if (!items.length) throw fail("Add wardrobe pieces before checking a garment.", 503);
     const candidate = await candidateImage(body.image);
     ensureRequest(controller);
-    let referenceImage, sheets;
+    const overlapEnv = { ...process.env, ...options.env };
+    const visualOverlap = shoppingOverlapReady(overlapEnv);
+    let referenceImage, sheets, sourceHashes;
     try {
       const bytes = await readFile(reference.file);
       const metadata = await sharp(bytes, { limitInputPixels: 64e6 }).metadata();
@@ -303,7 +310,7 @@ export function wardrobeShoppingApi(options = {}) {
       referenceImage = await jpeg(bytes);
     } catch { throw fail("Selected model reference is unavailable. Choose another reference."); }
     ensureRequest(controller);
-    ({ items, sheets } = await prepareWardrobe(items, available, controller));
+    ({ items, sheets, sourceHashes } = await prepareWardrobe(items, available, controller, false, visualOverlap));
     const prompt = `Assess whether the candidate garment is a worthwhile addition to this person's actual wardrobe. Inspect every supplied image; do not base advice only on metadata.
 Image 1 is the shopping candidate: a listing screenshot or shop photo. Image 2 is the selected person reference. Remaining images are labeled contact sheets of owned garments, with ITEM numbers mapped to exact IDs below.
 Use the person reference ONLY for the person's visible coloring and proportions. Its clothes do not establish preferences or wardrobe ownership. Never base personalFit on the reference outfit or background; assess the candidate's visual relationship to the person.
@@ -313,6 +320,7 @@ personalFit: discuss only observable visual color harmony and how garment propor
 wardrobeFit: explain useful combinations with the owned wardrobe. overlap: identify concrete near-duplicates or the gap this adds; avoid inventing ownership. pairings: provide up to four plausible combinations, each implicitly including the candidate plus only the owned itemIds listed here. Never include the candidate as an owned ID or suggest unowned shoes/accessories. Include the needed top/bottom or dress only when the wardrobe supports it; do not combine garments that cannot plausibly be worn together. Zero pairings is appropriate when unclear or unsupported. Reasons should identify actual visual details and explain the combination, not just generic praise.
 Keep the assessment concise, specific, and useful for a shopping decision. itemName is a short observed garment name (or Unclear item). summary gives the recommendation and main reason. Each prose field is a nonempty string. watchOuts may be empty if no useful additional caution. Output only the required structured assessment.
 Use the actual garment names in every prose field, caution and pairing reason, never ITEM numbers or inventory IDs. ITEM labels are only for interpreting contact sheets; inventory IDs belong only in pairings.itemIds.
+${visualOverlap ? "overlapItemIds: shortlist up to three owned pieces most plausibly similar to the candidate, ordered closest first, using the actual contact-sheet images. IDs must come from this inventory. These are possibilities for a separate individual-photo comparison, not confirmed duplicates. Shared color alone is insufficient. Return fewer or zero when there are no plausible matches or the candidate is unclear. Inventory IDs are also allowed in overlapItemIds." : ""}
 User notes: ${JSON.stringify(notes)}
 Owned inventory: ${JSON.stringify(items.map(({ file, ...item }, index) => ({ ...item, label: `ITEM ${index + 1}` })))}`;
     const request = { model: setting("OPENAI_VISION_MODEL", "gpt-6-luna"), store: false,
@@ -321,13 +329,33 @@ Owned inventory: ${JSON.stringify(items.map(({ file, ...item }, index) => ({ ...
         { type: "input_image", image_url: `data:image/jpeg;base64,${candidate.toString("base64")}`, detail: "high" },
         { type: "input_image", image_url: `data:image/jpeg;base64,${referenceImage.toString("base64")}`, detail: "high" },
         ...sheets.map((sheet) => ({ type: "input_image", image_url: `data:image/png;base64,${sheet.toString("base64")}`, detail: "high" })),
-      ] }], text: { format: { type: "json_schema", name: "wardrobe_shopping_assessment", strict: true, schema: assessmentSchema(items.map((item) => item.id)) } },
+      ] }], text: { format: { type: "json_schema", name: "wardrobe_shopping_assessment", strict: true, schema: assessmentSchema(items.map((item) => item.id), visualOverlap) } },
     };
     const response = await apiRequest(request, controller);
     const output = response?.output_text || (Array.isArray(response?.output) ? response.output.flatMap((entry) => Array.isArray(entry?.content) ? entry.content : []).filter((entry) => entry?.type === "output_text").map((entry) => entry.text).join("") : "");
     let assessment;
     try { assessment = JSON.parse(output); } catch { throw fail("The shopping assistant returned unreadable output. Please try again.", 502); }
-    return { assessment: validateAssessment(assessment, items), context: { wardrobeCount: items.length, modelReferenceId: reference.id, modelReferenceLabel: reference.label }, analyzedAt: new Date().toISOString() };
+    let nominees;
+    if (visualOverlap) {
+      nominees = assessment?.overlapItemIds;
+      if (!Array.isArray(nominees) || nominees.length > 3 || new Set(nominees).size !== nominees.length || nominees.some(id => !items.some(item => item.id === id))) throw fail("The shopping assistant returned an invalid comparison shortlist. Please try again.", 502);
+      const { overlapItemIds, ...rest } = assessment;
+      assessment = rest;
+    }
+    const validated = validateAssessment(assessment, items);
+    const visualComparison = visualOverlap ? await compareShoppingOverlap({ candidate, notes,
+      items: nominees.map(id => items.find(item => item.id === id)), sourceHashes, dataDir, env: overlapEnv, controller,
+      ensureActive: () => ensureRequest(controller), fetch: options.fetch, beforePaidCall: options.beforePaidCall,
+      outsideLease: options.outsideLease, timeoutMs: options.overlapTimeoutMs,
+    }) : null;
+    ensureRequest(controller);
+    if (visualComparison?.state === "checked") {
+      const current = await inventory();
+      if (nominees.some(id => !current.get(id)?.candidates.includes(items.find(item => item.id === id).file))) {
+        visualComparison.state = "unavailable"; visualComparison.matches = [];
+      }
+    }
+    return { assessment: validated, ...(visualComparison ? { visualOverlap: visualComparison } : {}), context: { wardrobeCount: items.length, modelReferenceId: reference.id, modelReferenceLabel: reference.label }, analyzedAt: new Date().toISOString() };
   }
 
   async function handler(req, res, next) {
@@ -339,6 +367,7 @@ Owned inventory: ${JSON.stringify(items.map(({ file, ...item }, index) => ({ ...
         const [refs, items] = await Promise.all([references(), inventory()]);
         const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
         return sendJson(res, 200, { ready: hasApiKey && refs.length > 0 && items.size > 0, hasApiKey, hasModelReference: refs.length > 0,
+          ...(shoppingOverlapReady({ ...process.env, ...options.env }) ? { visualOverlapEnabled: true } : {}),
           modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), wardrobeCount: items.size });
       }
       if (req.method === "POST" && [`${API}/analyze`, `${API}/gaps`].includes(url.pathname)) {

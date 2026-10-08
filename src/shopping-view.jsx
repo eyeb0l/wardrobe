@@ -127,6 +127,26 @@ function WardrobeGaps({ wardrobeItems, itemsById, loading, wardrobeError, config
   </section>;
 }
 
+function VisualOverlap({ comparison, itemsById }) {
+  if (!comparison) return null;
+  if (comparison.state === "unavailable") return <p className="shopping-small shopping-overlap-note" role="status">The individual-photo comparison couldn’t finish. The written assessment is still available; overlap remains unconfirmed.</p>;
+  if (comparison.state === "not-shortlisted") return <p className="shopping-small shopping-overlap-note">No close possibilities were shortlisted for individual-photo comparison. This doesn’t rule out overlap elsewhere in your wardrobe.</p>;
+  if (comparison.state !== "checked" || !Array.isArray(comparison.matches)) return null;
+  const labels = { "close-overlap": "Close overlap", different: "Meaningfully different", unclear: "Unclear" };
+  return <div className="shopping-overlap">
+    <p className="shopping-small shopping-overlap-note">Individual photos checked for {comparison.matches.length} shortlisted {comparison.matches.length === 1 ? "piece" : "pieces"}. Other pieces haven’t been compared individually.</p>
+    <div className="shopping-overlap-matches">{comparison.matches.map(({ itemId, status }) => {
+      const item = itemsById.get(itemId);
+      if (!item) return null;
+      return <figure className="shopping-overlap-match" key={itemId}>
+        <Photo src={item.thumbnail || item.image} alt={item.name || "Owned garment"} />
+        <figcaption><span className="shopping-overlap-name">{item.name || "Owned garment"}</span><span className={`shopping-overlap-status${status === "close-overlap" ? " is-close" : ""}`}>{labels[status] || labels.unclear}</span></figcaption>
+      </figure>;
+    })}</div>
+    {comparison.matches.some(match => match.status === "unclear") ? <p className="shopping-small shopping-overlap-note">Unclear means the images don’t support a confident comparison. Check those details before deciding.</p> : null}
+  </div>;
+}
+
 function Assessment({ result, itemsById, headingRef, titleId }) {
   const { assessment, context } = result;
   const pairings = Array.isArray(assessment.pairings) ? assessment.pairings : [];
@@ -143,7 +163,7 @@ function Assessment({ result, itemsById, headingRef, titleId }) {
         ["With your reference", assessment.personalFit],
         ["In your wardrobe", assessment.wardrobeFit],
         ["Anything similar?", assessment.overlap],
-      ].map(([label, description]) => description ? <section key={label} className="shopping-assessment-point"><h3>{label}</h3><p>{description}</p></section> : null)}
+      ].map(([label, description]) => description ? <section key={label} className="shopping-assessment-point"><h3>{label}</h3><p>{description}</p>{label === "Anything similar?" ? <VisualOverlap comparison={result.visualOverlap} itemsById={itemsById} /> : null}</section> : null)}
     </div>
     {watchOuts.length ? <section className="shopping-watch-outs"><h3>Before you decide</h3><ul>{watchOuts.map((point, index) => <li key={index}>{point}</li>)}</ul></section> : null}
     {pairings.length ? <section className="shopping-pairings" aria-label="Ways to wear it with your wardrobe">
@@ -433,6 +453,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
 
           <div className="shopping-submit-area">
             <p className="shopping-disclosure">This check sends your image, selected model reference and wardrobe photos to the AI service.</p>
+            {config?.visualOverlapEnabled ? <p className="shopping-small">Also compares individual photos of up to three similar owned pieces.</p> : null}
             {analysisError ? <p className="shopping-error" role="alert">{uiErrorMessage(analysisError)}</p> : null}
             <button className="shopping-primary" type="submit" disabled={!canAnalyze}>{analyzing ? "Checking your wardrobe…" : analysisError ? "Try again" : result ? "Check again" : "Check this piece"}<ArrowRight size={17} aria-hidden="true" /></button>
             {analyzing ? <div className="shopping-analysis-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p>Looking at the piece, your reference and possible combinations. This can take a minute.</p></div> : null}

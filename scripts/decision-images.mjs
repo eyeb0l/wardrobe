@@ -8,6 +8,14 @@ const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 const fail = () => Object.assign(new Error("An image is unavailable for checking. Refresh and review it again."), { status: 409 });
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 
+export async function prepareDecisionBytes(bytes) {
+  if (bytes.length > 30 * 1024 * 1024) throw fail();
+  const image = await sharp(bytes, { limitInputPixels: 50_000_000, animated: false }).rotate()
+    .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
+    .flatten({ background: "#ffffff" }).jpeg({ quality: 85 }).toBuffer();
+  return { image_url: `data:image/jpeg;base64,${image.toString("base64")}` };
+}
+
 export async function decisionImageIdentity(file) {
   const immutable = await imageIdentity(file);
   if (immutable) return `hosted:${JSON.stringify(immutable)}`;
@@ -30,10 +38,8 @@ export async function prepareDecisionImage(file) {
     if (bytes.length > 30 * 1024 * 1024) throw fail();
     // White preserves holes in transparent cutouts without sending alpha or
     // display transforms. Rotate before sizing and strip EXIF metadata.
-    const image = await sharp(bytes, { limitInputPixels: 50_000_000, animated: false }).rotate()
-      .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
-      .flatten({ background: "#ffffff" }).jpeg({ quality: 85 }).toBuffer();
-    const value = { identity, image_url: `data:image/jpeg;base64,${image.toString("base64")}` };
+    const image = await prepareDecisionBytes(bytes);
+    const value = { identity, ...image };
     const size = Buffer.byteLength(value.image_url);
     while (prepared.size && (prepared.size >= 64 || cacheBytes + size > MAX_CACHE_BYTES)) {
       const oldest = prepared.keys().next().value;
