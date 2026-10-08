@@ -163,10 +163,15 @@ export function wardrobeDiscoveryApi(options = {}) {
           usedImages.set(image.file, image);
         }
         check();
+        const validate = async () => {
+          check();
+          if (!(await discoverySubjectUnchanged(dataDir, subject, images))) throw fail("Your wardrobe changed during the search. Please try again.", 409);
+        };
         return rankWithDecisions({ brief: input.brief, context, candidates, images,
           usageLog: decisionUsageLog(dataDir, swapOutfit ? "owned-piece-swap" : "saved-look-search"),
-          namespace: [dataDir, source.fingerprint], env, fetch: options.fetch, outsideLease: options.outsideLease,
-          beforePaidCall: async kind => { check(); await options.beforePaidCall?.(kind); check(); }, timeoutMs: Math.max(1, deadline - Date.now()) });
+          namespace: [dataDir, source.fingerprint], env, fetch: options.fetch, withDecisionLease: options.withDecisionLease,
+          outsideLease: options.outsideLease ? callback => options.outsideLease(callback, validate) : undefined,
+          beforePaidCall: async kind => { await validate(); await options.beforePaidCall?.(kind); check(); }, timeoutMs: Math.max(1, deadline - Date.now()) });
       };
       const result = await rankDiscovery({ candidates, scoreBatch, ensureActive });
       const rankings = result.rankings.map(row => ({ ...row, novelty: novelty.get(row.id) || 0 }));

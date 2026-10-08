@@ -9,7 +9,8 @@ import { generateWardrobe } from "./generation-workflow.mjs";
 import { recoverOutbox } from "./outbox.mjs";
 import { maintenance } from "./maintenance.mjs";
 import { hostedEnabled } from "./hosted-enabled.mjs";
-import { outsideRequestLease } from "./request-lease.mjs";
+import { outsideRequestLease, independentDecisionLeases } from "./request-lease.mjs";
+import { shoppingOverlapReady } from "../scripts/shopping-overlap.mjs";
 
 let lastRecovery = 0;
 let imageStore;
@@ -49,6 +50,8 @@ export default async function handler(req, res) {
   if (!kind) return json(res, 404, { error: "Not found" });
   if (!["GET", "POST", "DELETE", "PATCH", "PUT"].includes(req.method)) return json(res, 405, { error: "Method not allowed" });
   const readOnly = req.method === "GET";
+  const independentDecisions = independentDecisionLeases(pathname)
+    && (kind !== "shopping" || shoppingOverlapReady(process.env));
   if (readOnly && pathname.endsWith("/jobs") && Date.now() - lastRecovery > 30_000) {
     lastRecovery = Date.now();
     waitUntil(recoverOutbox());
@@ -80,8 +83,10 @@ export default async function handler(req, res) {
       return;
     }
     plugin = await createPlugin(kind, {
-      readOnly, beforePaidCall: reservePaidCall,
-      outsideLease: callback => outsideRequestLease(store, pathname, callback),
+      readOnly,
+      beforePaidCall: independentDecisions ? kind => store.withLease(() => reservePaidCall(kind), { waitMs: 8_000, signal: waiting.signal }) : reservePaidCall,
+      withDecisionLease: independentDecisions ? callback => store.withLease(callback, { waitMs: 8_000, signal: waiting.signal }) : undefined,
+      outsideLease: (callback, validate) => outsideRequestLease(store, pathname, callback, validate),
       scheduleTask: async (payload) => {
         const task = await createTask(payload);
         try {
@@ -108,7 +113,7 @@ export default async function handler(req, res) {
   // A finished image can be visible while its worker is recording completion.
   // Keep this action pending through that short handoff instead of returning
   // an error that forces the user to click again. Long-running work still wins.
-  try { await (readOnly ? serve() : store.withLease(serve, { waitMs: 8_000, signal: waiting.signal })); }
+  try { await (readOnly || independentDecisions ? serve() : store.withLease(serve, { waitMs: 8_000, signal: waiting.signal })); }
   catch (error) {
     if (!res.writableEnded && !waiting.signal.aborted) json(res, error.status || 503, { error: error.status ? error.message : "The wardrobe is temporarily unavailable. Please try again." });
   } finally {

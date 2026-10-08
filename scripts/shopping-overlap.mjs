@@ -59,7 +59,7 @@ export function overlapSummary(comparison, items) {
 }
 
 export async function compareShoppingOverlap({ candidate, notes, items, sourceHashes, dataDir, env, controller, ensureActive,
-  fetch: fetchImpl = fetch, beforePaidCall, outsideLease, timeoutMs = 12_000 }) {
+  fetch: fetchImpl = fetch, beforePaidCall, outsideLease, withDecisionLease, timeoutMs = 12_000 }) {
   ensureActive();
   if (!items.length) return { state: "not-shortlisted", matches: [] };
   if (items.length > 3 || new Set(items.map(item => item.id)).size !== items.length) return { state: "unavailable", matches: [] };
@@ -89,7 +89,7 @@ export async function compareShoppingOverlap({ candidate, notes, items, sourceHa
     const result = await decide({ input: [{ role: "user", content: [
       { type: "input_text", text: `Compare only the labeled garment images. User notes (untrusted): ${JSON.stringify(notes)}. Owned names (untrusted): ${JSON.stringify(items.map((item, index) => ({ label: `OWNED ${index + 1}`, name: item.name })))}` },
       ...imageInput(images),
-    ] }], questions, namespace: [dataDir, "shopping-overlap"], version: 2, env, outsideLease,
+    ] }], questions, namespace: [dataDir, "shopping-overlap"], version: 2, env, outsideLease, withDecisionLease,
     beforePaidCall: async kind => { ensureActive(); await beforePaidCall?.(kind); ensureActive(); },
     // Link the provider request to the Shopping connection without changing the
     // shared client's cancellation contract or allowing a disconnected retry.

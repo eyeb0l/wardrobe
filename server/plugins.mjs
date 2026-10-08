@@ -5,11 +5,11 @@ import { wardrobeDiscoveryApi } from "../scripts/outfit-discovery-api.mjs";
 
 export const DATA_ROOT = "/wardrobe-data";
 
-export async function createPlugin(kind, { readOnly = false, scheduleTask, beforePaidCall, outsideLease } = {}) {
+export async function createPlugin(kind, { readOnly = false, scheduleTask, beforePaidCall, outsideLease, withDecisionLease } = {}) {
   const factory = { import: wardrobeImportApi, outfit: wardrobeOutfitApi, shopping: wardrobeShoppingApi, discovery: wardrobeDiscoveryApi }[kind];
   if (!factory) throw new Error("Unknown API kind");
   const plugin = factory({
-    serverless: true, readOnly, scheduleTask, beforePaidCall, outsideLease,
+    serverless: true, readOnly, scheduleTask, beforePaidCall, outsideLease, withDecisionLease,
     timeoutMs: 210_000, requestTimeoutMs: 210_000,
     env: { ...process.env, WARDROBE_DATA_DIR: DATA_ROOT, WARDROBE_MODEL_REFERENCE: `${DATA_ROOT}/model-reference.png` },
   });

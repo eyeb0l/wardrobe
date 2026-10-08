@@ -1,7 +1,14 @@
 import { readFile } from "../scripts/storage-fs.mjs";
 import { CLOUD_ROOT } from "../scripts/cloud-store.mjs";
 
-export async function outsideRequestLease(store, pathname, callback) {
+export const independentDecisionLeases = pathname => [
+  "/api/outfits/discovery/rank", "/api/outfits/discovery/swaps", "/api/shopping/analyze",
+].includes(pathname);
+
+export async function outsideRequestLease(store, pathname, callback, validate) {
+  // Parallel discovery decisions need independent owners, not concurrent
+  // suspensions of one request-wide owner. Their caller validates its evidence.
+  if (independentDecisionLeases(pathname)) return store.withoutLease(callback, validate);
   const imported = pathname.match(/^\/api\/import\/jobs\/([a-f0-9-]{36})\/(?:preflight|stages\/garment\/cleanup-preview)$/i);
   const outfit = pathname.match(/^\/api\/outfits\/jobs\/([a-f0-9-]{36})\/outfits\/[a-z0-9-]+\/check$/i);
   if (!imported && !outfit) return callback();

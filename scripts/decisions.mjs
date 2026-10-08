@@ -69,7 +69,11 @@ export function validateDecisionAnswers(result, questions, model) {
 
 // A shared client for bounded image judgments. Never logs evidence or provider
 // response bodies; only successful, validated answers enter the process cache.
-export async function decide({ input, questions, namespace, version = 1, env = process.env,
+export async function decide({ withDecisionLease, ...options }) {
+  return withDecisionLease ? withDecisionLease(() => runDecision(options)) : runDecision(options);
+}
+
+async function runDecision({ input, questions, namespace, version = 1, env = process.env,
   fetch: fetchImpl = fetch, beforePaidCall, outsideLease = fn => fn(), timeoutMs = 12_000, usageLog, cacheMode = "default" }) {
   if (!decisionsConfig(env).ready) throw fail("Image suggestions are unavailable. You can still review and browse your wardrobe.");
   if (!Array.isArray(questions) || !questions.length || questions.length > 64

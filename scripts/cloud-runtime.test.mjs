@@ -8,7 +8,7 @@ import { currentStorage, mkdir, readFile, withStorage, writeFile } from "./stora
 import { createPlugin } from "../server/plugins.mjs";
 import { executeCloudTask, INTERRUPTED } from "../server/task-runner.mjs";
 import { createTask, readTask, saveTask } from "../server/task-store.mjs";
-import { outsideRequestLease } from "../server/request-lease.mjs";
+import { outsideRequestLease, independentDecisionLeases } from "../server/request-lease.mjs";
 import { decide } from "./decisions.mjs";
 import { decisionsResponse } from "./test-helpers/decisions-response.mjs";
 
@@ -534,6 +534,72 @@ test("duplicate hosted image checks release both leases and share one paid reque
   assert.equal(calls, 1);
   assert.equal(reservations, 1);
 });
+
+for (const pathname of ["/api/outfits/discovery/rank", "/api/outfits/discovery/swaps", "/api/shopping/analyze"]) {
+  test(`${pathname} can queue parallel decisions behind image checks without holding their writer lease`, async t => {
+    const h = await harness(t), id = randomUUID();
+    await h.write(async () => {
+      await mkdir(`${CLOUD_ROOT}/outfit-jobs/${id}`, { recursive: true });
+      await writeFile(`${CLOUD_ROOT}/outfit-jobs/${id}/job.json`, "review");
+      await writeFile(`${CLOUD_ROOT}/library.json`, "original");
+    });
+    let release, started, queued, active = 0, peak = 0, calls = 0, reservations = 0, validations = 0, queueCount = 0;
+    const gate = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { started = resolve; });
+    const waiting = new Promise(resolve => { queued = resolve; });
+    const logErrors = [];
+    const request = (route, index, blocked = false) => withStorage(h.store, () => decide({
+      namespace: [id, index], env: { WARDROBE_DECISIONS_ENABLED: "1", OPENAI_API_KEY: "test-key" },
+      input: "fixture", questions: [{ type: "predicate", name: "clear" }], timeoutMs: 5000,
+      withDecisionLease: callback => h.store.withLease(callback, { waitMs: 5000 }),
+      beforePaidCall: async () => { await h.store.assertLease(); reservations++; },
+      usageLog: async () => { try { await h.store.assertLease(); } catch (error) { logErrors.push(error); } },
+      outsideLease: callback => outsideRequestLease(h.store, route, async () => {
+        if (!blocked && ++queueCount === 2) queued();
+        return callback();
+      }, async () => {
+        await h.store.assertLease();
+        assert.equal(await readFile(`${CLOUD_ROOT}/library.json`, "utf8"), "original");
+        validations++;
+      }),
+      fetch: async (_, init) => {
+        calls++; active++; peak = Math.max(peak, active);
+        if (blocked && active === 2) started();
+        if (blocked) await gate;
+        active--;
+        return Response.json(decisionsResponse(JSON.parse(init.body)));
+      },
+    }));
+    assert.equal(independentDecisionLeases(pathname), true);
+    const blockers = [0, 1].map(index => request(`/api/outfits/jobs/${id}/outfits/look-${index}/check`, index, true));
+    await entered;
+    // Both calls share the same warm store and request storage context, as the
+    // two candidate workers in one hosted discovery request do.
+    const followers = [2, 3].map(index => request(pathname, index));
+    let results;
+    try {
+      await waiting;
+    } finally { release(); results = await Promise.all([...blockers, ...followers]); }
+    assert.equal(results.length, 4);
+    assert.equal(calls, 4);
+    assert.equal(reservations, 4);
+    assert.equal(peak, 2);
+    assert.ok(validations >= 4, "queued work and provider results must each validate after reacquisition");
+    assert.deepEqual(logErrors, []);
+  });
+
+  test(`${pathname} rejects changed evidence after reacquiring its independent lease`, async t => {
+    const h = await harness(t), file = `${CLOUD_ROOT}/library.json`;
+    await h.write(() => writeFile(file, "original"));
+    await assert.rejects(h.write(() => outsideRequestLease(h.store, pathname, async () => {
+      const other = h.otherStore();
+      await other.withLease(() => other.writeFile(file, "edited"));
+    }, async () => {
+      if (await readFile(file, "utf8") !== "original") throw Object.assign(new Error("Evidence changed"), { status: 409 });
+    })), { status: 409 });
+    assert.equal(await h.store.readFile(file, "utf8"), "edited");
+  });
+}
 
 test('expired cleanup resumes for free while an expired paid step is never replayed', async t => {
   const h=await harness(t),jobId=randomUUID(),file=`${CLOUD_ROOT}/jobs/${jobId}/job.json`;

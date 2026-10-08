@@ -30,7 +30,7 @@ const image = (bytes, format, label) => {
 // The verdict is selected from fixed choices before the assistant writes its
 // explanation. Neither an assistant verdict nor its preliminary prose is input.
 export async function decideShoppingVerdict({ candidate, referenceImage, sheets, items, notes, comparison, dataDir, env,
-  controller, ensureActive, fetch: fetchImpl = fetch, beforePaidCall, outsideLease, timeoutMs = 12_000 }) {
+  controller, ensureActive, fetch: fetchImpl = fetch, beforePaidCall, outsideLease, withDecisionLease, timeoutMs = 12_000 }) {
   const active = () => { controller?.signal.throwIfAborted(); ensureActive?.(); };
   active();
   let onAbort;
@@ -61,7 +61,7 @@ export async function decideShoppingVerdict({ candidate, referenceImage, sheets,
       ] },
     ];
     active();
-    const work = decide({ input, questions, namespace: [dataDir, "shopping-verdict"], version: 1, env, outsideLease, timeoutMs,
+    const work = decide({ input, questions, namespace: [dataDir, "shopping-verdict"], version: 1, env, outsideLease, withDecisionLease, timeoutMs,
       usageLog: decisionUsageLog(dataDir, "shopping-verdict"),
       beforePaidCall: async kind => { active(); await beforePaidCall?.(kind); active(); },
       fetch: (url, options) => { active(); return fetchImpl(url, { ...options,

@@ -364,13 +364,16 @@ export function wardrobeShoppingApi(options = {}) {
       await assertSnapshot();
       visualComparison = await compareShoppingOverlap({ candidate, notes,
         items: nominees.map(id => items.find(item => item.id === id)), sourceHashes, dataDir, env: overlapEnv, controller,
-        ensureActive: () => ensureRequest(controller), fetch: options.fetch, beforePaidCall: options.beforePaidCall,
-        outsideLease: options.outsideLease, timeoutMs: options.overlapTimeoutMs,
+        ensureActive: () => ensureRequest(controller), fetch: options.fetch,
+        beforePaidCall: async kind => { await assertSnapshot(); await options.beforePaidCall?.(kind); },
+        withDecisionLease: options.withDecisionLease,
+        outsideLease: options.outsideLease ? callback => options.outsideLease(callback, assertSnapshot) : undefined, timeoutMs: options.overlapTimeoutMs,
       });
       await assertSnapshot();
       shoppingDecision = await decideShoppingVerdict({ candidate, referenceImage, sheets, items, notes, comparison: visualComparison,
         dataDir, env: overlapEnv, controller, ensureActive: () => ensureRequest(controller), fetch: options.fetch,
-        beforePaidCall: options.beforePaidCall, outsideLease: options.outsideLease, timeoutMs: options.verdictTimeoutMs,
+        beforePaidCall: async kind => { await assertSnapshot(); await options.beforePaidCall?.(kind); }, withDecisionLease: options.withDecisionLease,
+        outsideLease: options.outsideLease ? callback => options.outsideLease(callback, assertSnapshot) : undefined, timeoutMs: options.verdictTimeoutMs,
       });
       await assertSnapshot();
       fixedOverlap = overlapSummary(visualComparison, items);
