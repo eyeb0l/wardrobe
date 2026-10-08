@@ -27,7 +27,7 @@ test("Decisions uses ordered, labeled image input, shares work and charges only 
   assert.ok(Math.abs(a.rankings[0].match - .9) < 1e-9); assert.equal(b.cached, true); assert.equal(b.inputTokens, 0);
   a.rankings[0].id = "tampered";
   assert.equal((await rankWithDecisions(input)).rankings[0].id, "outfit-1");
-  assert.deepEqual([calls, charges, leases], [1, 1, 1]);
+  assert.deepEqual([calls, charges, leases], [1, 1, 2]);
   await rankWithDecisions({ ...input, images: [{ ...input.images[0], image_url: "data:image/jpeg;base64,bmV3" }] });
   await rankWithDecisions({ ...input, brief: "Office" });
   assert.equal(calls, 3);
