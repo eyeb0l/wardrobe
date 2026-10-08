@@ -12,7 +12,9 @@
     "test": "node --test scripts/*.test.mjs",
     "check": "npm run build",
     "build:vercel": "vite build && nitro build && node scripts/package-workflow-native.mjs && node scripts/verify-vercel-spa.mjs",
-    "cloud:import": "node scripts/migrate-to-cloud.mjs"
+    "cloud:import": "node scripts/migrate-to-cloud.mjs",
+    "decisions:eval": "node scripts/decision-evaluation-runner.mjs",
+    "decisions:usage": "node scripts/decision-usage-report.mjs"
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.2.8",

@@ -127,6 +127,30 @@ function WardrobeGaps({ wardrobeItems, itemsById, loading, wardrobeError, config
   </section>;
 }
 
+function VisualOverlap({ comparison, itemsById }) {
+  if (!comparison) return null;
+  if (comparison.state !== "checked") return null;
+  if (comparison.state !== "checked" || !Array.isArray(comparison.matches)) return null;
+  const labels = {
+    silhouette: { similar: "Similar silhouette", different: "Different silhouette", unclear: "Silhouette unclear" },
+    colour: { similar: "Similar colour/pattern", different: "Different colour/pattern", unclear: "Colour/pattern unclear" },
+    styling: { similar: "Similar styling possibilities", different: "Different styling possibilities", unclear: "Styling possibilities unclear" },
+  };
+  return <div className="shopping-overlap">
+    <p className="shopping-small shopping-overlap-note">Individual photos checked for {comparison.matches.length} shortlisted {comparison.matches.length === 1 ? "piece" : "pieces"}. Other pieces haven’t been compared individually. Styling possibilities are suggestions to consider.</p>
+    <div className="shopping-overlap-matches">{comparison.matches.map(match => {
+      const { itemId } = match;
+      const item = itemsById.get(itemId);
+      if (!item) return null;
+      return <figure className="shopping-overlap-match" key={itemId}>
+        <Photo src={item.thumbnail || item.image} alt={item.name || "Owned garment"} />
+        <figcaption><span className="shopping-overlap-name">{item.name || "Owned garment"}</span>{Object.entries(labels).map(([axis, values]) => <span key={axis} className="shopping-overlap-status">{values[match[axis]] || values.unclear}</span>)}</figcaption>
+      </figure>;
+    })}</div>
+    {comparison.matches.some(match => [match.silhouette, match.colour, match.styling].includes("unclear")) ? <p className="shopping-small shopping-overlap-note">Unclear means the images don’t support a confident comparison on that detail.</p> : null}
+  </div>;
+}
+
 function Assessment({ result, itemsById, headingRef, titleId }) {
   const { assessment, context } = result;
   const pairings = Array.isArray(assessment.pairings) ? assessment.pairings : [];
@@ -136,6 +160,7 @@ function Assessment({ result, itemsById, headingRef, titleId }) {
       <p className="shopping-eyebrow">{assessment.itemName || "Your potential addition"}</p>
       <h2 id={titleId} ref={headingRef} tabIndex={-1}>{VERDICTS[assessment.verdict] || VERDICTS.unclear}</h2>
       <p className="shopping-assessment-summary">{assessment.summary}</p>
+      {result.shoppingDecision?.state === "unavailable" ? <p className="shopping-small shopping-decision-note" role="status">The recommendation check couldn’t finish. This assessment stays uncertain.</p> : result.shoppingDecision?.state === "unclear" ? <p className="shopping-small shopping-decision-note" role="status">The photos and context don’t support a confident recommendation yet.</p> : null}
       {context ? <p className="shopping-small shopping-assessment-context">Compared with {context.wardrobeCount} {context.wardrobeCount === 1 ? "wardrobe piece" : "wardrobe pieces"}{context.modelReferenceLabel ? ` and ${context.modelReferenceLabel}` : ""}.</p> : null}
     </header>
     <div className="shopping-assessment-details">
@@ -143,7 +168,7 @@ function Assessment({ result, itemsById, headingRef, titleId }) {
         ["With your reference", assessment.personalFit],
         ["In your wardrobe", assessment.wardrobeFit],
         ["Anything similar?", assessment.overlap],
-      ].map(([label, description]) => description ? <section key={label} className="shopping-assessment-point"><h3>{label}</h3><p>{description}</p></section> : null)}
+      ].map(([label, description]) => description ? <section key={label} className="shopping-assessment-point"><h3>{label}</h3><p>{description}</p>{label === "Anything similar?" ? <VisualOverlap comparison={result.visualOverlap} itemsById={itemsById} /> : null}</section> : null)}
     </div>
     {watchOuts.length ? <section className="shopping-watch-outs"><h3>Before you decide</h3><ul>{watchOuts.map((point, index) => <li key={index}>{point}</li>)}</ul></section> : null}
     {pairings.length ? <section className="shopping-pairings" aria-label="Ways to wear it with your wardrobe">
@@ -433,6 +458,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
 
           <div className="shopping-submit-area">
             <p className="shopping-disclosure">This check sends your image, selected model reference and wardrobe photos to the AI service.</p>
+            {config?.visualOverlapEnabled ? <p className="shopping-small">Also compares individual photos of up to three similar owned pieces.</p> : null}
             {analysisError ? <p className="shopping-error" role="alert">{uiErrorMessage(analysisError)}</p> : null}
             <button className="shopping-primary" type="submit" disabled={!canAnalyze}>{analyzing ? "Checking your wardrobe…" : analysisError ? "Try again" : result ? "Check again" : "Check this piece"}<ArrowRight size={17} aria-hidden="true" /></button>
             {analyzing ? <div className="shopping-analysis-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p>Looking at the piece, your reference and possible combinations. This can take a minute.</p></div> : null}

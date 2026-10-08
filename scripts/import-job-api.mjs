@@ -7,7 +7,10 @@ import { inspectProductBackground, applyProductMask } from "./product-cutout.mjs
 import { generationAttempt, garmentTelemetry, manualTelemetry } from "./generation-telemetry.mjs";
 import { readLibrary, withLibraryLock, publicLibraryItem, saveLibraryEdit, deleteLibraryItem, migrateLibraryEdits, editableFields } from './wardrobe-library.mjs';
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "./storage-fs.mjs";
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile, containedFiles } from "./storage-fs.mjs";
+import { decisionsConfig, hashEvidence } from "./decisions.mjs";
+import { checkDecisionImages } from "./decision-checks.mjs";
+import { decisionUsageLog } from "./decision-usage.mjs";
 import path from "node:path";
 import sharp from "sharp";
 import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
@@ -374,6 +377,7 @@ export function wardrobeImportApi(options = {}) {
       hasModelReference,
       modelReference: referenceSetting,
       modelReferences: references.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })),
+      imageChecks: decisionsConfig({ ...process.env, ...options.env }),
     };
   }
 
@@ -913,6 +917,33 @@ export function wardrobeImportApi(options = {}) {
       if (!job) return json(res, 404, { error: "Job not found" });
       const action = match[2] || "";
       if (!action && req.method === "GET") return json(res, 200, publicJob(job));
+      if (action === "preflight" && req.method === "POST") {
+        validateServerlessMutation(req);
+        await body(req, 4096, true);
+        requireDetectionReview(job);
+        const env = { ...process.env, ...options.env };
+        if (!decisionsConfig(env).ready) throw Object.assign(new Error("Image checks are unavailable. You can still review the crop yourself."), { status: 503 });
+        const dir = path.join(jobsDir, job.id);
+        const assets = await containedFiles(dir, [job.internal.originalFile, job.internal.cropFile]);
+        if (assets.size !== new Set([job.internal.originalFile, job.internal.cropFile]).size) throw Object.assign(new Error("The source or crop is unavailable. Refresh the import."), { status: 409 });
+        const fingerprint = hashEvidence([job.updatedAt, job.metadata, job.internal.cropFile, job.stages.crop]);
+        const result = await checkDecisionImages("preflight", {
+          usageLog: decisionUsageLog(dataDir, "preflight"),
+          env, namespace: [dataDir, job.id, fingerprint], fetch: options.fetch, outsideLease: options.outsideLease,
+          beforePaidCall: async kind => {
+            if (req.aborted || res.destroyed) throw Object.assign(new Error("The image check was cancelled."), { status: 499 });
+            await options.beforePaidCall?.(kind);
+          },
+          timeoutMs: Math.min(timeoutMs ?? 12_000, 12_000),
+          entries: [{ label: "source", file: assets.get(job.internal.originalFile) }, { label: "target", file: assets.get(job.internal.cropFile) }],
+          metadata: { category: job.metadata.part, name: String(job.metadata.name || "").slice(0, 200) },
+          stillCurrent: async () => {
+            const fresh = await loadJob(job.id);
+            return fresh && hashEvidence([fresh.updatedAt, fresh.metadata, fresh.internal.cropFile, fresh.stages.crop]) === fingerprint;
+          },
+        });
+        return json(res, 200, result);
+      }
       if (req.method !== "GET" && Object.values(job.stages).some(stage => ["processing", "cleaning"].includes(stage.status))) {
         return json(res, 409, { error: "This item is still being prepared. Your other items remain available." });
       }

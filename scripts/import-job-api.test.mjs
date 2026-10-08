@@ -11,6 +11,7 @@ import sharp from "sharp";
 import { chooseChromaKey, hasCleanProductBackground, wardrobeImportApi } from "./import-job-api.mjs";
 import { buildModeledPhotoPrompt, buildModeledSettingPrompt } from "./modeled-photo-prompts.mjs";
 import { withStorage } from "./storage-fs.mjs";
+import { decisionsResponse } from "./test-helpers/decisions-response.mjs";
 
 test("chroma selection protects either recorded garment color", () => {
   for (const [primary, secondary, expected] of [
@@ -52,9 +53,15 @@ async function harness(t, env = {}, beforePaidCall) {
   } };
   let analysisResult = [{ name: "Grey top", part: "upperbody", color: "#777777", secondaryColor: null, tags: ["short sleeve"], boundingBox: { x: 100, y: 100, width: 800, height: 800 } }];
   let isCleanProductShot = false;
+  let decisionResponse;
   t.mock.method(globalThis, "fetch", async (url, options) => {
     assert.ok(url.startsWith("https://wardrobe-test.invalid/"));
     assert.equal(options.headers.Authorization, "Bearer test-key");
+    if (url.endsWith("/decisions")) {
+      const request = JSON.parse(options.body);
+      requests.push({ type: "decision", request });
+      return decisionResponse ? decisionResponse(request, options) : Response.json(decisionsResponse(request));
+    }
     if (url.endsWith("/responses")) {
       const request = JSON.parse(options.body);
       if (request.text.format.name === "wardrobe_modeled_setting") {
@@ -88,9 +95,9 @@ async function harness(t, env = {}, beforePaidCall) {
   await plugin.configResolved({ root });
   let handler;
   plugin.configureServer({ middlewares: { use(value) { handler = value; } } });
-  async function request(method, url, payload, expectedStatus) {
+  async function request(method, url, payload, expectedStatus, headers = {}) {
     const req = Readable.from(payload ? [Buffer.from(JSON.stringify(payload))] : []);
-    Object.assign(req, { method, url, headers: payload ? { 'content-type': 'application/json' } : {} });
+    Object.assign(req, { method, url, headers: { ...(payload ? { 'content-type': 'application/json' } : {}), ...headers } });
     let result;
     const res = { statusCode: 200, setHeader() {}, end(value) { result = Buffer.isBuffer(value) ? value : JSON.parse(value); } };
     await withStorage(storage, () => handler(req, res, () => assert.fail("Unexpected middleware fallthrough")));
@@ -107,7 +114,7 @@ async function harness(t, env = {}, beforePaidCall) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, imageReads, request, waitForStage, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
+  return { root, source, identity, requests, imageReads, request, waitForStage, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
@@ -795,4 +802,48 @@ test('cleanup acceptance requires the displayed immutable preview and makes no p
   assert.equal(accepted.stages.garment.status, 'review');
   assert.equal(accepted.stages.garment.assetUrl, secondUrl);
   assert.equal(h.requests.length, calls);
+});
+
+test('optional image preflight examines source and crop without modifying or accepting the job', async t => {
+  const charges = [];
+  const h = await harness(t, { WARDROBE_DECISIONS_ENABLED: '1' }, async kind => charges.push(kind));
+  const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: h.source.toString('base64') });
+  const jobFile = path.join(h.root, 'data', 'jobs', job.id, 'job.json');
+  const before = await readFile(jobFile, 'utf8');
+  h.setDecisions(body => {
+    assert.equal(body.input[0].content.filter(part => part.type === 'input_image').length, 2);
+    assert.doesNotMatch(JSON.stringify(body), /test-key|identity\.png|model-reference|originalAssetUrl/);
+    const result = decisionsResponse(body);
+    result.answers[0].choice = 'concern';
+    result.answers[0].probabilities = body.questions[0].choices.map(({value}) => ({value, probability: value === 'concern' ? 1 : 0}));
+    result.answers[1] = { type: 'refusal', name: body.questions[1].name };
+    return Response.json(result);
+  });
+  const result = await h.request('POST', `/api/import/jobs/${job.id}/preflight`, {});
+  assert.equal(result.status, 'needs-review');
+  assert.deepEqual(result.checks.map(check => check.state), ['concern', 'unknown', 'clear']);
+  assert.equal(await readFile(jobFile, 'utf8'), before);
+  assert.deepEqual(charges, ['text', 'text']);
+  const repeated = await h.request('POST', `/api/import/jobs/${job.id}/preflight`, {});
+  assert.equal(repeated.cached, true); assert.equal(repeated.inputTokens, 0); assert.equal(charges.length, 2);
+});
+
+test('preflight rejects disabled features and cross-site requests before inference', async t => {
+  const h = await harness(t, { WARDROBE_DECISIONS_ENABLED: '0' });
+  const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: h.source.toString('base64') });
+  await h.request('POST', `/api/import/jobs/${job.id}/preflight`, {}, 503);
+  await h.request('POST', `/api/import/jobs/${job.id}/preflight`, {}, 403, { 'sec-fetch-site': 'cross-site' });
+  assert.equal(h.requests.filter(item => item.type === 'decision').length, 0);
+});
+
+test('preflight never returns judgments for a crop replaced during inference', async t => {
+  const h = await harness(t, { WARDROBE_DECISIONS_ENABLED: '1' });
+  const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: h.source.toString('base64') });
+  h.setDecisions(async body => {
+    await writeFile(path.join(h.root, 'data', 'jobs', job.id, 'crop.png'), h.identity);
+    return Response.json(decisionsResponse(body));
+  });
+  const result = await h.request('POST', `/api/import/jobs/${job.id}/preflight`, {}, 409);
+  assert.match(result.error, /changed/);
+  assert.equal((await h.request('GET', `/api/import/jobs/${job.id}`)).stages.crop.status, 'review');
 });

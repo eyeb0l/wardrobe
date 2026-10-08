@@ -77,6 +77,14 @@
 .shopping-assessment h3 { margin: 0 0 12px; font-size: 13px; line-height: 1.5; font-weight: 550; }
 .shopping-assessment-point p, .shopping-watch-outs li, .shopping-pairing > p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.75; }
 .shopping-watch-outs { max-width: 850px; margin-top: 26px; }
+.shopping-assessment-point .shopping-overlap-note { margin-top: 16px; font-size: 11px; line-height: 1.65; }
+.shopping-overlap-matches { display: grid; gap: 14px; margin-top: 16px; }
+.shopping-overlap-match { display: flex; align-items: center; gap: 14px; margin: 0; min-width: 0; }
+.shopping-overlap-match img, .shopping-overlap-match .shopping-photo-fallback { width: 72px; height: 90px; flex-shrink: 0; object-fit: contain; mix-blend-mode: multiply; }
+.shopping-overlap-match figcaption { min-width: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.shopping-overlap-name, .shopping-overlap-status { display: block; }
+.shopping-overlap-status { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.shopping-decision-note { margin-top: 14px; }
 .shopping-watch-outs ul { padding-left: 18px; margin: 0; }
 .shopping-watch-outs li + li { margin-top: 7px; }
 .shopping-pairings { margin-top: 35px; padding-top: 26px; border-top: 1px solid var(--line); }

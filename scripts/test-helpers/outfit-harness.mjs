@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import sharp from "sharp";
 import { wardrobeOutfitApi } from "../outfit-api.mjs";
+import { decisionsResponse } from "./decisions-response.mjs";
 
 const API = "/api/outfits";
 const accessoryIdeas = ["Small gold hoops to echo the warm tones.", "A compact brown leather bag for a polished finish.", "A slim watch with a simple cream dial."];
@@ -55,10 +56,16 @@ async function harness(t, { env = {}, timeoutMs, seed = true, edit, analysis, be
   const requests = [];
   let analysisResult = analysis || [plan()];
   let editResponse = edit;
+  let decisionResponse;
   const fetchMock = async (url, options) => {
     assert.ok(url.startsWith("https://outfit-test.invalid/v1/"), "tests must never call a real provider");
     assert.equal(options.headers.Authorization, "Bearer outfit-test-key");
     assert.ok(options.signal instanceof AbortSignal);
+    if (url.endsWith("/decisions")) {
+      const request = JSON.parse(options.body);
+      requests.push({ kind: "decision", request });
+      return decisionResponse ? decisionResponse(request, options) : Response.json(decisionsResponse(request));
+    }
     if (url.endsWith("/responses")) {
       const request = JSON.parse(options.body);
       requests.push({ kind: "analysis", request });
@@ -117,7 +124,7 @@ async function harness(t, { env = {}, timeoutMs, seed = true, edit, analysis, be
   const create = (count = 1, extra = {}) => request("POST", `${API}/jobs`, { count, modelReferenceId: "default", ...extra }, 202);
   const action = (job, outfit, name, body, status = name === "retry" ? 202 : 200) => request("POST", `${API}/jobs/${job.id}/outfits/${outfit.id}/${name}`, body, status);
   return { root, dataDir, originals, items, identity, output, bytesById, requests, request, settled, create, action, restart, image, makePlugin, close: () => plugin.closeBundle(), requestPlugin: (instance, ...args) => sendRequest(middleware(instance), ...args),
-    setAnalysis(value) { analysisResult = value; }, setEdit(value) { editResponse = value; } };
+    setAnalysis(value) { analysisResult = value; }, setEdit(value) { editResponse = value; }, setDecisions(value) { decisionResponse = value; } };
 }
 
 export { API, accessoryIdeas, plan, harness };

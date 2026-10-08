@@ -8,6 +8,9 @@ import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishCandidateImage } from "./outfit-storage.mjs";
 import { acquireOutfitStoreLock } from "./outfit-store-lock.mjs";
+import { decisionsConfig, hashEvidence } from "./decisions.mjs";
+import { checkDecisionImages, imageCheckConfig } from "./decision-checks.mjs";
+import { decisionUsageLog } from "./decision-usage.mjs";
 
 const API = "/api/outfits";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -418,7 +421,7 @@ export function wardrobeOutfitApi(options = {}) {
     const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
     const hasModelReference = refs.length > 0;
     const availableCombinations = Math.max(0, counts.upperbody * counts.lowerbody - (await usedPairs(items)).size);
-    return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), counts, maxCount: 12, availableCombinations, models: models() };
+    return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), counts, maxCount: 12, availableCombinations, models: models(), imageChecks: imageCheckConfig("outfit-review", { ...process.env, ...options.env }) };
   }
 
   async function apiRequest(endpoint, init, telemetry, beforeTelemetry) {
@@ -930,6 +933,43 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if (!job) throw fail("Outfit job not found", 404);
       const action = match[2] || "";
       if (!action && req.method === "GET") return sendJson(res, 200, publicJob(job));
+      const imageCheck = action.match(/^outfits\/([a-z0-9-]+)\/check$/);
+      if (imageCheck && req.method === "POST") {
+        await readBody(req);
+        const env = { ...process.env, ...options.env };
+        if (!decisionsConfig(env).ready) throw fail("Image checks are unavailable. You can still review the photo yourself.", 503);
+        const outfit = job.outfits.find(item => item.id === imageCheck[1]);
+        if (!outfit || outfit.status !== "review" || !FILE.test(outfit.internal?.candidateFile)) throw fail("This photo is not ready for review.", 409);
+        const candidateFile = await containedFile(path.join(jobsDir, job.id), outfit.internal.candidateFile);
+        const items = await inventory({ verifyImages: false });
+        if (outfit.garmentIds.some(id => !items.has(id))) throw fail("One of this outfit's pieces is no longer available. Refresh your wardrobe.", 409);
+        const pieces = outfit.garmentIds.map(id => items.get(id));
+        const metadata = pieces.map(({ file, ...item }, index) => ({ ...item, visualEvidence: `garment_${index}` }));
+        const fingerprint = hashEvidence([job.updatedAt, outfit, metadata]);
+        const result = await checkDecisionImages("outfit-review", {
+          usageLog: decisionUsageLog(dataDir, "outfit-review"),
+          env, namespace: [dataDir, job.id, outfit.id, fingerprint], fetch: options.fetch, outsideLease: options.outsideLease,
+          beforePaidCall: async kind => {
+            if (req.aborted || res.destroyed) throw fail("The image check was cancelled.", 499);
+            await options.beforePaidCall?.(kind);
+          },
+          timeoutMs: Math.min(options.timeoutMs ?? 12_000, 12_000), metadata: { garments: metadata },
+          entries: [{ label: "result", file: candidateFile }, ...pieces.map((piece, index) => ({ label: `garment_${index}`, file: piece.file }))],
+          stillCurrent: async () => {
+            const fresh = await requestedJob(job.id);
+            const current = fresh?.outfits.find(item => item.id === outfit.id);
+            const currentItems = await inventory({ verifyImages: false });
+            const currentMetadata = outfit.garmentIds.map((id, index) => {
+              const piece = currentItems.get(id);
+              if (!piece) return null;
+              const { file, ...item } = piece;
+              return { ...item, visualEvidence: `garment_${index}` };
+            });
+            return current?.status === "review" && hashEvidence([fresh.updatedAt, current, currentMetadata]) === fingerprint;
+          },
+        });
+        return sendJson(res, 200, result);
+      }
       const candidate = action.match(/^assets\/([^/]+)$/);
       if (candidate && req.method === "GET") {
         const filename = candidate[1];
