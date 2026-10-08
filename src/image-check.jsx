@@ -9,6 +9,9 @@ export function ImageCheck({ endpoint, fingerprint, enabled, disabled = false, a
   const [state, setState] = useState(null);
   useEffect(() => {
     controller.current?.abort(); controller.current = null;
+    // A closed review can stay mounted; release cancelled loading state so it
+    // can be checked again when reopened, without starting another request.
+    setState(current => current?.busy ? null : current);
     return () => controller.current?.abort();
   }, [endpoint, fingerprint, enabled, active]);
   if (!enabled) return null;
