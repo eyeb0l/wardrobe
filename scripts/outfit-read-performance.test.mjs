@@ -119,6 +119,7 @@ test('accepted image checks revalidate manifest membership and source existence 
   const headers = { 'if-none-match': image.headers.etag };
   h.reset();
   assert.equal((await h.request(`${API}/images/saved-look.png`, { plugin, headers })).status, 304);
+  assert.ok(h.queries.length <= 3, 'manifest, contained metadata and image identity each need at most one query');
   assert.equal(h.reads.length, 0);
   await h.store.withLease(() => h.store.writeFile(`${CLOUD_ROOT}/outfits.json`, JSON.stringify({ version: 1, outfits: [] })));
   assert.equal((await h.request(`${API}/images/saved-look.png`, { plugin, headers })).status, 404);
@@ -128,6 +129,8 @@ test('accepted image checks revalidate manifest membership and source existence 
   });
   assert.equal((await h.request(`${API}/images/saved-look.png`, { plugin, headers })).status, 404);
   assert.equal((await h.request(`${API}/images/saved-look.png`, { headers, targetStore: h.freshStore() })).status, 404);
+  await h.store.withLease(() => h.store.mkdir(`${CLOUD_ROOT}/outfit-images/saved-look.png`));
+  assert.equal((await h.request(`${API}/images/saved-look.png`, { plugin, headers })).status, 404, 'a directory cannot reuse a saved image ETag');
   assert.equal(h.reads.length, 0);
 });
 
@@ -201,6 +204,8 @@ test('individual job polls and candidate 304s read only the fresh requested job'
     baseline.push({ response: await h.request(url, options), queries: h.queries.length });
     assert.equal(h.reads.length, 0);
   }
+  assert.ok(baseline[0].queries <= 3, 'an individual poll reads the manifest, contained metadata and requested job once');
+  assert.ok(baseline[1].queries <= 5, 'a candidate 304 adds only its contained metadata and image identity');
   const unrelated = [];
   for (let index = 0; index < 25; index++) { const job = h.job(); unrelated.push(job.id); await h.writeJob(job); }
   for (const [index, [url, options]] of actions.entries()) {
@@ -210,6 +215,17 @@ test('individual job polls and candidate 304s read only the fresh requested job'
     assert.equal(h.reads.length, 0);
     assert.ok(h.queries.every(({ values }) => !values.some(value => typeof value === 'string' && unrelated.some(id => value.includes(id)))));
   }
+  await h.store.withLease(async () => {
+    const file = `${CLOUD_ROOT}/outfit-jobs/${target.id}/candidate.png`;
+    await h.store.rm(file);
+    await h.store.mkdir(file);
+  });
+  assert.equal((await h.request(candidate, actions[1][1])).status, 404, 'candidate containment refreshes a file replaced by a directory');
+  await h.store.withLease(async () => {
+    const file = `${CLOUD_ROOT}/outfit-jobs/${target.id}/candidate.png`;
+    await h.store.rm(file, { recursive: true });
+    await h.store.writeFile(file, h.png);
+  });
   // Warm readers must honor candidate membership changes, even with an ETag.
   delete target.outfits[0].internal.candidateFile;
   await h.writeJob(target);

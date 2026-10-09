@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { readFile, stat, imageIdentity } from "./storage-fs.mjs";
+import { readFile, stat, imageIdentity, originalImage } from "./storage-fs.mjs";
 
 const prepared = new Map();
+const pending = new Map();
 let cacheBytes = 0;
 const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 const fail = () => Object.assign(new Error("An image is unavailable for checking. Refresh and review it again."), { status: 409 });
@@ -34,22 +35,35 @@ export async function prepareDecisionImage(file) {
     }
     const key = JSON.stringify([file, identity]);
     if (prepared.has(key)) return { ...prepared.get(key), file };
-    bytes ||= await readFile(file);
-    if (bytes.length > 30 * 1024 * 1024) throw fail();
-    // White preserves holes in transparent cutouts without sending alpha or
-    // display transforms. Rotate before sizing and strip EXIF metadata.
-    const image = await prepareDecisionBytes(bytes);
-    // Parallel batches may finish preparing the same file while we decode it.
-    // Reuse that entry without counting its bytes twice against the cache cap.
-    if (prepared.has(key)) return { ...prepared.get(key), file };
-    const value = { identity, ...image };
-    const size = Buffer.byteLength(value.image_url);
-    while (prepared.size && (prepared.size >= 64 || cacheBytes + size > MAX_CACHE_BYTES)) {
-      const oldest = prepared.keys().next().value;
-      cacheBytes -= Buffer.byteLength(prepared.get(oldest).image_url); prepared.delete(oldest);
+    let work = pending.get(key);
+    if (!work) {
+      // Batches can share a garment. Coalesce its download and decode only
+      // after every caller has resolved the current immutable/content identity.
+      work = (async () => {
+        if (!bytes) {
+          const snapshot = await originalImage(file);
+          if (snapshot) {
+            // Never cache replacement pixels under the earlier identity. A
+            // later restoration of the original must not expose the replacement.
+            if (`hosted:${JSON.stringify(snapshot.identity)}` !== identity) throw fail();
+            bytes = snapshot.bytes;
+          } else bytes = await readFile(file);
+        }
+        // White preserves holes in transparent cutouts without sending alpha or
+        // display transforms. Rotate before sizing and strip EXIF metadata.
+        const image = await prepareDecisionBytes(bytes);
+        const value = { identity, ...image };
+        const size = Buffer.byteLength(value.image_url);
+        while (prepared.size && (prepared.size >= 64 || cacheBytes + size > MAX_CACHE_BYTES)) {
+          const oldest = prepared.keys().next().value;
+          cacheBytes -= Buffer.byteLength(prepared.get(oldest).image_url); prepared.delete(oldest);
+        }
+        if (size <= MAX_CACHE_BYTES) { prepared.set(key, value); cacheBytes += size; }
+        return value;
+      })().finally(() => pending.delete(key));
+      pending.set(key, work);
     }
-    if (size <= MAX_CACHE_BYTES) { prepared.set(key, value); cacheBytes += size; }
-    return { ...value, file };
+    return { ...await work, file };
   } catch { throw fail(); }
 }
 

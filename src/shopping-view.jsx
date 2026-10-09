@@ -38,12 +38,11 @@ function Photo({ src, alt, className = "", sizes = "(max-width: 580px) 33vw, 160
   return <OptimizedImage src={src} alt={alt} className={className} onError={() => setFailedSource(src)} sizes={sizes} />;
 }
 
-function WardrobeGaps({ wardrobeItems, itemsById, loading, wardrobeError, config, configLoading, configError, analyzing, onBusyChange }) {
+function WardrobeGaps({ wardrobeItems, fingerprint, itemsById, loading, wardrobeError, config, configLoading, configError, analyzing, onBusyChange }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const controller = useRef(null);
-  const fingerprint = JSON.stringify(wardrobeItems);
   const latestFingerprint = useRef(fingerprint);
   latestFingerprint.current = fingerprint;
   const id = useId();
@@ -129,7 +128,6 @@ function WardrobeGaps({ wardrobeItems, itemsById, loading, wardrobeError, config
 
 function VisualOverlap({ comparison, itemsById }) {
   if (!comparison) return null;
-  if (comparison.state !== "checked") return null;
   if (comparison.state !== "checked" || !Array.isArray(comparison.matches)) return null;
   const labels = {
     silhouette: { similar: "Similar silhouette", different: "Different silhouette", unclear: "Silhouette unclear" },
@@ -228,7 +226,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     secondaryColor: typeof secondaryColor === "string" ? secondaryColor.slice(0, 20) : null,
     tags: Array.isArray(tags) ? tags.filter((tag) => typeof tag === "string").slice(0, 12).map((tag) => tag.slice(0, 40)) : [],
   })), [items]);
-  const wardrobeFingerprint = JSON.stringify(wardrobeItems);
+  const wardrobeFingerprint = useMemo(() => JSON.stringify(wardrobeItems), [wardrobeItems]);
   const latestWardrobe = useRef(wardrobeFingerprint);
   latestWardrobe.current = wardrobeFingerprint;
   const setupProblem = configLoading ? "" : configError ? uiErrorMessage(configError) : setupMessage(config);
@@ -401,7 +399,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
       <p>See how a new piece could suit you and work with what you own.</p>
     </header>
 
-    <WardrobeGaps wardrobeItems={wardrobeItems} itemsById={itemsById} loading={loading} wardrobeError={wardrobeError}
+    <WardrobeGaps wardrobeItems={wardrobeItems} fingerprint={wardrobeFingerprint} itemsById={itemsById} loading={loading} wardrobeError={wardrobeError}
       config={config} configLoading={configLoading} configError={configError} analyzing={analyzing} onBusyChange={setFindingGaps} />
 
     <form className="shopping-form" onSubmit={analyze}>

@@ -95,6 +95,76 @@ test("cloud contained files batch fresh minimal metadata and reject unsafe or no
   await assert.rejects(h.store.containedFiles(`${CLOUD_ROOT}/../outside`, names), { code: "EACCES" });
 });
 
+test("cloud file metadata excludes stored contents and stays fresh after replacement and deletion", async (t) => {
+  const h = await harness(t);
+  const directory = `${CLOUD_ROOT}/metadata`, file = `${directory}/state.json`;
+  const text = JSON.stringify({ private: "x".repeat(100_000) });
+  await h.store.withLease(async () => {
+    await h.store.mkdir(`${directory}/nested`, { recursive: true });
+    await h.store.writeFile(file, text);
+    await h.store.writeFile(`${directory}/image.png`, Buffer.from([0, 1, 2]));
+  });
+  const responses = [], query = h.database.query;
+  h.database.query = async (...args) => {
+    const rows = await query(...args);
+    responses.push(rows);
+    return rows;
+  };
+  const details = await h.store.stat(file);
+  assert.equal(details.size, Buffer.byteLength(text));
+  assert.equal(details.isFile(), true);
+  assert.ok(Number.isFinite(details.mtimeMs));
+  assert.equal(await h.store.realpath(file), file);
+  assert.deepEqual(await h.store.readdir(directory), ["image.png", "nested", "state.json"]);
+  const entries = await h.store.readdir(directory, { withFileTypes: true });
+  assert.deepEqual(entries.map(entry => [entry.name, entry.isFile(), entry.isDirectory()]),
+    [["image.png", true, false], ["nested", false, true], ["state.json", true, false]]);
+  assert.equal(entries.find(entry => entry.name === "state.json").size, details.size);
+  await h.store.imageIdentity(`${directory}/image.png`);
+  assert.ok(responses.flat().every(row => !Object.hasOwn(row, "text_content")), "metadata requests do not transfer JSON bodies");
+  assert.ok(JSON.stringify(responses).length < 2048, "response size does not scale with the stored JSON body");
+  assert.equal(h.reads.length, 0);
+  assert.equal(await h.store.readFile(file, "utf8"), text, "content readers still receive complete file bytes");
+  await h.store.withLease(async () => {
+    await h.store.rm(file);
+    await h.store.mkdir(file);
+  });
+  assert.equal((await h.store.stat(file)).isDirectory(), true);
+  assert.equal((await h.store.readdir(directory, { withFileTypes: true })).find(entry => entry.name === "state.json").isDirectory(), true);
+  await h.store.withLease(() => h.store.rm(file, { recursive: true }));
+  await assert.rejects(h.store.stat(file), { code: "ENOENT" });
+  await assert.rejects(h.store.realpath(file), { code: "ENOENT" });
+  await assert.rejects(h.store.readdir(file), { code: "ENOENT" });
+  await assert.rejects(h.store.readdir(`${directory}/image.png`), { code: "ENOTDIR" });
+});
+
+test("original image bytes and identity use the same row during a concurrent path replacement", async t => {
+  const h = await harness(t);
+  const file = `${CLOUD_ROOT}/snapshot.png`, bytes = Buffer.from([0, 1, 2]), replacement = Buffer.from([0, 3, 4]);
+  await h.store.withLease(() => h.store.writeFile(file, bytes));
+  const identity = await h.store.imageIdentity(file);
+  const queries = [], query = h.database.query;
+  h.database.query = async (sql, values) => { queries.push({ sql, values }); return query(sql, values); };
+  const get = h.blob.get;
+  let replaced = false;
+  h.blob.get = async (...args) => {
+    if (!replaced) { replaced = true; await h.store.withLease(() => h.store.writeFile(file, replacement)); }
+    return get(...args);
+  };
+  const cold = h.other();
+  const captured = await cold.originalImage(file);
+  assert.equal(captured.identity, identity); assert.deepEqual(captured.bytes, bytes);
+  assert.equal(queries.filter(({ sql, values }) => /^SELECT .* FROM wardrobe_files WHERE path = \$1$/.test(sql) && values[0] === file).length, 1,
+    "the identity and bytes share one metadata lookup");
+  const current = await cold.originalImage(file);
+  assert.equal(current.identity, await h.store.imageIdentity(file));
+  assert.notEqual(current.identity, captured.identity); assert.notEqual(current.etag, captured.etag);
+  assert.deepEqual(current.bytes, replacement);
+  const downloads = h.reads.length;
+  assert.deepEqual(await cold.originalImage(file, current.etag), { identity: current.identity, etag: current.etag, notModified: true });
+  assert.equal(h.reads.length, downloads, "revalidation retains the identity without reading Blob bytes");
+});
+
 test("cloud directories, exact bytes, atomic publication and immutable links", async (t) => {
   const h = await harness(t);
   const { store } = h;

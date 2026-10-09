@@ -1,4 +1,4 @@
-import { readFile, readdir, realpath, stat, containedFiles, imageIdentity } from "./storage-fs.mjs";
+import { readFile, readdir, realpath, containedFiles, imageIdentity } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
 import { outfitContactSheets, contactThumbnail } from "./outfit-api.mjs";
@@ -20,8 +20,8 @@ const object = (value) => value !== null && typeof value === "object" && !Array.
 
 async function containedFile(directory, filename) {
   if (typeof filename !== "string" || filename !== path.basename(filename) || [".", ".."].includes(filename)) throw fail("Invalid local asset", 404);
-  const [base, resolved] = await Promise.all([realpath(directory), realpath(path.join(directory, filename))]);
-  if (!resolved.startsWith(`${base}${path.sep}`) || !(await stat(resolved)).isFile()) throw fail("Local asset is unavailable", 404);
+  const resolved = (await containedFiles(directory, [filename])).get(filename);
+  if (!resolved) throw fail("Local asset is unavailable", 404);
   return resolved;
 }
 

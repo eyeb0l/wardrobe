@@ -291,13 +291,16 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
   const busy = useRef(false);
   const mutationVersion = useRef(0);
   const resources = useRef(null);
-  const wardrobeFingerprint = JSON.stringify(items.map(({ id, part, image, revision }) => [id, part, image, revision]));
+  const wardrobeFingerprint = useMemo(() => JSON.stringify(items.map(({ id, part, image, revision }) => [id, part, image, revision])), [items]);
   const previousWardrobe = useRef(wardrobeFingerprint);
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
-  const fingerprint = discoveryFingerprint(outfits, items);
+  const fingerprint = useMemo(() => discoveryFingerprint(outfits, items), [outfits, items]);
   const currentDiscovery = discoveryConfig?.ready && discoveryResult?.fingerprint === fingerprint ? discoveryResult : null;
-  const outfitsById = new Map(outfits.map((outfit) => [outfit.id, outfit]));
-  const displayedOutfits = currentDiscovery ? orderDiscovery(currentDiscovery.rankings, currentDiscovery).map(({ id }) => outfitsById.get(id)).filter(Boolean) : outfits;
+  const displayedOutfits = useMemo(() => {
+    if (!currentDiscovery) return outfits;
+    const outfitsById = new Map(outfits.map((outfit) => [outfit.id, outfit]));
+    return orderDiscovery(currentDiscovery.rankings, currentDiscovery).map(({ id }) => outfitsById.get(id)).filter(Boolean);
+  }, [currentDiscovery, outfits]);
 
   if (!resources.current) resources.current = {
     discovery: createViewResource({

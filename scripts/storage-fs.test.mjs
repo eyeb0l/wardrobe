@@ -3,7 +3,19 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { containedFiles, withStorage } from "./storage-fs.mjs";
+import { containedFiles, originalImage, withStorage } from "./storage-fs.mjs";
+
+test("original image snapshots stay optional and use the current request's storage", async () => {
+  const a = { originalImage: async file => { await new Promise(resolve => setImmediate(resolve)); return { identity: "a", bytes: Buffer.from(file) }; } };
+  const b = { originalImage: async file => ({ identity: "b", bytes: Buffer.from(file) }) };
+  const [first, second, local, absent] = await Promise.all([
+    withStorage(a, () => originalImage("first")), withStorage(b, () => originalImage("second")),
+    originalImage("local"), withStorage(fs, () => originalImage("unsupported")),
+  ]);
+  assert.deepEqual(first, { identity: "a", bytes: Buffer.from("first") });
+  assert.deepEqual(second, { identity: "b", bytes: Buffer.from("second") });
+  assert.equal(local, undefined); assert.equal(absent, undefined);
+});
 
 test("contained files retain realpath, regular-file and symlink containment checks locally", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "wardrobe-contained-"));
