@@ -1,6 +1,7 @@
 import { decide } from "./decisions.mjs";
 import { imageInput } from "./decision-images.mjs";
 import { decisionUsageLog } from "./decision-usage.mjs";
+import { SHOPPING_FRAME_INVARIANCE } from "./shopping-policy.mjs";
 
 const VERDICTS = ["good-addition", "consider", "skip", "unclear"];
 const DIMENSIONS = ["similar", "different", "unclear"];
@@ -53,7 +54,7 @@ export async function decideShoppingVerdict({ candidate, referenceImage, sheets,
         { value: "insufficient", description: "Essential candidate or owned-image evidence is missing, obscured or unreadable." },
         { value: "unclear", description: "Evidence sufficiency cannot be established reliably." },
       ] },
-      { name: "shopping_verdict", type: "choice", instructions: "Choose the candidate's advisory visual wardrobe-addition verdict from the images, authorized inventory, explicit user notes and separate comparisons. Similar silhouette with a different colour is not automatically a duplicate: evaluate whether the colour supports distinct, concrete combinations or occasions with actual owned garments. A colour change alone does not establish useful new styling possibilities. Avoid pushing a purchase when the visual case is weak. Decide contribution and redundancy, not affordability, fit or unseen quality. Choose unclear if the evidence question is not sufficient, uncertainty prevents a grounded judgment, or the intended garment is ambiguous.", choices: [
+      { name: "shopping_verdict", type: "choice", instructions: `Choose the candidate's advisory visual wardrobe-addition verdict from the images, authorized inventory, explicit user notes and separate comparisons. ${SHOPPING_FRAME_INVARIANCE} Similar silhouette with a different colour is not automatically a duplicate: evaluate whether the colour supports distinct, concrete combinations or occasions with actual owned garments. A colour change alone does not establish useful new styling possibilities. Avoid pushing a purchase when the visual case is weak. Decide contribution and redundancy, not affordability, fit or unseen quality. This verdict measures practical contribution, not the value of enjoyment or the overall wisdom of buying. Choose unclear if the evidence question is not sufficient, uncertainty prevents a grounded judgment, or the intended garment is ambiguous.`, choices: [
         { value: "good-addition", description: "Clear, useful new styling possibilities or a supported gap, with concrete compatible owned garments and limited practical redundancy." },
         { value: "consider", description: "Some supported new combinations or colour/styling possibilities, alongside meaningful overlap or limited added versatility." },
         { value: "skip", description: "Clear practical redundancy or visibly limited compatibility leaves little supported wardrobe contribution." },
@@ -61,7 +62,7 @@ export async function decideShoppingVerdict({ candidate, referenceImage, sheets,
       ] },
     ];
     active();
-    const work = decide({ input, questions, namespace: [dataDir, "shopping-verdict"], version: 1, env, outsideLease, withDecisionLease, timeoutMs,
+    const work = decide({ input, questions, namespace: [dataDir, "shopping-verdict"], version: 2, env, outsideLease, withDecisionLease, timeoutMs,
       usageLog: decisionUsageLog(dataDir, "shopping-verdict"),
       beforePaidCall: async kind => { active(); await beforePaidCall?.(kind); active(); },
       fetch: (url, options) => { active(); return fetchImpl(url, { ...options,

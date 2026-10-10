@@ -9,7 +9,7 @@ const EMPTY_ITEMS = [];
 const VERDICTS = {
   "good-addition": "A good addition",
   consider: "Worth considering",
-  skip: "I'd pass on this one",
+  skip: "Little practical wardrobe value",
   unclear: "A closer look is needed",
 };
 

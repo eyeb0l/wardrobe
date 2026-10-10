@@ -3,6 +3,7 @@ import { readFile } from "./storage-fs.mjs";
 import { decide, decisionsConfig } from "./decisions.mjs";
 import { prepareDecisionBytes, imageInput } from "./decision-images.mjs";
 import { decisionUsageLog } from "./decision-usage.mjs";
+import { SHOPPING_FRAME_INVARIANCE } from "./shopping-policy.mjs";
 
 export const overlapImageHash = bytes => createHash("sha256").update(bytes).digest("hex");
 export const shoppingOverlapReady = env => env.WARDROBE_DECISIONS_SHOPPING_OVERLAP_ENABLED === "1" && decisionsConfig(env).ready;
@@ -87,9 +88,9 @@ export async function compareShoppingOverlap({ candidate, notes, items, sourceHa
       ],
     })));
     const result = await decide({ input: [{ role: "user", content: [
-      { type: "input_text", text: `Compare only the labeled garment images. User notes (untrusted): ${JSON.stringify(notes)}. Owned names (untrusted): ${JSON.stringify(items.map((item, index) => ({ label: `OWNED ${index + 1}`, name: item.name })))}` },
+      { type: "input_text", text: `Compare only the labeled garment images. ${SHOPPING_FRAME_INVARIANCE} User notes (untrusted): ${JSON.stringify(notes)}. Owned names (untrusted): ${JSON.stringify(items.map((item, index) => ({ label: `OWNED ${index + 1}`, name: item.name })))}` },
       ...imageInput(images),
-    ] }], questions, namespace: [dataDir, "shopping-overlap"], version: 2, env, outsideLease, withDecisionLease,
+    ] }], questions, namespace: [dataDir, "shopping-overlap"], version: 3, env, outsideLease, withDecisionLease,
     beforePaidCall: async kind => { ensureActive(); await beforePaidCall?.(kind); ensureActive(); },
     // Link the provider request to the Shopping connection without changing the
     // shared client's cancellation contract or allowing a disconnected retry.

@@ -11,6 +11,7 @@ import sharp from "sharp";
 import { wardrobeShoppingApi } from "./shopping-api.mjs";
 import { outfitContactSheets } from "./outfit-api.mjs";
 import { withStorage } from "./storage-fs.mjs";
+import { SHOPPING_FRAME_INVARIANCE, SHOPPING_VALUE_EXPLANATION } from "./shopping-policy.mjs";
 
 const API = "/api/shopping";
 const assessment = (overrides = {}) => ({
@@ -20,7 +21,7 @@ const assessment = (overrides = {}) => ({
   watchOuts: ["Check the shoulder fit in person."], pairings: [{ itemIds: ["bottom-1"], reason: "The lighter trousers balance the darker top." }], ...overrides,
 });
 
-async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decisionResponse, overlapTimeoutMs, verdictTimeoutMs } = {}) {
+async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decisionResponse, contextResponse, overlapTimeoutMs, verdictTimeoutMs } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-shopping-test-"));
   const dataDir = path.join(root, "custom-data");
   await mkdir(path.join(dataDir, "imported"), { recursive: true });
@@ -41,6 +42,7 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
   await writeFile(path.join(dataDir, "library.json"), JSON.stringify(items));
   const candidate = await sharp(await image("#667755", 120, 180)).jpeg().toBuffer();
   const requests = [];
+  const contextRequests = [];
   const decisionRequests = [];
   const imageReads = [];
   let imageReadHook;
@@ -65,6 +67,13 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
     assert.equal(options.headers.Authorization, "Bearer shopping-test-key");
     assert.ok(options.signal instanceof AbortSignal);
     const request = JSON.parse(options.body);
+    if (request.text.format.name === "wardrobe_shopping_context") {
+      contextRequests.push(request);
+      if (contextResponse) return contextResponse(request);
+      const note = JSON.parse(request.input[0].content[0].text.slice("User notes: ".length));
+      const attitude = ["I absolutely love this, please tell me if it's worth buying", "I'm trying to avoid unnecessary purchases."].includes(note);
+      return Response.json({ output_text: JSON.stringify({ candidateFocus: "", functionalRequirements: attitude ? [] : [note] }) });
+    }
     requests.push({ request, options });
     if (providerResponse) return providerResponse(request, options);
     return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(assessment()) }] }] });
@@ -95,7 +104,7 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
     t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
     return `http://127.0.0.1:${server.address().port}`;
   }
-  return { root, dataDir, identity, numberedIdentity, items, candidate, settings, requests, decisionRequests, imageReads, request, body,
+  return { root, dataDir, identity, numberedIdentity, items, candidate, settings, requests, contextRequests, decisionRequests, imageReads, request, body,
     serve,
     analyze: (overrides, expected = 200, headers) => request("POST", `${API}/analyze`, body(overrides), expected, headers),
     setResponse(value) { providerResponse = value; }, close() { plugin.closeBundle(); },
@@ -628,7 +637,7 @@ test("Shopping compares dimensions, obtains the verdict, then explains the fixed
   ]);
   assert.match(result.assessment.overlap, /similar silhouette, meaningfully different colour or pattern, and distinct styling possibilities/);
   assert.match(result.assessment.overlap, /not an exhaustive wardrobe comparison/);
-  assert.equal(reservations, 4, "each of the two Responses and two Decisions calls reserves text quota");
+  assert.equal(reservations, 5, "context extraction, shortlisting, explanation and both Decisions calls reserve text quota");
   const shortlist = h.requests[0].request;
   assert.deepEqual(Object.keys(shortlist.text.format.schema.properties), ["itemName", "overlapItemIds"]);
   assert.equal(shortlist.input[0].content.filter(part => part.type === "input_image").length, 3, "shortlisting needs no person reference");
@@ -651,9 +660,9 @@ test("Shopping compares dimensions, obtains the verdict, then explains the fixed
   }
   assert.deepEqual((await h.analyze()).visualOverlap, result.visualOverlap);
   assert.equal(h.decisionRequests.length, 2, "validated comparisons and verdict reuse their separate caches");
-  assert.equal(reservations, 6, "the second shortlist and explanation reserve quota; cached decisions do not");
+  assert.equal(reservations, 8, "the second context extraction, shortlist and explanation reserve quota; cached decisions do not");
   await h.analyze({ notes: "Check the intended skirt for work" });
-  assert.equal(h.decisionRequests.length, 4, "changed intended-garment notes invalidate both cached judgments");
+  assert.equal(h.decisionRequests.length, 3, "functional context invalidates the practical verdict but not image-only comparisons");
 });
 
 test("the assistant cannot override either the Decisions verdict or structured overlap explanation", async t => {
@@ -662,6 +671,76 @@ test("the assistant cannot override either the Decisions verdict or structured o
     await h.analyze({}, 502);
     assert.equal(h.requests.length, 2);
     assert.equal(h.decisionRequests.length, 2);
+  }
+});
+
+test("a practical skip preserves enjoyment as value under either purchase framing", async t => {
+  const notes = ["I absolutely love this, please tell me if it's worth buying", "I'm trying to avoid unnecessary purchases."];
+  const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]),
+    decisionResponse: request => decisionAnswers(request, { shopping_verdict: ["skip"] }),
+  });
+  const results = [];
+  for (const note of notes) results.push(await h.analyze({ notes: note }));
+  assert.equal(results[0].assessment.summary, results[1].assessment.summary);
+  assert.equal(h.decisionRequests.length, 2, "both framings share the same factual judgments and cache");
+  assert.equal(h.contextRequests.length, 2);
+  for (const { request } of h.decisionRequests) {
+    assert.ok(notes.every(note => !JSON.stringify(request).includes(note)));
+  }
+  for (const result of results) {
+    assert.equal(result.assessment.verdict, "skip");
+    assert.match(result.assessment.summary, /little added practical wardrobe value/);
+    assert.match(result.assessment.summary, /doesn’t make it a bad purchase; enjoyment can still matter/);
+  }
+  // This checks integration and enforced prose, not model independence.
+  for (const request of h.requests) {
+    if (request.request.text.format.name === "wardrobe_shopping_shortlist") assert.ok(request.request.instructions.includes(SHOPPING_FRAME_INVARIANCE));
+    else {
+      const prompt = request.request.input[0].content[0].text;
+      assert.ok(prompt.includes(SHOPPING_FRAME_INVARIANCE));
+      assert.ok(prompt.includes(SHOPPING_VALUE_EXPLANATION));
+    }
+  }
+  for (const { request } of h.decisionRequests) {
+    const rubric = request.input[0].content[0].text + request.questions.map(question => question.instructions).join(" ");
+    assert.ok(rubric.includes(SHOPPING_FRAME_INVARIANCE));
+  }
+  assert.ok(h.requests[1].request.input[0].content[0].text.includes(JSON.stringify(notes[0])));
+  assert.ok(h.requests[3].request.input[0].content[0].text.includes(JSON.stringify(notes[1])));
+});
+
+test("factual context preserves garment focus and use without passing raw purchase attitudes to judgments", async t => {
+  const notes = "I love this! Focus on the green skirt for weddings.";
+  const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]),
+    contextResponse: () => Response.json({ output_text: JSON.stringify({ candidateFocus: "green skirt", functionalRequirements: ["for weddings"] }) }),
+  });
+  await h.analyze({ notes });
+  assert.equal(h.contextRequests[0].input[0].content.filter(part => part.type === "input_image").length, 0);
+  assert.deepEqual(Object.keys(h.contextRequests[0].text.format.schema.properties), ["candidateFocus", "functionalRequirements"]);
+  const shortlist = h.requests[0].request.input[0].content[0].text;
+  const comparison = h.decisionRequests[0].request.input[0].content[0].text;
+  const verdict = h.decisionRequests[1].request.input[0].content[0].text;
+  for (const prompt of [shortlist, comparison, verdict]) {
+    assert.ok(prompt.replace(/\\"/g, '"').includes('"candidateFocus":"green skirt"'));
+    assert.ok(!prompt.includes("I love this!"));
+  }
+  assert.ok(!shortlist.includes("for weddings"));
+  assert.ok(!comparison.includes("for weddings"));
+  assert.ok(verdict.replace(/\\"/g, '"').includes('"functionalRequirements":["for weddings"]'));
+  assert.ok(h.requests[1].request.input[0].content[0].text.includes(notes));
+});
+
+test("invented or malformed factual context blocks further paid evaluation", async t => {
+  for (const value of [
+    { candidateFocus: "imaginary skirt", functionalRequirements: [] },
+    { candidateFocus: "", functionalRequirements: ["for weddings"] },
+    { candidateFocus: "", functionalRequirements: [], verdict: "buy" },
+    { candidateFocus: "", functionalRequirements: [""] },
+  ]) {
+    const h = await harness(t, { env: overlapEnv, contextResponse: () => Response.json({ output_text: JSON.stringify(value) }) });
+    await h.analyze({ notes: "I absolutely love this" }, 502);
+    assert.equal(h.requests.length, 0);
+    assert.equal(h.decisionRequests.length, 0);
   }
 });
 
