@@ -150,9 +150,9 @@ async function recommendOriginal(image, analysis) {
   return analysis.items.length === 1 && (background.transparent || (analysis.isCleanProductShot && background.plain));
 }
 
-async function cropDetectedItem(bytes, boundingBox) {
-  const normalized = await normalizeImage(bytes);
-  const { width, height } = await sharp(normalized).metadata();
+// Detection sees this normalized PNG. Reuse its bytes and dimensions across
+// all crops instead of re-encoding the full upload once per detected item.
+async function cropDetectedItem(normalized, boundingBox, { width, height }) {
   const box = normalizeBoundingBox(boundingBox);
   const rawLeft = (box.x / 1000) * width;
   const rawTop = (box.y / 1000) * height;
@@ -425,10 +425,11 @@ export function wardrobeImportApi(options = {}) {
         model: RETRY_VISION_MODEL, effort: RETRY_VISION_EFFORT, image, mime: "image/png" });
       const canUseOriginal = await recommendOriginal(image, analysis);
       const candidates = [];
+      const dimensions = analysis.items.length ? await sharp(image).metadata() : null;
       for (const [index, item] of analysis.items.entries()) {
         const metadata = normalizeMetadata(item);
         const file = `detection-${requestId}-${index}.png`;
-        await writeFile(path.join(dir, file), await cropDetectedItem(image, metadata.boundingBox));
+        await writeFile(path.join(dir, file), await cropDetectedItem(image, metadata.boundingBox, dimensions));
         candidates.push({ id: randomUUID(), metadata, assetUrl: `${ASSET_ROOT}/${job.id}/${file}`, canUseOriginal });
       }
       next.detectionRetry = { id: requestId, status: "review", model: RETRY_VISION_MODEL, effort: RETRY_VISION_EFFORT, candidates, createdAt: new Date().toISOString() };
@@ -455,10 +456,10 @@ export function wardrobeImportApi(options = {}) {
 
   async function persistImportedLocked(job, includeModeled) {
     const id = `import-${job.id}`;
-    if ((await loadImported()).some(item => item.id === id && item.hidden)) throw Object.assign(new Error("Wardrobe item was deleted"), { status: 404 });
+    const records = await loadImported();
+    const existing = records.find((record) => record.id === id);
+    if (existing?.hidden) throw Object.assign(new Error("Wardrobe item was deleted"), { status: 404 });
     if (job.modeledReplacement) {
-      const records = await loadImported();
-      const existing = records.find((record) => record.id === id);
       if (!existing) throw Object.assign(new Error("Wardrobe item no longer exists"), { status: 404 });
       if (!includeModeled) throw Object.assign(new Error("Only the modeled shot can be updated here"), { status: 409 });
       const modeledName = `${id}-modeled-${job.generationId}-${job.stages.modeled.attempts}.png`;
@@ -484,9 +485,8 @@ export function wardrobeImportApi(options = {}) {
       modeledImage = `${LIBRARY_ASSET_ROOT}/${modeledName}`;
     }
     const metadata = job.metadata || {};
-    const records = await loadImported();
-    const existing = records.find((record) => record.id === id);
     const record = {
+      ...existing,
       id,
       name: metadata.name || "New piece",
       part: metadata.part || "upperbody",
@@ -885,12 +885,13 @@ export function wardrobeImportApi(options = {}) {
         const detected = analysis.items.map(normalizeMetadata);
         const canUseOriginal = await recommendOriginal(normalizedImage, analysis);
         const jobs = [];
+        const dimensions = detected.length ? await sharp(normalizedImage).metadata() : null;
         for (const metadata of detected) {
           const id = randomUUID();
           const dir = path.join(jobsDir, id); await mkdir(dir, { recursive: true });
           const originalFile = "original.png";
           const cropFile = "crop.png";
-          const croppedImage = await cropDetectedItem(normalizedImage, metadata.boundingBox);
+          const croppedImage = await cropDetectedItem(normalizedImage, metadata.boundingBox, dimensions);
           await writeFile(path.join(dir, originalFile), normalizedImage);
           await writeFile(path.join(dir, cropFile), croppedImage);
           const now = new Date().toISOString();

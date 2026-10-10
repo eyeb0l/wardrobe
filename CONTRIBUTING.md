@@ -9,7 +9,7 @@ npm run check
 git diff --check
 ```
 
-`npm test` runs the Node test suite. `npm run check` builds the Vite frontend; it does not run tests or build the hosted server. CI currently runs `npm ci` and `npm run check` only. For hosted runtime, routing, dependency or packaging changes, also run:
+`npm test` runs the Node test suite. `npm run check` builds the Vite frontend; it does not run tests or build the hosted server. CI runs `npm ci`, `npm test` and `npm run check`. For hosted runtime, routing, dependency or packaging changes, also run:
 
 ```bash
 npm run build:vercel

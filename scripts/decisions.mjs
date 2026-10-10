@@ -3,6 +3,9 @@ import { emptyDecisionUsage, normalizeDecisionUsage, newDecisionUsageId } from "
 
 export const DECISIONS_MODEL = "gpt-6-luna";
 export const hashEvidence = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+// Keep the existing array hash format while reusing the serialized image payload.
+const hashRequest = (prefix, body) => createHash("sha256")
+  .update(JSON.stringify(prefix).slice(0, -1)).update(",").update(body).update("]").digest("hex");
 const cache = new Map(), pending = new Map();
 let activeRequests = 0, preflight = Promise.resolve();
 const requestQueue = [];
@@ -88,14 +91,15 @@ async function runDecision({ input, questions, namespace, version = 1, env = pro
   const endpoint = `${(env.OPENAI_API_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "")}/decisions`;
   const payload = { model, input, questions };
   const body = JSON.stringify(payload);
-  if (Buffer.byteLength(body) > 8 * 1024 * 1024) throw fail("These images are too large to check together. You can still review them yourself.", 422);
+  const bodyBytes = Buffer.byteLength(body);
+  if (bodyBytes > 8 * 1024 * 1024) throw fail("These images are too large to check together. You can still review them yourself.", 422);
   if (!["default", "bypass"].includes(cacheMode)) throw fail("Invalid image check cache mode.", 422);
-  const key = hashEvidence([namespace, endpoint, env.OPENAI_API_KEY, version, payload]);
+  const key = hashRequest([namespace, endpoint, env.OPENAI_API_KEY, version], body);
   const started = Date.now(), id = newDecisionUsageId();
-  const record = { id, attemptId: id, model, requestHash: hashEvidence([version, payload]), source: "provider", outcome: "unknown",
+  const record = { id, attemptId: id, model, requestHash: hashRequest([version], body), source: "provider", outcome: "unknown",
     dispatchState: "not-sent", startedAt: new Date(started).toISOString(), finishedAt: null, elapsedMs: null,
     imageCount: Array.isArray(input) ? input.flatMap(message => message.content).filter(part => part.type === "input_image").length : 0,
-    questionCount: questions.length, bodyBytes: Buffer.byteLength(body), provider: new URL(endpoint).hostname, httpStatus: null, requestId: null, refusalCount: null, failure: null, usage: null };
+    questionCount: questions.length, bodyBytes, provider: new URL(endpoint).hostname, httpStatus: null, requestId: null, refusalCount: null, failure: null, usage: null };
   const log = async () => { try { await usageLog?.(structuredClone(record)); } catch { /* Logging must never trigger another provider request. */ } };
   const finished = () => { record.finishedAt = new Date().toISOString(); record.elapsedMs = Math.max(0, Date.now() - started); };
   const reuse = async (value, source) => {

@@ -39,10 +39,12 @@ async function harness(t, env = {}, beforePaidCall) {
   await writeFile(path.join(root, "identity.png"), identity);
   const requests = [];
   const imageReads = [];
+  const libraryReads = [];
   let failCandidateSave = false;
   const storage = { ...fileSystem, async readFile(filename, ...args) {
     const bytes = await fileSystem.readFile(filename, ...args);
     if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
+    if (path.basename(String(filename)) === "library.json") libraryReads.push(String(filename));
     return bytes;
   }, async writeFile(filename, data, ...args) {
     if (failCandidateSave && String(filename).includes("job.json") && String(data).includes('"detectionRetry":')) {
@@ -114,7 +116,7 @@ async function harness(t, env = {}, beforePaidCall) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, imageReads, request, waitForStage, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
+  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
@@ -317,6 +319,63 @@ test("empty vision results create no jobs or image requests", async (t) => {
   const created = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
   assert.deepEqual(created, { jobs: [], noClothingDetected: true });
   assert.equal(h.requests.length, 1);
+});
+
+test("multi-item detection crops one normalized rotated source for uploads and retries", async t => {
+  const h = await harness(t);
+  const width = 300, height = 180, pixels = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.set([x % 256, y, (x + y) % 256], (y * width + x) * 3);
+  const source = await sharp(pixels, { raw: { width, height, channels: 3 } }).withMetadata({ orientation: 6 }).jpeg({ quality: 100 }).toBuffer();
+  const normalized = await sharp(source).rotate().toColorspace("srgb").png().toBuffer();
+  const dimensions = await sharp(normalized).metadata();
+  assert.deepEqual([dimensions.width, dimensions.height], [180, 300]);
+  const areas = [{ left: 0, top: 0, width: 102, height: 162 }, { left: 78, top: 138, width: 102, height: 162 }];
+  const expected = await Promise.all(areas.map(area => sharp(normalized).extract(area).raw().toBuffer()));
+  h.setAnalysis([
+    { ...dress, boundingBox: { x: 0, y: 0, width: 500, height: 500 } },
+    { ...dress, name: "Second item", boundingBox: { x: 500, y: 500, width: 500, height: 500 } },
+  ]);
+  let rotations = 0;
+  const rotate = sharp.prototype.rotate;
+  t.mock.method(sharp.prototype, "rotate", function (...args) { rotations++; return rotate.apply(this, args); });
+  const { jobs } = await h.request("POST", "/api/import/jobs", { imageBase64: source.toString("base64") });
+  assert.equal(jobs.length, 2); assert.equal(rotations, 1, "one normalization for the upload, regardless of item count");
+  for (const [index, job] of jobs.entries()) {
+    assert.equal(job.stages.crop.status, "review");
+    assert.deepEqual(await sharp(await h.request("GET", job.stages.crop.assetUrl)).raw().toBuffer(), expected[index]);
+    assert.deepEqual(await h.request("GET", job.originalAssetUrl), normalized);
+  }
+  rotations = 0;
+  const retry = await h.request("POST", `/api/import/jobs/${jobs[0].id}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000030" });
+  assert.equal(retry.detectionRetry.candidates.length, 2); assert.equal(rotations, 1, "retry candidates reuse one normalized source");
+  for (const [index, candidate] of retry.detectionRetry.candidates.entries()) {
+    assert.deepEqual(await sharp(await h.request("GET", candidate.assetUrl)).raw().toBuffer(), expected[index]);
+  }
+  assert.deepEqual(retry.stages, jobs[0].stages, "the current review stays unchanged until acceptance");
+});
+
+test("import publication uses one library snapshot and preserves unknown fields", async t => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  await h.waitForStage(job.id, "garment");
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`);
+  await h.waitForStage(job.id, "modeled");
+  const libraryFile = path.join(h.root, "data", "library.json");
+  const [existing] = JSON.parse(await readFile(libraryFile, "utf8"));
+  await writeFile(libraryFile, JSON.stringify([{ ...existing, futureMetadata: { retained: true }, sourceAttribution: "fixture" }]));
+  h.libraryReads.length = 0;
+  const approved = await h.request("POST", `/api/import/jobs/${job.id}/stages/modeled/approve`);
+  assert.equal(h.libraryReads.length, 1, "one read while the library mutation lock is held");
+  assert.deepEqual(approved.libraryItem.futureMetadata, { retained: true });
+  assert.equal(approved.libraryItem.sourceAttribution, "fixture");
+  assert.equal(approved.libraryItem.name, existing.name);
+  assert.equal(approved.libraryItem.image, existing.image);
+  assert.match(approved.libraryItem.modeledImage, /-modeled\.png$/);
+  assert.notEqual(approved.libraryItem.modeledImage, existing.modeledImage);
+  const [saved] = JSON.parse(await readFile(libraryFile, "utf8"));
+  assert.deepEqual(saved.futureMetadata, { retained: true });
+  assert.equal(saved.sourceAttribution, "fixture");
 });
 
 test("reference discovery keeps the configured default and finds numbered PNGs in numeric order", async (t) => {

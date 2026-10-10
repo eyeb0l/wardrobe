@@ -37,16 +37,20 @@ function garment(record) {
 }
 
 async function snapshot(dataDir) {
-  const records = await readLibrary(path.join(dataDir, "library.json"));
+  const [records, manifest] = await Promise.all([
+    readLibrary(path.join(dataDir, "library.json")), readManifest(dataDir),
+  ]);
   const candidates = records.filter((item) => item && !item.hidden && !item.deleted && /^[a-z0-9][a-z0-9-]{0,159}$/.test(item.id) && Object.hasOwn(parts, item.part))
     .map((record) => ({ record, filename: record.image?.match?.(/^\/api\/import\/library\/([a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp))$/i)?.[1] })).filter(({ filename }) => filename);
-  const files = await containedFiles(path.join(dataDir, "imported"), candidates.map(({ filename }) => filename));
+  const saved = manifest.outfits.filter((outfit) => outfit.status === "accepted");
+  const [files, photos] = await Promise.all([
+    containedFiles(path.join(dataDir, "imported"), candidates.map(({ filename }) => filename)),
+    containedFiles(path.join(dataDir, "outfit-images"), saved.map((outfit) => acceptedFilename(outfit.image))),
+  ]);
   const items = new Map(), itemFiles = new Map();
   for (const { record, filename } of candidates) if (files.has(filename) && !items.has(record.id)) {
     items.set(record.id, record); itemFiles.set(record.id, files.get(filename));
   }
-  const saved = (await readManifest(dataDir)).outfits.filter((outfit) => outfit.status === "accepted");
-  const photos = await containedFiles(path.join(dataDir, "outfit-images"), saved.map((outfit) => acceptedFilename(outfit.image)));
   const outfits = saved.filter((outfit) => photos.has(acceptedFilename(outfit.image)) && outfit.garmentIds.every((id) => items.has(id)));
   const usage = new Map();
   for (const outfit of saved) for (const id of outfit.garmentIds) usage.set(id, (usage.get(id) || 0) + 1);

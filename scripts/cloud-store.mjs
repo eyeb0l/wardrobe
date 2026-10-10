@@ -9,6 +9,7 @@ import { immutableByteCache } from "./immutable-byte-cache.mjs";
 
 export const CLOUD_ROOT = "/wardrobe-data";
 const LEASE_SECONDS = 270;
+const blobDigest = url => createHash("sha256").update(url).digest("hex");
 const leaseContext = new AsyncLocalStorage();
 const error = (code, file, message = code) => Object.assign(new Error(`${message}: ${file}`), { code, path: file, status: code === "EBUSY" ? 409 : code === "ESTALE" ? 503 : undefined });
 const canonical = (value) => {
@@ -225,9 +226,11 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       throw failure;
     }
   };
-  const rowFor = async (file) => {
+  // Mutable path lookups remain fresh. Metadata readers select only the fields
+  // they need so a stat or directory listing never downloads JSON file bodies.
+  const rowFor = async (file, columns = "*") => {
     const target = canonical(file);
-    const rows = await db.query("SELECT * FROM wardrobe_files WHERE path = $1", [target]);
+    const rows = await db.query(`SELECT ${columns} FROM wardrobe_files WHERE path = $1`, [target]);
     if (!rows[0]) throw error("ENOENT", target);
     return rows[0];
   };
@@ -245,7 +248,7 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
   };
   const imageRow = async (file, width) => {
     if (width !== undefined && !DISPLAY_WIDTHS.includes(width)) throw Object.assign(new Error("Unsupported display image size"), { status: 400 });
-    const row = await rowFor(file);
+    const row = await rowFor(file, "path, kind, blob_url, size");
     if (row.kind !== "file" || !row.blob_url) throw Object.assign(new Error("Image not found"), { status: 404 });
     return row;
   };
@@ -279,7 +282,7 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     root: CLOUD_ROOT,
     async imageIdentity(file) {
       const row = await imageRow(file);
-      return `blob-sha256:${createHash("sha256").update(row.blob_url).digest("hex")}`;
+      return `blob-sha256:${blobDigest(row.blob_url)}`;
     },
     async initializeGarbageCollection() { await db.transaction(GC_SCHEMA_SQL.map(text => ({ text }))); },
     async collectGarbage(options = {}) {
@@ -291,9 +294,12 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     async initializeDisplayImages() { await db.query(DISPLAY_CACHE_SCHEMA); },
     async originalImage(file, condition) {
       const source = await imageRow(file);
-      const etag = `"original-${createHash("sha256").update(source.blob_url).digest("hex")}"`;
-      if (matchesETag(condition, etag)) return { etag, notModified: true };
-      return { etag, bytes: await readBlob(source.blob_url, file) };
+      const hash = blobDigest(source.blob_url);
+      const identity = `blob-sha256:${hash}`, etag = `"original-${hash}"`;
+      // Identity and bytes refer to this captured immutable URL even if the
+      // mutable path is replaced while its Blob download is in flight.
+      if (matchesETag(condition, etag)) return { identity, etag, notModified: true };
+      return { identity, etag, bytes: await readBlob(source.blob_url, file) };
     },
     async displayImage(file, width, condition) {
       const source = await imageRow(file, width);
@@ -477,8 +483,9 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     },
     async readdir(file, options = {}) {
       const target = canonical(file);
-      if ((await rowFor(target)).kind !== "dir") throw error("ENOTDIR", target);
-      const rows = await db.query(`SELECT * FROM wardrobe_files WHERE left(path, length($1) + 1) = $1 || '/'
+      if ((await rowFor(target, "kind")).kind !== "dir") throw error("ENOTDIR", target);
+      const columns = options.withFileTypes ? "path, kind, size, updated_at" : "path";
+      const rows = await db.query(`SELECT ${columns} FROM wardrobe_files WHERE left(path, length($1) + 1) = $1 || '/'
         AND strpos(substring(path FROM length($1) + 2), '/') = 0 ORDER BY path`, [target]);
       return rows.map((row) => options.withFileTypes ? { name: path.posix.basename(row.path), ...fileStat(row) } : path.posix.basename(row.path));
     },
@@ -495,9 +502,9 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       if (kinds.get(base) !== "dir") return new Map();
       return new Map([...candidates].filter(([, file]) => kinds.get(file) === "file"));
     },
-    async stat(file) { return fileStat(await rowFor(file)); },
+    async stat(file) { return fileStat(await rowFor(file, "kind, size, updated_at")); },
     async lstat(file) { return store.stat(file); },
-    async realpath(file) { await rowFor(file); return canonical(file); },
+    async realpath(file) { await rowFor(file, "path"); return canonical(file); },
     async rename(source, destination) { await mutate("rename", { path: canonical(source), dest: canonical(destination) }); },
     async link(source, destination) { await mutate("link", { path: canonical(source), dest: canonical(destination), exclusive: true }); },
     async copyFile(source, destination, flags = 0) {

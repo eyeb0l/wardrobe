@@ -4,7 +4,7 @@ import * as fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { decide } from "./decisions.mjs";
+import { decide, hashEvidence } from "./decisions.mjs";
 import { decisionsResponse } from "./test-helpers/decisions-response.mjs";
 import { withStorage } from "./storage-fs.mjs";
 import { normalizeDecisionUsage, decisionUsageLog, readDecisionUsage, summarizeDecisionUsage,
@@ -24,6 +24,23 @@ test("all usage fields survive sanitization while missing, negative and inconsis
   const broken = normalizeDecisionUsage({ input_tokens: 1, input_tokens_details: { cached_tokens: 2, cache_write_tokens: 3 }, output_tokens: 4, total_tokens: 0,
     output_tokens_details: { reasoning_tokens: 5 }, compute_units: -1 });
   assert.deepEqual(broken, { inputTokens: 1, cachedInputTokens: null, cacheWriteTokens: null, outputTokens: 4, reasoningTokens: null, totalTokens: null, computeUnits: null });
+});
+
+test("request hashes and byte counts match the exact dispatched image evidence", async () => {
+  const records = [];
+  const config = options({ version: 3, input: [{ role: "user", content: [
+    { type: "input_text", text: 'Navy jacket: "silk"? £80\nCheck the cuffs.' },
+    { type: "input_image", image_url: "data:image/png;base64,dGVzdA==" },
+  ] }], usageLog: async record => records.push(record), fetch: async (_, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(records[0].requestHash, hashEvidence([3, body]));
+    assert.equal(records[0].bodyBytes, Buffer.byteLength(init.body));
+    return Response.json(decisionsResponse(body));
+  } });
+  const first = await decide(config);
+  assert.equal((await decide(config)).cached, true);
+  assert.ok(records.every(record => record.requestHash === records[0].requestHash));
+  assert.ok(records.every(record => record.attemptId === first.attemptId));
 });
 
 test("durable log writes dispatch intent, links shared/cache results and counts provider usage once", async t => {

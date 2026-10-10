@@ -710,11 +710,20 @@ for (const selected of [["skip", .74], ["good-addition", .95, .6], ["refusal"], 
 for (const mode of ["http-error", "malformed", "timeout", "quota"]) {
   test(`verdict ${mode} produces an explicit uncertain explanation without silently retaining an assistant verdict`, async t => {
     let reservations = 0;
+    const verdictStarted = Promise.withResolvers();
     const h = await harness(t, { env: overlapEnv, response: shortlisted(["top-1"]), verdictTimeoutMs: mode === "timeout" ? 30 : 12_000,
       beforePaidCall: () => { if (++reservations === 3 && mode === "quota") throw new Error("PRIVATE quota/path/key"); },
-      decisionResponse: async request => request.questions[0].name !== "shopping_evidence" ? decisionAnswers(request)
-        : mode === "timeout" ? new Promise(() => {}) : mode === "malformed" ? Response.json({ model: "gpt-6-luna", answers: [] }) : Response.json({ error: "PRIVATE provider/key/path" }, { status: 429 }) });
-    const result = await h.analyze();
+      decisionResponse: async request => {
+        if (request.questions[0].name !== "shopping_evidence") return decisionAnswers(request);
+        verdictStarted.resolve();
+        return mode === "timeout" ? new Promise(() => {}) : mode === "malformed" ? Response.json({ model: "gpt-6-luna", answers: [] }) : Response.json({ error: "PRIVATE provider/key/path" }, { status: 429 });
+      } });
+    // Exercise the dispatched request's timeout without letting snapshot disk
+    // reads consume this test's 30 ms deadline on a busy worker.
+    if (mode === "timeout") t.mock.timers.enable({ apis: ["setTimeout"] });
+    const pending = h.analyze();
+    if (mode === "timeout") { await verdictStarted.promise; t.mock.timers.tick(30); }
+    const result = await pending;
     assert.equal(result.assessment.verdict, "unclear");
     assert.equal(result.shoppingDecision.state, "unavailable");
     assert.ok(!JSON.stringify(result).includes("PRIVATE"));

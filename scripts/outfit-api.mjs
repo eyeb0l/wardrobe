@@ -33,8 +33,8 @@ async function readJson(file, fallback) {
 
 async function containedFile(directory, filename) {
   if (typeof filename !== "string" || filename !== path.basename(filename) || filename === "." || filename === "..") throw fail("Invalid asset path", 404);
-  const [base, resolved] = await Promise.all([realpath(directory), realpath(path.join(directory, filename))]);
-  if (!resolved.startsWith(`${base}${path.sep}`) || !(await stat(resolved)).isFile()) throw fail("Asset is unavailable", 404);
+  const resolved = (await containedFiles(directory, [filename])).get(filename);
+  if (!resolved) throw fail("Asset is unavailable", 404);
   return resolved;
 }
 

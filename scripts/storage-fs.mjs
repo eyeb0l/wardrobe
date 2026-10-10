@@ -10,6 +10,8 @@ export const currentStorage = () => context.getStore();
 // A hosted immutable image identity always comes from a fresh path lookup.
 // Local files are mutable, so callers must fall back to checking their bytes.
 export const imageIdentity = async (file) => context.getStore()?.imageIdentity?.(file);
+// Optional hosted read: the identity and original bytes share one path snapshot.
+export const originalImage = async (file) => context.getStore()?.originalImage?.(file);
 const operation = (name) => (...args) => (context.getStore() ?? local)[name](...args);
 export const readFile = operation("readFile");
 export const writeFile = operation("writeFile");

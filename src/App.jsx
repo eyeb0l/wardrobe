@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
-import { OutfitView } from "./outfit-view.jsx";
-import { ShoppingView } from "./shopping-view.jsx";
 
 import { uiErrorMessage } from "./ui-error.mjs";
 
 import { wardrobeRequest, migrateBrowserEdits } from "./wardrobe-sync.mjs";
+
+const OutfitView = lazy(() => import("./outfit-view.jsx").then((module) => ({ default: module.OutfitView })));
+const ShoppingView = lazy(() => import("./shopping-view.jsx").then((module) => ({ default: module.ShoppingView })));
 
 const TYPES = [
   { id: "all", label: "All" },
@@ -300,7 +301,6 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
 function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
-  const imageRef = useRef(null);
   const samplingCanvasRef = useRef(null);
   const shakeTimerRef = useRef(null);
   const [sampling, setSampling] = useState(null);
@@ -425,7 +425,6 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
       style={hasModeledImage ? { "--piece-rotation": pieceRotation } : undefined}
     >
       <OptimizedImage
-        ref={imageRef}
         unoptimized={Boolean(sampling)}
         src={item.image}
         alt={`Selected ${type.toLowerCase()}`}
@@ -629,8 +628,20 @@ export function App() {
         <a href="/outfits" onClick={(event) => navigate(event, "/outfits")} aria-current={route === "/outfits" ? "page" : undefined}>Outfits</a>
         <a href="/shopping" onClick={(event) => navigate(event, "/shopping")} aria-current={route === "/shopping" ? "page" : undefined}>Shopping</a>
       </nav>
-      {(shoppingOpened || route === "/shopping") ? <div hidden={route !== "/shopping"}><ShoppingView items={items} loading={loading} wardrobeError={error} active={route === "/shopping"} /></div> : null}
-      {(outfitsOpened || route === "/outfits") ? <div hidden={route !== "/outfits"}><OutfitView items={items} active={route === "/outfits"} /></div> : null}
+      {(shoppingOpened || route === "/shopping") ? (
+        <div hidden={route !== "/shopping"}>
+          <Suspense fallback={<p className="status" role="status">Loading Shopping</p>}>
+            <ShoppingView items={items} loading={loading} wardrobeError={error} active={route === "/shopping"} />
+          </Suspense>
+        </div>
+      ) : null}
+      {(outfitsOpened || route === "/outfits") ? (
+        <div hidden={route !== "/outfits"}>
+          <Suspense fallback={<p className="status" role="status">Loading Outfits</p>}>
+            <OutfitView items={items} active={route === "/outfits"} />
+          </Suspense>
+        </div>
+      ) : null}
       {["/shopping", "/outfits"].includes(route) ? null : <>
       <main className="gallery-pane">
         <header className="gallery-header">
