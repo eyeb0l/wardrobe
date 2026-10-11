@@ -373,6 +373,7 @@ export function wardrobeImportApi(options = {}) {
     const hasModelReference = references.some((item) => item.id === "default");
     return {
       ready: hasApiKey && hasModelReference,
+      setupMode: options.serverless ? "hosted" : "local",
       hasApiKey,
       hasModelReference,
       modelReference: referenceSetting,
