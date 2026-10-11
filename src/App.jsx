@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
+import { SetupFlow } from "./setup-flow.jsx";
 
 import { uiErrorMessage } from "./ui-error.mjs";
 
@@ -513,6 +514,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
 }
 
 export function App() {
+  const [setupRequested, setSetupRequested] = useState(0);
   const [route, setRoute] = useState(() => window.location.pathname.replace(/\/$/, "") || "/");
   const [shoppingOpened, setShoppingOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/shopping");
   const [outfitsOpened, setOutfitsOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/outfits");
@@ -627,7 +629,9 @@ export function App() {
         <a href="/" onClick={(event) => navigate(event, "/")} aria-current={!["/outfits", "/shopping"].includes(route) ? "page" : undefined}>Wardrobe</a>
         <a href="/outfits" onClick={(event) => navigate(event, "/outfits")} aria-current={route === "/outfits" ? "page" : undefined}>Outfits</a>
         <a href="/shopping" onClick={(event) => navigate(event, "/shopping")} aria-current={route === "/shopping" ? "page" : undefined}>Shopping</a>
+        <button className="setup-nav-button" type="button" onClick={() => setSetupRequested(value => value + 1)}>Setup & guide</button>
       </nav>
+      <SetupFlow requested={setupRequested} />
       {(shoppingOpened || route === "/shopping") ? (
         <div hidden={route !== "/shopping"}>
           <Suspense fallback={<p className="status" role="status">Loading Shopping</p>}>
@@ -685,7 +689,7 @@ export function App() {
       </main>
 
       {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} />}
-      <WardrobeImportFlow regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} />
+      <WardrobeImportFlow regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} onOpenSetup={() => setSetupRequested(value => value + 1)} />
       </>}
     </div>
   );

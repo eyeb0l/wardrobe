@@ -25,11 +25,12 @@ Requires Node.js 22.x and npm.
 git clone https://github.com/eyeb0l/wardrobe.git
 cd wardrobe
 npm ci
-cp .env.example .env
 npm run dev
 ```
 
-Open [localhost:5173](http://localhost:5173). Browsing saved clothes and outfits needs no API key. To enable the web importer, add `OPENAI_API_KEY` to `.env`, place a PNG identity reference at `data/model-reference.png`, and restart.
+Open [localhost:5173](http://localhost:5173). On your first visit, a short setup flow helps you create `.env` privately and introduces Wardrobe, Outfits and Shopping. If an API key is already configured, it goes straight to the introduction. Reopen it anytime from **Setup & guide**; completion is remembered in this browser.
+
+Browsing saved clothes and outfits needs no API key: choose **Explore first** to get started. To enable the web importer, duplicate `.env.example` as `.env` (keep an existing `.env`), add `OPENAI_API_KEY` in your text editor, place a PNG identity reference at `data/model-reference.png`, and restart. Setup checks whether the key and reference are present without making a paid API call or validating the key with OpenAI. Credentials never need to be entered into the setup page.
 
 Local development uses the configured data directory; it does not sync with the hosted wardrobe. For private access across devices, follow the [Vercel hosting guide](docs/HOSTING.md), including authentication, cloud storage and the initial data copy.
 
