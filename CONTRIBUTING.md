@@ -15,6 +15,8 @@ git diff --check
 npm run build:vercel
 ```
 
+For browser interactions and responsive UI checks, follow the [headless Chromium testing recipe](docs/TESTING.md). It uses the pinned Playwright version, isolated synthetic data and desktop/mobile screenshots.
+
 This builds Vite and Nitro, packages native workflow dependencies, and verifies SPA route fallback. For documentation-only changes, check commands and links against the code. Model API contract tests do not establish image quality: prompt/model changes also need the [visual comparison workflow](docs/model-migration.md), within an authorised generation budget.
 
 ## Code and storage boundaries

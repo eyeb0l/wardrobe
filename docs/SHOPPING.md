@@ -10,7 +10,15 @@ Expand **What’s missing?** (collapsed by default). **Find my gaps** suggests u
 
 ## Check a piece
 
-To assess a particular piece, choose/drop/paste a listing screenshot or garment photo, select a model reference, and optionally add the occasion, price or fit you have in mind. **Check this piece** returns a recommendation, styling considerations, overlap and combinations with owned pieces. Unclear evidence may produce **A closer look is needed**; photographs alone cannot establish exact sizing, fabric quality or value.
+To assess a particular piece, import a product link or choose/drop/paste a listing screenshot or garment photo, select a model reference, and optionally add the occasion, price or fit you have in mind. **Check this piece** returns a recommendation, styling considerations, overlap and combinations with owned pieces. Unclear evidence may produce **A closer look is needed**; photographs alone cannot establish exact sizing, fabric quality or value.
+
+### Import a product link
+
+Paste an individual retailer product link into **Product URL** and choose **Import link**. Shopping previews the product photo, available details and source link. Check that the photo shows the intended garment and colour, especially on pages with several variants or a model wearing multiple pieces. Add your own questions separately in the notes, then choose **Check this piece** when ready.
+
+Importing a link does not run an AI assessment, spend model credits or add anything to your wardrobe. The preview remains a Shopping draft; replacing or removing its photo also removes the associated retailer details. Product details help identify the candidate during the assessment and are treated as retailer claims, not verified facts.
+
+This uses the same public-page reader as [wardrobe website imports](IMPORTING.md#import-from-a-website): JSON-LD product data with Open Graph/Twitter fallbacks, one product per page, and public HTTP(S) requests with time, size and redirect limits. It does not log in or execute page JavaScript. If a retailer blocks access or its product/photo is ambiguous or unavailable, try another product link or upload a screenshot. A failed link import keeps any photo already selected.
 
 ### Visual overlap
 
@@ -20,4 +28,4 @@ With visual overlap enabled, Shopping extracts garment-identification facts and 
 
 ## Upload preparation
 
-Shopping accepts the same source formats and limits as [imports](IMPORTING.md#upload-preparation), but always prepares a JPEG locally at a maximum 1,600-pixel edge and under 2 MB, removing embedded metadata such as EXIF location. HEIC uses native decoding when available and a lazily loaded local decoder otherwise. The server validates and normalises the image again.
+Shopping accepts the same source formats and limits as [imports](IMPORTING.md#upload-preparation), but always prepares uploaded photos as a JPEG locally at a maximum 1,600-pixel edge and under 2 MB, removing embedded metadata such as EXIF location. HEIC uses native decoding when available and a lazily loaded local decoder otherwise. The server validates and normalises the image again. Website photos are prepared on the server to the same JPEG size limits before previewing.
