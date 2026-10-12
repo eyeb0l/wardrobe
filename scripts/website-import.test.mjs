@@ -23,6 +23,64 @@ test("falls back to social metadata, decoding HTML entities and ignoring malform
   assert.equal(result.imageUrls[0], "https://shop.example/shirt.png?a=1&b=2");
 });
 
+test("document base resolves structured and social image URLs even when it follows the metadata", () => {
+  const html = ld({ ...product, image: ["images/front.png", { contentUrl: "/back.png" }, "https://images.example/absolute.png"] })
+    + '<meta property="og:image" content="social.png"><meta name="twitter:image" content="//images.example/twitter.png">'
+    + '<base href="https://cdn.example/catalog/">';
+  const result = extractWebsiteProduct(html, url);
+  assert.deepEqual(result.imageUrls, ["https://cdn.example/catalog/images/front.png", "https://cdn.example/back.png",
+    "https://images.example/absolute.png", "https://cdn.example/catalog/social.png", "https://images.example/twitter.png"]);
+  assert.equal(result.source.url, url);
+});
+
+test("first valid base wins, resolves against the fetched page, and falls back when absent or invalid", () => {
+  const metadata = ld({ ...product, image: "shirt.png" });
+  const invalid = '<base target="_blank"><base href="javascript:invalid"><base href="http://[invalid">';
+  const result = extractWebsiteProduct(invalid + '<base href="../catalog/"><base href="https://ignored.example/">' + metadata, url);
+  assert.deepEqual(result.imageUrls, ["https://shop.example/catalog/shirt.png"]);
+  for (const bases of ["", invalid, '<base href=""><base href="https://ignored.example/">']) {
+    assert.deepEqual(extractWebsiteProduct(bases + metadata, url).imageUrls, ["https://shop.example/products/shirt.png"]);
+  }
+});
+
+test("relative product and canonical URLs use the same document base for primary selection and deduplication", () => {
+  const base = '<base href="/catalog/">';
+  const canonical = "https://shop.example/catalog/shirt";
+  for (const [metadata, productUrl] of [
+    ['<link rel="canonical" href="shirt">', canonical],
+    ['<meta property="og:url" content="shirt">', canonical],
+    [`<link rel="canonical" href="${canonical}">`, "shirt"],
+  ]) {
+    const result = extractWebsiteProduct(base + metadata + ld([
+      { ...product, name: "Recommended", url: "other" }, { ...product, url: productUrl, image: "shirt.png" },
+    ]), url);
+    assert.equal(result.source.name, product.name);
+    assert.deepEqual(result.imageUrls, ["https://shop.example/catalog/shirt.png"]);
+    assert.equal(result.source.url, url);
+  }
+  assert.equal(extractWebsiteProduct(base + ld([{ ...product, url: "shirt" }, { ...product, url: canonical }]), url).source.name, product.name);
+});
+
+test("import downloads a base-relative image and still rejects private-network bases", async () => {
+  const png = await sharp({ create: { width: 80, height: 120, channels: 4, background: "#333333" } }).png().toBuffer();
+  for (const base of ["https://cdn.example/catalog/", "http://127.0.0.1/private/"]) {
+    const calls = [];
+    const imported = importWebsiteProduct(url, { fetchResource: async (value, options) => {
+      if (options.kind === "page") return { url: value, bytes: Buffer.from(`<base href="${base}">` + ld({ ...product, image: "shirt.png" })) };
+      calls.push(value);
+      if (value.startsWith("http://127.")) return fetchWebsiteResource(value, { ...options, request() { assert.fail("Private addresses must not be fetched"); } });
+      return { url: value, bytes: png };
+    } });
+    if (base.startsWith("http://127.")) await assert.rejects(imported, /could not be downloaded or decoded/);
+    else {
+      const result = await imported;
+      assert.equal(result.source.imageUrl, base + "shirt.png");
+      assert.equal(result.source.url, url);
+    }
+    assert.deepEqual(calls, [base + "shirt.png"]);
+  }
+});
+
 test("prefers product data over site social tags and refuses ambiguous collection pages", () => {
   const html = `<meta property="og:title" content="Shop"><meta property="og:image" content="/logo.png">`;
   assert.equal(extractWebsiteProduct(html + ld(product), url).imageUrls[0], "https://shop.example/shirt.png");

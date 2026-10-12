@@ -138,12 +138,15 @@ function productIdentity(product, pageUrl) {
 export function extractWebsiteProduct(html, pageUrl) {
   const meta = new Map();
   const documents = [];
-  let script = null, title = "", inTitle = false, canonicalUrl = null;
+  let script = null, title = "", inTitle = false, canonicalUrl = null, documentBase = null;
   new Parser({
     onopentag(tag, attrs) {
       if (tag === "meta") {
         const key = (attrs.property || attrs.name || "").toLowerCase();
         if (attrs.content && !meta.has(key)) meta.set(key, attrs.content);
+      }
+      if (tag === "base" && documentBase === null && typeof attrs.href === "string") {
+        try { documentBase = websiteUrl(attrs.href, pageUrl).href; } catch { /* Keep looking for a valid HTTP(S) base. */ }
       }
       if (tag === "link" && !canonicalUrl && attrs.rel?.toLowerCase().split(/\s+/).includes("canonical")) canonicalUrl = attrs.href;
       if (tag === "script" && attrs.type?.split(";")[0].trim().toLowerCase() === "application/ld+json") script = "";
@@ -158,6 +161,9 @@ export function extractWebsiteProduct(html, pageUrl) {
       }
     },
   }).end(html);
+  // Resolve metadata only after parsing, so even URLs preceding <base> use the
+  // first valid document base. Keep pageUrl as the source and requested page.
+  const metadataBase = documentBase || pageUrl;
   const products = [];
   const queue = [...documents];
   // Iterative and bounded: retailer JSON can be deeply nested or contain lists
@@ -175,15 +181,15 @@ export function extractWebsiteProduct(html, pageUrl) {
   // Same-site metadata also connects collection-path aliases to their product.
   const pageOrigin = new URL(pageUrl).origin;
   const pageIdentities = [pageUrl, canonicalUrl, meta.get("og:url")]
-    .map(value => comparablePageUrl(value, pageUrl))
+    .map(value => comparablePageUrl(value, metadataBase))
     .filter(value => value && new URL(value).origin === pageOrigin);
-  const matching = pageIdentities.map(identity => products.filter(product => productPage(product, pageUrl) === identity))
+  const matching = pageIdentities.map(identity => products.filter(product => productPage(product, metadataBase) === identity))
     .find(matches => matches.length) || [];
-  const identities = new Set(products.map(product => productIdentity(product, pageUrl)));
+  const identities = new Set(products.map(product => productIdentity(product, metadataBase)));
   if (!matching.length && identities.size > 1) throw fail(`This page lists several products. Open an individual product page. ${fallback}`);
   const product = matching[0] || products[0] || {};
   const imageCandidates = values => [...new Set(values.filter(Boolean).flatMap(value => {
-    try { return [websiteUrl(value, pageUrl).href]; } catch { return []; }
+    try { return [websiteUrl(value, metadataBase).href]; } catch { return []; }
   }))].slice(0, 3);
   // Bound each source separately so a full structured-image list cannot crowd
   // out social fallbacks when those preferred images fail to load or decode.
