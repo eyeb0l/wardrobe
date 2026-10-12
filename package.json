@@ -14,7 +14,8 @@
     "build:vercel": "vite build && nitro build && node scripts/package-workflow-native.mjs && node scripts/verify-vercel-spa.mjs",
     "cloud:import": "node scripts/migrate-to-cloud.mjs",
     "decisions:eval": "node scripts/decision-evaluation-runner.mjs",
-    "decisions:usage": "node scripts/decision-usage-report.mjs"
+    "decisions:usage": "node scripts/decision-usage-report.mjs",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.2.8",
@@ -39,7 +40,8 @@
     "workflow": "^4.8.8"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8"
+    "@electric-sql/pglite": "^0.5.8",
+    "@playwright/test": "1.64.0"
   },
   "engines": {
     "node": "22.x"

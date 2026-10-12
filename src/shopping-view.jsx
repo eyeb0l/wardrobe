@@ -192,6 +192,8 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   const [modelReferenceId, setModelReferenceId] = useState("");
   const [prepared, setPrepared] = useState(null);
   const [preparing, setPreparing] = useState(false);
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [importing, setImporting] = useState(false);
   const [imageError, setImageError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [notes, setNotes] = useState("");
@@ -208,6 +210,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   const comparedWardrobe = useRef(null);
   const configController = useRef(null);
   const analysisController = useRef(null);
+  const importController = useRef(null);
   const submitting = useRef(false);
   const dragDepth = useRef(0);
   const focusImageChooser = useRef(false);
@@ -231,7 +234,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   latestWardrobe.current = wardrobeFingerprint;
   const setupProblem = configLoading ? "" : configError ? uiErrorMessage(configError) : setupMessage(config);
   const wardrobeProblem = wardrobeError ? "Your wardrobe couldn't be loaded. Reload the page to try again." : !loading && !items.length ? "Add a few pieces in the Wardrobe tab first so this check can compare with what you own." : "";
-  const canAnalyze = !findingGaps && !!prepared && !preparing && !analyzing && !configLoading && !setupProblem && !loading && !wardrobeProblem && !!selectedReference;
+  const canAnalyze = !findingGaps && !!prepared && !preparing && !importing && !analyzing && !configLoading && !setupProblem && !loading && !wardrobeProblem && !!selectedReference;
 
   const refreshConfig = useCallback(async () => {
     configController.current?.abort();
@@ -260,6 +263,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
       analysisVersion.current += 1;
       configController.current?.abort();
       analysisController.current?.abort();
+      importController.current?.abort();
       submitting.current = false;
     };
   }, [refreshConfig]);
@@ -277,6 +281,9 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   const chooseFile = useCallback(async (file) => {
     if (!file || submitting.current) return;
     const version = ++prepareVersion.current;
+    importController.current?.abort();
+    importController.current = null;
+    setImporting(false);
     clearAnalysis();
     setPrepared(null);
     setImageError("");
@@ -290,6 +297,60 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
       if (mounted.current && version === prepareVersion.current) setPreparing(false);
     }
   }, [clearAnalysis]);
+
+  const cancelImport = () => {
+    prepareVersion.current += 1;
+    importController.current?.abort();
+    importController.current = null;
+    setImporting(false);
+    setImageError("");
+  };
+
+  const importWebsite = async () => {
+    if (submitting.current || findingGaps || importController.current || !websiteUrl.trim()) return;
+    let url;
+    try {
+      url = new URL(websiteUrl.trim());
+      if (!["https:", "http:"].includes(url.protocol)) throw new Error("Invalid protocol");
+    } catch {
+      setImageError("Enter a complete product link beginning with https:// or http://.");
+      return;
+    }
+    const version = ++prepareVersion.current;
+    const controller = new AbortController();
+    importController.current = controller;
+    setPreparing(false);
+    setImporting(true);
+    setImageError("");
+    try {
+      const value = await request("/api/shopping/import-website", {
+        method: "POST", signal: controller.signal,
+        body: JSON.stringify({ websiteUrl: url.href }),
+      });
+      const source = value.websiteSource;
+      let sourceUrl;
+      try { sourceUrl = new URL(source?.url); } catch { /* handled below */ }
+      if (typeof value.imageDataUrl !== "string" || !value.imageDataUrl.startsWith("data:image/jpeg;base64,")
+        || typeof value.name !== "string" || !value.name.trim() || source?.type !== "website"
+        || typeof source.name !== "string" || !source.name.trim() || !sourceUrl
+        || !["https:", "http:"].includes(sourceUrl.protocol)
+        || ["brand", "material", "color", "description", "category", "sku", "imageUrl"].some(key => source[key] != null && typeof source[key] !== "string")) {
+        throw new Error("The product import was incomplete. Try the link again or upload a photo.");
+      }
+      if (!mounted.current || controller.signal.aborted || version !== prepareVersion.current) return;
+      clearAnalysis();
+      setPrepared({ dataUrl: value.imageDataUrl, name: value.name, websiteSource: source });
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted && version === prepareVersion.current) {
+        setImageError(error.message || "This product link couldn't be imported. Try another link or upload a photo.");
+      }
+    } finally {
+      if (mounted.current && importController.current === controller) {
+        importController.current = null;
+        setImporting(false);
+      }
+    }
+  };
 
   const acceptFiles = useCallback((files) => {
     if (submitting.current) return;
@@ -322,6 +383,9 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     if (submitting.current) return;
     focusImageChooser.current = true;
     prepareVersion.current += 1;
+    importController.current?.abort();
+    importController.current = null;
+    setImporting(false);
     clearAnalysis();
     setPrepared(null);
     setPreparing(false);
@@ -361,6 +425,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
         signal: controller.signal,
         body: JSON.stringify({
           image: prepared.dataUrl,
+          ...(prepared.websiteSource ? { websiteSource: prepared.websiteSource } : {}),
           modelReferenceId,
           notes: notes.trim(),
           wardrobeItems,
@@ -400,19 +465,30 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     </header>
 
     <WardrobeGaps wardrobeItems={wardrobeItems} fingerprint={wardrobeFingerprint} itemsById={itemsById} loading={loading} wardrobeError={wardrobeError}
-      config={config} configLoading={configLoading} configError={configError} analyzing={analyzing} onBusyChange={setFindingGaps} />
+      config={config} configLoading={configLoading} configError={configError} analyzing={analyzing || importing || preparing} onBusyChange={setFindingGaps} />
 
-    <form className="shopping-form" onSubmit={analyze}>
+    <form className="shopping-form" onSubmit={analyze} noValidate>
       <div className="shopping-workspace">
         <section className="shopping-upload-section" aria-labelledby={`${id}-upload-title`}>
           <h2 id={`${id}-upload-title`} className="shopping-section-title">The piece you're considering</h2>
+          <div className="shopping-link-import" aria-busy={importing}>
+            <label className="shopping-field" htmlFor={`${id}-website-url`}><span>Product URL</span></label>
+            <div className="shopping-link-controls">
+              <input id={`${id}-website-url`} type="url" name="websiteUrl" inputMode="url" autoComplete="url" placeholder="https://shop.example/product" value={websiteUrl} disabled={analyzing || importing} aria-describedby={`${id}-link-hint`}
+                onChange={(event) => setWebsiteUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void importWebsite(); } }} />
+              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || !websiteUrl.trim()}>{importing ? "Importing…" : "Import link"}<ArrowRight size={16} aria-hidden="true" /></button>
+            </div>
+            <p id={`${id}-link-hint`} className="shopping-small">Import the product photo and details, then check the piece when you're ready.</p>
+            {importing ? <div className="shopping-link-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-small">Finding the product photo and details…</p><button type="button" className="shopping-text-button" onClick={cancelImport}>Cancel import</button></div> : null}
+          </div>
+          <p className="shopping-upload-alternative">Or add a photo or screenshot</p>
           <div className={`shopping-upload${dragging ? " is-dragging" : ""}${prepared ? " has-image" : ""}`}
             onDragEnter={(event) => { if (fileDragged(event)) { event.preventDefault(); if (!submitting.current) { dragDepth.current += 1; setDragging(true); } } }}
             onDragOver={(event) => { if (fileDragged(event)) { event.preventDefault(); event.dataTransfer.dropEffect = submitting.current ? "none" : "copy"; } }}
             onDragLeave={(event) => { if (fileDragged(event)) { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); } }}
             onDrop={(event) => { if (fileDragged(event)) { event.preventDefault(); dragDepth.current = 0; setDragging(false); acceptFiles([...event.dataTransfer.files]); } }}
           >
-            {prepared ? <img className="shopping-upload-preview" src={prepared.dataUrl} alt="The shopping image you selected" /> : preparing ? <div className="shopping-upload-empty" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-upload-title">Preparing your photo…</p><button type="button" className="shopping-text-button" onClick={removeImage}>Cancel</button></div> : <div className="shopping-upload-empty">
+            {prepared ? <img className="shopping-upload-preview" src={prepared.dataUrl} alt={prepared.websiteSource ? prepared.websiteSource.name : "The shopping image you selected"} /> : preparing ? <div className="shopping-upload-empty" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-upload-title">Preparing your photo…</p><button type="button" className="shopping-text-button" onClick={removeImage}>Cancel</button></div> : <div className="shopping-upload-empty">
               <Plus size={30} weight="light" aria-hidden="true" />
               <p className="shopping-upload-title">Add a photo or screenshot</p>
               <p>Use a saved listing or a photo from a shop.</p>
@@ -426,6 +502,14 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             <div><p className="shopping-file-name" title={prepared.name}>{prepared.name}</p><p className="shopping-small">Ready to check.</p></div>
             <div className="shopping-image-actions"><button type="button" className="shopping-text-button" disabled={analyzing} onClick={() => fileInput.current?.click()}>Replace</button><button type="button" className="shopping-remove" onClick={removeImage} disabled={analyzing} aria-label="Remove shopping image"><X size={18} aria-hidden="true" /></button></div>
           </div> : null}
+          {prepared?.websiteSource ? <section className="shopping-product-source" aria-labelledby={`${id}-source-title`} aria-live="polite">
+            <p className="shopping-small shopping-source-label">Imported from a product page</p>
+            <h3 id={`${id}-source-title`}>{prepared.websiteSource.name}</h3>
+            <a className="shopping-source-link" href={prepared.websiteSource.url} target="_blank" rel="noopener noreferrer">{prepared.websiteSource.url}<span className="shopping-sr-only"> (opens in a new tab)</span></a>
+            {[prepared.websiteSource.brand, prepared.websiteSource.material, prepared.websiteSource.color].some(Boolean) ? <dl className="shopping-source-details">{[["Brand", prepared.websiteSource.brand], ["Material", prepared.websiteSource.material], ["Colour", prepared.websiteSource.color]].filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl> : null}
+            {prepared.websiteSource.description ? <p className="shopping-source-description">{prepared.websiteSource.description}</p> : null}
+            <p className="shopping-small shopping-source-check">Check the photo matches the product and colour you intended before checking this piece.</p>
+          </section> : null}
           {imageError ? <p className="shopping-error" role="alert">{uiErrorMessage(imageError)}</p> : null}
         </section>
 
@@ -455,12 +539,12 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
           {setupProblem ? <div className="shopping-notice" role="status"><p>{setupProblem}</p><button type="button" className="shopping-text-button" onClick={refreshConfig} disabled={configLoading || analyzing}>{configLoading ? "Refreshing…" : "Refresh settings"}</button></div> : configLoading ? <p className="shopping-small" role="status">Loading shopping settings…</p> : null}
 
           <div className="shopping-submit-area">
-            <p className="shopping-disclosure">This check sends your image, selected model reference and wardrobe photos to the AI service.</p>
+            <p className="shopping-disclosure">This check sends your image{prepared?.websiteSource ? ", imported product details" : ""}, selected model reference and wardrobe photos to the AI service.</p>
             {config?.visualOverlapEnabled ? <p className="shopping-small">Also compares individual photos of up to three similar owned pieces.</p> : null}
             {analysisError ? <p className="shopping-error" role="alert">{uiErrorMessage(analysisError)}</p> : null}
             <button className="shopping-primary" type="submit" disabled={!canAnalyze}>{analyzing ? "Checking your wardrobe…" : analysisError ? "Try again" : result ? "Check again" : "Check this piece"}<ArrowRight size={17} aria-hidden="true" /></button>
             {analyzing ? <div className="shopping-analysis-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p>Looking at the piece, your reference and possible combinations. This can take a minute.</p></div> : null}
-            {!prepared && !preparing && !setupProblem && !wardrobeProblem ? <p className="shopping-small shopping-upload-prompt">Add an image to get started.</p> : null}
+            {!prepared && !preparing && !importing && !setupProblem && !wardrobeProblem ? <p className="shopping-small shopping-upload-prompt">Import a product link or add an image to get started.</p> : null}
           </div>
         </div>
       </div>
