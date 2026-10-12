@@ -46,9 +46,9 @@ An outfit case looks like this:
 }
 ```
 
-The example illustrates the schema; its labels are not evidence about any real photograph. Crop cases use labels `source` and `target`, metadata `{ category, name }`, and expected check IDs `complete`, `isolated` and `detail`. Every independent check needs `clear`, `concern` or `unknown`. Use `unknown` when the visual evidence cannot support a judgment, rather than treating obscured detail as correct or defective. Human review dates are required for a live run.
+The example illustrates the schema; its labels are not evidence about any real photograph. Crop cases use labels `source` and `target`, metadata `{ category, name }`, and expected check IDs `complete`, `isolated` and `detail`. Every independent check needs `clear`, `concern` or `unknown`. Use `unknown` when the visual evidence cannot support a judgement, rather than treating obscured detail as correct or defective. Human review dates are required for a live run.
 
-Outfit evidence must contain the result and one cutout per metadata garment, labeled `garment_0`, `garment_1`, etc. Bounded garment metadata accepts `id`, `name`, `part`, `color`, `tags` and `outerConstruction`; reference labels are derived from order. Ground truth, review status, case/family names, selection hints and notes are never sent to the provider. The runner rejects arbitrary metadata fields and paths escaping the dataset, including symlinks. PNG, JPEG and WebP sources use the production 30 MiB/50-million-pixel limits and 768-pixel JPEG preparation; each request is at most 8 MiB and the prepared suite at most 64 MiB.
+Outfit evidence must contain the result and one cutout per metadata garment, labelled `garment_0`, `garment_1`, etc. Bounded garment metadata accepts `id`, `name`, `part`, `color`, `tags` and `outerConstruction`; reference labels are derived from order. Ground truth, review status, case/family names, selection hints and notes are never sent to the provider. The runner rejects arbitrary metadata fields and paths escaping the dataset, including symlinks. PNG, JPEG and WebP sources use the production 30 MiB/50-million-pixel limits and 768-pixel JPEG preparation; each request is at most 8 MiB and the prepared suite at most 64 MiB.
 
 ## Review an offline plan
 

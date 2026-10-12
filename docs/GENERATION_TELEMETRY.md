@@ -1,6 +1,6 @@
 # Generation refusal telemetry
 
-The app quietly records image attempts for garment cutouts, modeled garment photos, and modeled outfits. It does not switch models, retry automatically, or send analytics to a third party. Collection starts when this code runs; older generations are not backfilled. Detection, outfit planning and modeled-scene planning are excluded from image-attempt denominators. A failure before an image request is dispatched is not an image refusal.
+The app quietly records image attempts for garment cutouts, modelled garment photos, and modelled outfits. It does not switch models, retry automatically, or send analytics to a third party. Collection starts when this code runs; older generations are not backfilled. Detection, outfit planning and modelled-scene planning are excluded from image-attempt denominators. A failure before an image request is dispatched is not an image refusal.
 
 ## Records and privacy
 
@@ -14,7 +14,7 @@ Each image record contains:
 - Start/end timestamps, outcome (`succeeded`, `refused`, `technical_failure`, or `unknown`), HTTP status, bounded API error code/type, and local error class.
 - SHA-256 prompt/reference fingerprints and a pointer to the existing generation record. No prompt text, response/error messages, image data, garment names/tags, or API keys are copied into telemetry.
 
-Refusals require an explicit refusal field or a recognized API code/type (`content_policy_violation`, `moderation_blocked`, `safety_violation`, `safety_system`, `content_filter`, `refusal`). HTTP 400/403 alone and arbitrary error-message wording do not prove refusal. Unrecognized provider errors count as technical failures; inspect code distributions before interpreting category comparisons. Extend the explicit mapping when a new provider code is verified.
+Refusals require an explicit refusal field or a recognised API code/type (`content_policy_violation`, `moderation_blocked`, `safety_violation`, `safety_system`, `content_filter`, `refusal`). HTTP 400/403 alone and arbitrary error-message wording do not prove refusal. Unrecognised provider errors count as technical failures; inspect code distributions before interpreting category comparisons. Extend the explicit mapping when a new provider code is verified.
 
 Success means image generation/processing produced a candidate, not that the user approved its appearance. A timeout is a technical failure from the app's perspective; the provider may still have produced/billed a result. A process interruption leaving only a start record remains `unknown` and is excluded from completed-attempt rates. Telemetry is best effort: a storage failure emits a generic warning without causing another paid call or discarding an image. Therefore counts can be incomplete during outages. The report flags gaps in recorded attempt numbers and excludes a missing first attempt from first-attempt metrics. Entirely missing episodes cannot be detected.
 

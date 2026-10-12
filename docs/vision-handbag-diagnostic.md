@@ -1,22 +1,22 @@
 # Handbag fidelity diagnostic — 2026-09-20
 
-**Historical diagnostic.** The [colour fix and former Terra medium retry](chroma-cleanup-and-detection-rescue.md) were deployed in PR #12; the current manual retry uses GPT-6.1 Sol. The findings below describe the earlier Luna medium/Terra low comparison. Terra low had better raw handle localization in this example, but was less consistent at rejecting its incorrect color.
+**Historical diagnostic.** The [colour fix and former Terra medium retry](chroma-cleanup-and-detection-rescue.md) were deployed in PR #12; the current manual retry uses GPT-6.1 Sol. The findings below describe the earlier Luna medium/Terra low comparison. Terra low had better raw handle localisation in this example, but was less consistent at rejecting its incorrect colour.
 
 The user supplied an original navy/slate-blue tote with brown trim and an imported version whose fabric looks dark purple. This is a focused diagnostic of one known failure, not a representative benchmark. Nothing was regenerated, replaced in the wardrobe or deployed.
 
 ## API test
 
-Twenty calls, all completed: Luna medium and Terra low, two repeats each, on five fixtures. Two fixtures replay the actual production detection request on each image using the app's browser preprocessing and server normalization. Three use a new neutral fidelity-review prompt: original/candidate in both display orders, plus a faithful downscaled-original control. The prompt did not reveal the user's color complaint. The expected mismatch and control outcome were recorded before calls. Repeated calls/order swaps are not independent products.
+Twenty calls, all completed: Luna medium and Terra low, two repeats each, on five fixtures. Two fixtures replay the actual production detection request on each image using the app's browser preprocessing and server normalisation. Three use a new neutral fidelity-review prompt: original/candidate in both display orders, plus a faithful downscaled-original control. The prompt did not reveal the user's colour complaint. The expected mismatch and control outcome were recorded before calls. Repeated calls/order swaps are not independent products.
 
 | Outcome | Luna medium | Terra low |
 |---|---:|---:|
 | Original described as navy/blue with brown trim | 2/2 | 2/2 |
 | Real mismatch rejected | 4/4 | 2/4 |
-| Main-body color explicitly flagged as a major mismatch | 4/4 | 1/4 |
+| Main-body colour explicitly flagged as a major mismatch | 4/4 | 1/4 |
 | Faithful resize control accepted | 2/2 | 2/2 |
 | Cost for all 10 calls | $0.0082316 | $0.0661760 |
 
-Terra accepted the purple candidate in two trials, attributing it to lighting/viewpoint. Its second rejection primarily asserted absent pocket/logo details at low resolution and rated color only a minor issue. That is weaker evidence for the user's specific color problem than Luna's consistent major-color warnings. Some answers from both models used overly specific material/construction descriptions; these counts measure color recognition/rejection, not comprehensive answer quality.
+Terra accepted the purple candidate in two trials, attributing it to lighting/viewpoint. Its second rejection primarily asserted absent pocket/logo details at low resolution and rated colour only a minor issue. That is weaker evidence for the user's specific colour problem than Luna's consistent major-colour warnings. Some answers from both models used overly specific material/construction descriptions; these counts measure colour recognition/rejection, not comprehensive answer quality.
 
 Both models' detection responses still called the imported purple-looking bag “navy,” although their hex estimates were purple-toned. This illustrates why a single short item label should not be treated as a fidelity check.
 
@@ -24,9 +24,9 @@ Terra did better on the original's raw top bounding coordinate: 190/192 versus L
 
 ## Reproduced processing defect
 
-The saved snapshot record for this bag is `import-d8c60e08-bb0a-42a5-a41d-58d601c378d6`, with blue primary `#1e3445` and brown secondary `#8b503b`. Those colors select cyan `#00ffff` as the generated background key.
+The saved snapshot record for this bag is `import-d8c60e08-bb0a-42a5-a41d-58d601c378d6`, with blue primary `#1e3445` and brown secondary `#8b503b`. Those colours select cyan `#00ffff` as the generated background key.
 
-Current cleanup applies spill suppression throughout the foreground. It interprets legitimate green/blue channel strength as cyan contamination, subtracts those channels and reduces opacity. A small synthetic opaque patch using the saved blue color, passed through the actual production helper, changed as follows:
+Current cleanup applies spill suppression throughout the foreground. It interprets legitimate green/blue channel strength as cyan contamination, subtracts those channels and reduces opacity. A small synthetic opaque patch using the saved blue colour, passed through the actual production helper, changed as follows:
 
 | | RGBA |
 |---|---|
@@ -39,7 +39,7 @@ This proves a present code defect capable of explaining the observed direction o
 
 Relevant code:
 
-- [Key selection and image-generation prompt](../scripts/import-job-api.mjs#L166): color metadata selects the key and supplies hints, but the prompt explicitly prioritizes the reference image.
+- [Key selection and image-generation prompt](../scripts/import-job-api.mjs#L166): colour metadata selects the key and supplies hints, but the prompt explicitly prioritises the reference image.
 - [Chroma cleanup](../scripts/import-job-api.mjs#L228): global channel suppression and alpha reduction; subsequent passes repeat suppression.
 - [Spill verification](../scripts/import-job-api.mjs#L331): no source-to-result garment fidelity comparison.
 - [Extraction pipeline](../scripts/import-job-api.mjs#L586): image generation, raw generated source saved, then cleanup.
@@ -47,10 +47,10 @@ Relevant code:
 
 ## Recommended order of work
 
-1. Correct cleanup so legitimate foreground colors/opacity survive; add regression coverage for blue with cyan, and analogous garment/key combinations. Validate edge cleanup as well as interior fidelity.
+1. Correct cleanup so legitimate foreground colours/opacity survive; add regression coverage for blue with cyan, and analogous garment/key combinations. Validate edge cleanup as well as interior fidelity.
 2. Improve access to the original-preserving path for already isolated transparent product photos. This particular original does not need generative reconstruction.
 3. Trial source-versus-result fidelity review with Luna medium on a broader set of real accepted/rejected imports. This small test supports that workflow, but is not enough to ship an automatic acceptance gate.
-4. Evaluate a Terra retry for difficult detection/localization separately. Switching the vision model does not repair downstream channel suppression.
+4. Evaluate a Terra retry for difficult detection/localisation separately. Switching the vision model does not repair downstream channel suppression.
 
 This diagnostic itself changed no code or saved images; implementation and release are covered in the linked follow-up.
 

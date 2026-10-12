@@ -12,9 +12,9 @@ node --env-file=.env.cloud scripts/skill-snapshot.mjs \
   --target cloud --out "$WORK/snapshot"
 ```
 
-Run from the repository root with Node 22.x. The ignored `.env.cloud` needs the existing production `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN`; never print their values, put them in commands, or commit the file. The helpers need no OpenAI key. If credentials are unavailable, use the authenticated app or obtain the missing access. Do not initialize another database, weaken Vercel protection, or copy a stale library into production.
+Run from the repository root with Node 22.x. The ignored `.env.cloud` needs the existing production `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN`; never print their values, put them in commands, or commit the file. The helpers need no OpenAI key. If credentials are unavailable, use the authenticated app or obtain the missing access. Do not initialise another database, weaken Vercel protection, or copy a stale library into production.
 
-The command leaves cloud storage unchanged and acquires no lease. `--out` must be a new directory whose parent already exists. It checks for source changes while copying and writes `snapshot.json` last, recording the target, capture time, reference IDs and file hashes. On failure, retain partial files for diagnosis and retry into a fresh directory; only a directory with the completion marker is a usable snapshot. Snapshots omit jobs, modeled garment photos and outfit images, so they are not backups.
+The command leaves cloud storage unchanged and acquires no lease. `--out` must be a new directory whose parent already exists. It checks for source changes while copying and writes `snapshot.json` last, recording the target, capture time, reference IDs and file hashes. On failure, retain partial files for diagnosis and retry into a fresh directory; only a directory with the completion marker is a usable snapshot. Snapshots omit jobs, modelled garment photos and outfit images, so they are not backups.
 
 To reuse downloads, add `--reuse /path/to/previous/snapshot` and keep `--out` new. The earlier snapshot must be complete and use the same target. Metadata and image identities are fetched fresh; cached originals are copied only when their SHA-256, size and current immutable Blob identity match. Changed, missing or corrupt cached files are downloaded again. Snapshots without identity metadata and mutable local files fall back to source reads. Reuse leaves the earlier snapshot untouched and retains all consistency checks.
 
@@ -35,7 +35,7 @@ Name/category/colour/tag edits and hidden state are shared in the stored library
 
 Keep original PNGs for generation, exact colour work and final saves. URLs with `format=webp&w=320`, `640` or `1280` return private display derivatives with browser cache revalidation. Do not replace originals with WebP or publish public Blob URLs. The model-reference HTTP route without display parameters returns a small preview; use the snapshot's original reference for Imagegen.
 
-Keep snapshots, downloaded references, personal photos, generated results and credentials private and outside tracked files. Preserve identity/source images unchanged. Generation may send selected references to the authorized image provider; it is not local-only processing.
+Keep snapshots, downloaded references, personal photos, generated results and credentials private and outside tracked files. Preserve identity/source images unchanged. Generation may send selected references to the authorised image provider; it is not local-only processing.
 
 ## Save reviewed results
 
@@ -43,7 +43,7 @@ The [import](../scripts/import-reviewed-clothes.mjs) and [outfit-save](../script
 
 Use the command in the relevant skill, keeping generation and visual QA outside the lease. If the store is busy, retain staged results and retry after the active operation finishes; never delete a lease or lock. Cloud saves need no server restart or deployment. After saving, refresh the authenticated production app and verify returned IDs, added item counts, and original/display images.
 
-Check live records before retrying an uncertain save. Identical saves do not duplicate records. Conflicting outfit IDs fail; import IDs derive from cutout content, so reimporting an identical cutout updates its metadata and any supplied modeled photo while retaining unrelated records and fields. Physical-item deduplication still requires source review.
+Check live records before retrying an uncertain save. Identical saves do not duplicate records. Conflicting outfit IDs fail; import IDs derive from cutout content, so reimporting an identical cutout updates its metadata and any supplied modelled photo while retaining unrelated records and fields. Physical-item deduplication still requires source review.
 
 Use `scripts/migrate-to-cloud.mjs` only for initial migration, never ongoing sync or skill delivery. During a skill task, do not issue ad hoc SQL, replace `library.json`/`outfits.json` from a snapshot, or garbage-collect originals/derivatives.
 
@@ -51,7 +51,7 @@ Use `scripts/migrate-to-cloud.mjs` only for initial migration, never ongoing syn
 
 Native Imagegen and app API generation are separate workflows. App requests use the authenticated UI, selected reference and configured models. Hosted jobs are durable: after a disconnect, poll or reopen the same job instead of submitting again. Results require review/acceptance before entering the saved collection. A timeout does not prove a paid request failed, and the app's daily API limits do not cover native Imagegen calls.
 
-For API automation, read the current [import](../scripts/import-job-api.mjs), [outfit](../scripts/outfit-api.mjs) or [shopping](../scripts/shopping-api.mjs) contract. Routes use Vercel Authentication; previews deliberately lack production API access. Prefer the signed-in browser. For Vercel CLI access, follow its skill, protect temporary automation credentials, and afterward revoke only those created for the task. Never make images public to enable a tool fetch.
+For API automation, read the current [import](../scripts/import-job-api.mjs), [outfit](../scripts/outfit-api.mjs) or [shopping](../scripts/shopping-api.mjs) contract. Routes use Vercel Authentication; previews deliberately lack production API access. Prefer the signed-in browser. For Vercel CLI access, follow its skill, protect temporary automation credentials, and afterwards revoke only those created for the task. Never make images public to enable a tool fetch.
 
 ## Explicit local mode
 

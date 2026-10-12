@@ -71,7 +71,7 @@ An **exploratory sensitivity check**, excluding only those eight paired transpor
 
 Detection often found the main garment correctly but missed a small accessory, drew an inadequate box around an obscured underlayer, or joined separate clothing into one dress. In confirmation, item-set or crop flags appeared on 27 medium and 28 high calls; other acceptance failures also include inaccurate attributes and false clean-product flags. The all-items rule means a small earring error can fail an otherwise good main-garment detection. The [private visual gallery](../data/vision-eval-api-2026-09-20/confirmation-gallery.html) shows the actual processed inputs, frozen labels and predicted boxes.
 
-Curation still repeated excluded pairs in two medium answers and one high answer. Shopping sometimes used the retailer model's coloring instead of the supplied person reference, or omitted a necessary top/bottom from a proposed look. These point to focused follow-up work on crop validation, deterministic pair exclusions, and clearer separation of candidate/person images. Those changes were not made during this evaluation.
+Curation still repeated excluded pairs in two medium answers and one high answer. Shopping sometimes used the retailer model's colouring instead of the supplied person reference, or omitted a necessary top/bottom from a proposed look. These point to focused follow-up work on crop validation, deterministic pair exclusions, and clearer separation of candidate/person images. Those changes were not made during this evaluation.
 
 The screen did not justify paying for Terra/low or Sol/low: neither improved weighted acceptance over Luna/medium, while cost per accepted answer was about 8.5× and 16.7× higher respectively on the same screening cases. This remains screening evidence; neither received the larger held-out confirmation, and higher efforts were not tested.
 
@@ -85,11 +85,11 @@ Calibration ran sequentially; screening used five concurrent candidates per matc
 
 The wardrobe/person context is shared throughout. Repeats are not independent garments. Correlated ARKET styling is grouped across r01/r02/r03, and retailer views/shopping cases stay in one split. Confirmation inference clusters product families, with joint resampling across detection/shopping; other tasks have their own context families. Curation has only one wardrobe family, so variation across people cannot be estimated.
 
-No website-UI screenshot stratum was captured. Shopping has no truly blank/unclear candidate or exact duplicate control in this round. Most accessory photos have no jewelry; one clearly shows existing gold hoops. Three near-white isolated product backgrounds have unresolved white-versus-gray semantics, so either clean flag is accepted and that ambiguity is recorded. The Next r08 listing title disagrees with its asset; the image and the visible pale blazer are authoritative.
+No website-UI screenshot stratum was captured. Shopping has no truly blank/unclear candidate or exact duplicate control in this round. Most accessory photos have no jewellery; one clearly shows existing gold hoops. Three near-white isolated product backgrounds have unresolved white-versus-grey semantics, so either clean flag is accepted and that ambiguity is recorded. The Next r08 listing title disagrees with its asset; the image and the visible pale blazer are authoritative.
 
 All 51 budget-runner, production-capture, scoring and paired-analysis tests passed. The actual example gallery was visually checked at desktop and narrow widths; all images loaded locally and boxes aligned with the rasters.
 
-The tested API shortlist excludes Terra/Sol at higher efforts and Luna none/xhigh/max. No claim is made about their price/performance. All conclusions are conditional on these prompts, images, labels, acceptance thresholds and model-assisted judgments.
+The tested API shortlist excludes Terra/Sol at higher efforts and Luna none/xhigh/max. No claim is made about their price/performance. All conclusions are conditional on these prompts, images, labels, acceptance thresholds and model-assisted judgements.
 
 
 ## Reproduction and completion evidence

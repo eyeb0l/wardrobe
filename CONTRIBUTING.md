@@ -1,6 +1,6 @@
 # Contributing
 
-Use Node.js 22.x. Fork the repository or create a focused branch, then open a pull request describing the resulting behavior and validation.
+Use Node.js 22.x. Fork the repository or create a focused branch, then open a pull request describing the resulting behaviour and validation.
 
 ```bash
 npm ci
@@ -15,7 +15,7 @@ git diff --check
 npm run build:vercel
 ```
 
-This builds Vite and Nitro, packages native workflow dependencies, and verifies SPA route fallback. For documentation-only changes, check commands and links against the code. Model API contract tests do not establish image quality: prompt/model changes also need the [visual comparison workflow](docs/model-migration.md), within an authorized generation budget.
+This builds Vite and Nitro, packages native workflow dependencies, and verifies SPA route fallback. For documentation-only changes, check commands and links against the code. Model API contract tests do not establish image quality: prompt/model changes also need the [visual comparison workflow](docs/model-migration.md), within an authorised generation budget.
 
 ## Code and storage boundaries
 

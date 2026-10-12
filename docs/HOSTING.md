@@ -43,7 +43,7 @@ Replace `data` with your configured directory. The import includes:
 
 Dotfiles and transient locks are excluded. References outside the directory are not copied; place the intended hosted default at `model-reference.png` inside it. The hosted server configures its own paths, so do not copy local `WARDROBE_DATA_DIR` or `WARDROBE_MODEL_REFERENCE` overrides into Vercel.
 
-This is an initial copy, not synchronization. It leaves local originals unchanged, skips identical cloud files, and stops at a differing cloud file without overwriting it. Earlier files may already have copied; rerunning verifies and skips matches. It rejects active generation, symbolic links within the selected data, and a missing library.
+This is an initial copy, not synchronisation. It leaves local originals unchanged, skips identical cloud files, and stops at a differing cloud file without overwriting it. Earlier files may already have copied; rerunning verifies and skips matches. It rejects active generation, symbolic links within the selected data, and a missing library.
 
 After the import succeeds and deployment protection is verified, set `WARDROBE_HOSTED_ENABLED=1` in **Production only** and create a new production source deployment.
 
@@ -62,11 +62,11 @@ Hosted requests have separate allowances per UTC calendar day:
 | Production variable | Default | Requests counted |
 | --- | --- | --- |
 | `WARDROBE_DAILY_IMAGE_API_LIMIT` | 40 | Image generation |
-| `WARDROBE_DAILY_TEXT_API_LIMIT` | 1,000 | Text/vision, including shopping, accessories, clothing analysis, outfit planning, modeled-photo scene planning, and optional Decisions discovery and image checks |
+| `WARDROBE_DAILY_TEXT_API_LIMIT` | 1,000 | Text/vision, including shopping, accessories, clothing analysis, outfit planning, modelled-photo scene planning, and optional Decisions discovery and image checks |
 
 Set positive integers and redeploy to change them. `WARDROBE_DAILY_API_LIMIT` remains an image-only fallback when the image-specific setting is unset. Legacy aggregate usage counts against images until the next UTC day; text has its own allowance. Backups preserve both counters.
 
-Each provider request reserves allowance immediately before dispatch under the writer lease. Cached suggestions and skipped work use none; failed or uncertain requests still count. A successful modeled-garment attempt uses one text request for scene planning followed by one image request; planning must succeed before image generation starts. Batches may make several calls. These are **request-count limits, not currency budgets**; use provider-side controls too.
+Each provider request reserves allowance immediately before dispatch under the writer lease. Cached suggestions and skipped work use none; failed or uncertain requests still count. A successful modelled-garment attempt uses one text request for scene planning followed by one image request; planning must succeed before image generation starts. Batches may make several calls. These are **request-count limits, not currency budgets**; use provider-side controls too.
 
 ### Optional Decisions features
 
@@ -74,7 +74,7 @@ Set the server-only `WARDROBE_DECISIONS_ENABLED=1` flag in the intended environm
 
 For the guarded outfit-review candidate, set `WARDROBE_DECISIONS_OUTFIT_RUBRIC_VERSION=2` in **Preview only**, after verifying the existing isolated Preview storage and protection flags. It additionally requires `VERCEL_ENV=preview` and `WARDROBE_PREVIEW_ENABLED=1`; Vercel supplies `VERCEL_ENV`. Outfit checks use the full photo and selected cutouts in one five-question request. Crop checks and other environments retain version 1. The selected version is exposed as `imageChecks.rubricVersion` by `/api/outfits/config`. Human acceptance and fuller audits remain independent of these suggestions; no check runs automatically.
 
-Shopping additionally requires `WARDROBE_DECISIONS_SHOPPING_OVERLAP_ENABLED=1`. Enable it in the isolated protected Preview first. **Check this piece** follows four stages: an assistant shortlist of up to three authorized owned garments; one Decisions request with independent silhouette, colour/pattern and styling-possibility questions for each cutout; a Decisions evidence/verdict request with the candidate, selected reference and all owned contact sheets; and an assistant explanation constrained to that verdict and a deterministic comparison explanation. Similar silhouettes and different colours can coexist. The shortlist is not an exhaustive duplicate search. No shortlist skips individual comparisons but still evaluates the verdict against the full wardrobe. Refusals or confidence/selected-choice probabilities below the provisional 0.75 thresholds remain unclear; these thresholds have not been calibrated on Shopping. A failed comparison remains unconfirmed. A failed verdict stays unclear and explicitly unavailable, with no assistant-verdict fallback. The assistant cannot override the verdict or comparison explanation. The library, all supplied owned images and selected reference are fenced after every paid stage; changed evidence fails the whole assessment with HTTP 409. Every actual provider dispatch reserves text quota (up to four calls); cached Decisions results reserve no additional call. Private usage purposes are `shopping-overlap` and `shopping-verdict`. Suggestions remain advisory and do not import or buy anything. Disable this additional flag and redeploy to restore the original Shopping assessment.
+Shopping additionally requires `WARDROBE_DECISIONS_SHOPPING_OVERLAP_ENABLED=1`. Enable it in the isolated protected Preview first. **Check this piece** follows four stages: an assistant shortlist of up to three authorised owned garments; one Decisions request with independent silhouette, colour/pattern and styling-possibility questions for each cutout; a Decisions evidence/verdict request with the candidate, selected reference and all owned contact sheets; and an assistant explanation constrained to that verdict and a deterministic comparison explanation. Similar silhouettes and different colours can coexist. The shortlist is not an exhaustive duplicate search. No shortlist skips individual comparisons but still evaluates the verdict against the full wardrobe. Refusals or confidence/selected-choice probabilities below the provisional 0.75 thresholds remain unclear; these thresholds have not been calibrated on Shopping. A failed comparison remains unconfirmed. A failed verdict stays unclear and explicitly unavailable, with no assistant-verdict fallback. The assistant cannot override the verdict or comparison explanation. The library, all supplied owned images and selected reference are fenced after every paid stage; changed evidence fails the whole assessment with HTTP 409. Every actual provider dispatch reserves text quota (up to four calls); cached Decisions results reserve no additional call. Private usage purposes are `shopping-overlap` and `shopping-verdict`. Suggestions remain advisory and do not import or buy anything. Disable this additional flag and redeploy to restore the original Shopping assessment.
 
 ## Release code and retain data
 
@@ -92,15 +92,15 @@ Names, categories, colours, tags, hidden items, and deletion tombstones live in 
 
 Older browser-only edits and hidden items migrate on that browser's first opening of the upgraded app. Existing shared edits take precedence. The browser retains a copy under `open-wardrobe-legacy-backup-v1`; failed migrations keep the original keys and retry on refresh. Deletion tombstones prevent delayed imports or migrations from resurrecting items. Sync applies to devices using the same store; local development remains separate.
 
-### Modeled-photo prompts
+### Modelled-photo prompts
 
-Modeled garment generation plans a fresh setting using the configured vision model, reviewed cutout, user direction, and known previous settings. There is no backdrop catalog. The app and import-clothes skill share planning and image prompts through `scripts/modeled-photo-prompts.mjs`; the prompt CLI renders them without API calls. Approved app and skill imports retain `modeledSetting` for later planning, while older photos without it remain usable. See [modeled photos](MODELED_PHOTOS.md) for the review and manual-upload workflow.
+Modelled garment generation plans a fresh setting using the configured vision model, reviewed cutout, user direction, and known previous settings. There is no backdrop catalogue. The app and import-clothes skill share planning and image prompts through `scripts/modeled-photo-prompts.mjs`; the prompt CLI renders them without API calls. Approved app and skill imports retain `modeledSetting` for later planning, while older photos without it remain usable. See [modelled photos](MODELED_PHOTOS.md) for the review and manual-upload workflow.
 
 ## Display images and transfer usage
 
 Original PNGs are retained for generation, downloads, and precise colour sampling. Gallery images, outfit photos, references, and import previews use responsive WebP copies at widths of 320, 640, or 1280 pixels, without enlarging smaller originals. Encoding uses quality 85 and alpha quality 100. Originals are never recompressed or made public.
 
-Private Blob stores the copies; `wardrobe_image_variants` indexes them separately. A missing size is generated on first display through the same authenticated API route. Compression makes no paid model calls. To initialize this additive cache table and prepare existing images:
+Private Blob stores the copies; `wardrobe_image_variants` indexes them separately. A missing size is generated on first display through the same authenticated API route. Compression makes no paid model calls. To initialise this additive cache table and prepare existing images:
 
 ```sh
 # Read-only inventory.
@@ -112,13 +112,13 @@ node --env-file=.env.cloud scripts/warm-display-images.mjs --apply
 
 Fresh migrations create the table automatically. Warmup leaves originals unchanged; unused originals and derivatives are eligible for the cleanup below.
 
-### Caching and read behavior
+### Caching and read behaviour
 
 - **Private image responses:** originals and WebP use `private, no-cache` and an ETag derived from immutable object identity. A matching revalidation returns 304 without downloading image bytes. Routes still check current file references and any required manifest membership first. No private response enters the public CDN cache.
 - **Blob reads:** immutable upload URLs permit private Blob CDN caching. Each warm storage client also retains at most 64 MiB / 256 image entries, with an 8 MiB maximum per entry, and coalesces concurrent reads of the same object. Database path lookups remain fresh, so replacement/deletion takes effect immediately. Backup downloads and restored-upload integrity checks bypass both caches.
 - **Workers:** a warm worker reuses its bounded storage client, but each step acquires a fresh fenced lease and reads current task/file metadata. Separate instances and explicitly supplied stores do not share caches. Allow for repeated downloads on cold starts; there is no durable worker cache.
 - **Metadata reads:** outfit/Shopping settings check file existence instead of downloading originals for dimensions. Cloud garment paths resolve in one fresh metadata query; local paths retain symlink checks. Accepted outfit reads omit generation history, and a single-job read loads only that job. Settings, history, and recovery still load state needed for reservations and pending work.
-- **Image processing:** modeled import generation reads the cutout and identity reference without the unused source upload. Shopping resolves the submitted inventory, validates the selected reference, and decodes each usable cutout once per contact-sheet tile. Published display variants serve the just-encoded bytes; if another request won publication, its stored copy is used. These optimizations preserve originals, contact-sheet recipes, and provider inputs.
+- **Image processing:** modelled import generation reads the cutout and identity reference without the unused source upload. Shopping resolves the submitted inventory, validates the selected reference, and decodes each usable cutout once per contact-sheet tile. Published display variants serve the just-encoded bytes; if another request won publication, its stored copy is used. These optimisations preserve originals, contact-sheet recipes, and provider inputs.
 - **Outfit generation:** planning validates originals while preparing contact sheets, then rechecks selected garments and current combination reservations before committing. Rendering, retries, and approval validate only selected images. Hosted approval publishes a validated candidate with a fenced, exclusive metadata link, retaining its immutable original and existing WebP copies. Removing a candidate reference cannot delete a Blob still referenced by an accepted outfit. Local approval publishes independent image bytes.
 - **Browser reads:** the Outfits view treats successful collection, settings, and history results as fresh for 30 seconds during in-app navigation; each loads independently. Returning to the tab/window refreshes them, and edits/generation invalidate affected resources. Hidden views cancel reads and pause polling. Import polling requests only jobs that can advance on the server, without overlapping polls. Small outfit thumbnails use smaller derivatives than detail views. This is browser-view state, not a shared server cache.
 
@@ -144,7 +144,7 @@ Blob cache misses consume Simple Operations and Fast Origin Transfer; downloads 
 
 The cron in `vercel.json` calls `/api/maintenance/storage` daily at `0 20 * * *` (20:00 UTC; 03:00 Bangkok the following day). Hobby invokes it within that hour. Configure a separate random **Production-only** `CRON_SECRET`; Vercel sends it as `Authorization: Bearer …`. Keep deployment protection enabled. See [cron authentication](https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs) and [Hobby schedule precision](https://vercel.com/docs/cron-jobs/usage-and-pricing).
 
-For an existing store, initialize the display cache table above if needed, then apply the additive cleanup schema before deploying this feature:
+For an existing store, initialise the display cache table above if needed, then apply the additive cleanup schema before deploying this feature:
 
 ```sh
 # Initialize collection tables/publication guards, then inspect; no deletions.

@@ -15,9 +15,9 @@ Initial detection uses the configured default (`gpt-6-luna` by default), with re
 - `POST /api/import/jobs/:id/detection/discard` requires the current `retryId` and retains the original result.
 - Initial upload accepts `detectionModel: "sol"` and the former `"terra"` option for older clients; both use `gpt-6.1-sol`. Arbitrary model names are rejected.
 
-Sol uses the production detection prompt/schema and original image, a 16,384-token output cap, and a provider deadline no longer than 210 seconds. Responses are validated before candidate creation. The existing text/vision quota hook runs before dispatch. Hosted routes retain origin checks and the shared writer lease; local job mutations are serialized.
+Sol uses the production detection prompt/schema and original image, a 16,384-token output cap, and a provider deadline no longer than 210 seconds. Responses are validated before candidate creation. The existing text/vision quota hook runs before dispatch. Hosted routes retain origin checks and the shared writer lease; local job mutations are serialised.
 
-Existing-job request identities are persisted before spending and retained across subsequent retries, acceptance, discard and restart. Replaying an attempted ID never dispatches again. A lost acknowledgement does not authorize automatic retry. Empty results, errors, timeouts and candidate-persistence failures preserve the current crop. A restarted client observes an in-flight marker for at most 240 seconds, then permits an explicit new attempt without automatically spending.
+Existing-job request identities are persisted before spending and retained across subsequent retries, acceptance, discard and restart. Replaying an attempted ID never dispatches again. A lost acknowledgement does not authorise automatic retry. Empty results, errors, timeouts and candidate-persistence failures preserve the current crop. A restarted client observes an in-flight marker for at most 240 seconds, then permits an explicit new attempt without automatically spending.
 
 The empty-initial-result path uses the existing initial-upload endpoint. Its synchronous UI guard prevents duplicate clicks, but that endpoint has no durable request-ID deduplication: an explicit second submission after a lost acknowledgement may make another paid call. It never resubmits automatically.
 

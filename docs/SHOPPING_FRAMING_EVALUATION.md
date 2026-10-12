@@ -24,12 +24,12 @@ An initial instruction-only revision made the requested practical verdicts both 
 
 - A text-only fact extractor receives the notes without images, inventory or evaluation questions. It returns garment identification and concrete functional requirements as exact source substrings. Invalid or invented context stops the check.
 - Shortlisting and individual comparisons receive only garment identification. Functional requirements also reach the practical verdict. Raw notes reach the final explanation.
-- All stages use explicit framing-invariance guidance. Relevant facts may affect practical judgments; enthusiasm and purchase restraint do not establish similarity or new versatility.
+- All stages use explicit framing-invariance guidance. Relevant facts may affect practical judgements; enthusiasm and purchase restraint do not establish similarity or new versatility.
 - `skip` is presented as “Little practical wardrobe value”. Its enforced summary acknowledges that this does not make it a bad purchase and that enjoyment can matter. Supported pairings do not imply added versatility.
 
 In the final separated-context run, both requested descriptions extracted empty factual context. Their shortlist requests had identical hashes and returned the same owned IDs. The comparison and verdict reused identical factual inputs; independent neutral provider replays confirmed the same answers. Every framing displayed `unclear`: the underlying choice remained `skip`, with confidence 0.72 and probability 0.79. The existing confidence threshold therefore preserves uncertainty for these schematic images. Blue-cardigan comparisons matched on all axes; black-cardigan colour and styling remained uncertain consistently.
 
-The initial, instruction-only and separated-context phases used 16, 16 and 14 calls respectively. A final repeat with generic extraction examples, rather than the tested sentences in the extraction instructions, used 14 calls and reproduced the separated-context judgments. All 60 calls across the four phases succeeded, within a 16-call bound per phase. Cache reuse is part of the architectural result; it is not counted as independent model evaluation.
+The initial, instruction-only and separated-context phases used 16, 16 and 14 calls respectively. A final repeat with generic extraction examples, rather than the tested sentences in the extraction instructions, used 14 calls and reproduced the separated-context judgements. All 60 calls across the four phases succeeded, within a 16-call bound per phase. Cache reuse is part of the architectural result; it is not counted as independent model evaluation.
 
 ## Limits and verification
 
@@ -37,10 +37,10 @@ This is a small calibration exercise on one artificial garment family. It establ
 
 When Decisions Shopping is enabled, nonempty notes add one small text-only Responses call before shortlisting. It uses the configured vision model, the existing text quota, cancellation, and snapshot checks. Empty notes skip extraction. Model configuration and confidence thresholds are preserved.
 
-Integration regressions cover both framings sharing practical judgments, retention of concrete garment/use facts, rejection of invented extraction output, original notes reaching the explanation, and enforced acknowledgment of enjoyment for `skip`. Run:
+Integration regressions cover both framings sharing practical judgements, retention of concrete garment/use facts, rejection of invented extraction output, original notes reaching the explanation, and enforced acknowledgment of enjoyment for `skip`. Run:
 
 ```sh
 node --test scripts/shopping-api.test.mjs scripts/shopping-verdict.test.mjs scripts/shopping-overlap.test.mjs
 ```
 
-These automated tests mock the provider and verify integration, not visual accuracy. The live controls above supply the behavioral evidence.
+These automated tests mock the provider and verify integration, not visual accuracy. The live controls above supply the behavioural evidence.

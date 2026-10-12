@@ -4,17 +4,17 @@ The cloud wardrobe is authoritative. These tools create independent, dated recov
 
 ## Contents and consistency
 
-Exports include persistent cloud files: the library (edits, hidden items, and deletion tombstones), original/modeled images, outfits, references, prompts, import/outfit jobs and source images, task history, and both daily API counters. Transient dotfiles, locks, `.tmp` files, and garbage-collection progress are excluded. Display WebP caches regenerate from originals; provider workflow executions are not backed up.
+Exports include persistent cloud files: the library (edits, hidden items, and deletion tombstones), original/modelled images, outfits, references, prompts, import/outfit jobs and source images, task history, and both daily API counters. Transient dotfiles, locks, `.tmp` files, and garbage-collection progress are excluded. Display WebP caches regenerate from originals; provider workflow executions are not backed up.
 
 File contents and snapshot manifests use authenticated AES-256-GCM encryption. Objects are deduplicated by checksum across snapshots. Later exports reuse locally verified encrypted bytes for unchanged immutable cloud images. The manifest is published last, so an interrupted export leaves completed recovery points usable.
 
 Export holds the same renewable writer lease as editing, generation, and cleanup. Reads remain available; writes may report busy, especially during the first full download. A busy lease makes export fail so a scheduler can retry. Existing installations with the standard application schema need no migration or deployment for these tools.
 
-## Initialize and export
+## Initialise and export
 
 Use Node 22.x, installed project dependencies, and a stable checkout. Keep production `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` in a private credentials file such as the ignored `.env.cloud`. No OpenAI key is needed. The Blob token permits writes/deletions, so protect it as a production secret; export only reads cloud files and acquires/releases the database lease.
 
-Create a private key directory, then initialize a **new** backup repository and key:
+Create a private key directory, then initialise a **new** backup repository and key:
 
 ```sh
 mkdir -p "$HOME/Library/Application Support/Wardrobe Backup Keys"
@@ -24,7 +24,7 @@ node scripts/wardrobe-backup.mjs init \
   --key-file "$HOME/Library/Application Support/Wardrobe Backup Keys/primary.key"
 ```
 
-Both parent directories must exist. Initialization refuses existing destinations; the key must be outside the backup repository, and both must be outside Git. Save a separate secure copy of the key: **losing it makes backups unrecoverable**. Keep an off-device copy of the complete encrypted repository, with its recovery key stored separately. Never commit backups, restored data, credentials, or keys.
+Both parent directories must exist. Initialisation refuses existing destinations; the key must be outside the backup repository, and both must be outside Git. Save a separate secure copy of the key: **losing it makes backups unrecoverable**. Keep an off-device copy of the complete encrypted repository, with its recovery key stored separately. Never commit backups, restored data, credentials, or keys.
 
 Environment variables can replace repeated `--repo` and `--key-file` arguments:
 
@@ -39,7 +39,7 @@ node scripts/wardrobe-backup.mjs status
 
 `verify` authenticates the manifest, decrypts every referenced object, and checks size and SHA-256. `list` returns snapshot IDs. `status` verifies the latest snapshot and exits **2** when none exists or it is over 48 hours old, **1** on error, and **0** when healthy. `verify` and `restore` accept `--snapshot ID`; otherwise they use the latest snapshot. Only cloud operations need cloud credentials.
 
-Do not edit the encrypted repository by hand, and copy it only while no backup command is running. All commands after initialization use a `.lock` directory. After a crash, inspect `.lock/owner.json` and confirm the recorded process and all backup processes have stopped before removing only that stale lock. Locks are never automatically stolen.
+Do not edit the encrypted repository by hand, and copy it only while no backup command is running. All commands after initialisation use a `.lock` directory. After a crash, inspect `.lock/owner.json` and confirm the recorded process and all backup processes have stopped before removing only that stale lock. Locks are never automatically stolen.
 
 ## Restore locally first
 
@@ -48,11 +48,11 @@ node scripts/wardrobe-backup.mjs restore \
   --snapshot SNAPSHOT_ID --out "$HOME/Wardrobe Recovery Test"
 ```
 
-The output must be new, outside Git and the backup repository, with an existing parent directory. Files are verified before restoration and read back afterward. `.restore-complete.json` marks success; never use an incomplete restore as a recovered wardrobe.
+The output must be new, outside Git and the backup repository, with an existing parent directory. Files are verified before restoration and read back afterwards. `.restore-complete.json` marks success; never use an incomplete restore as a recovered wardrobe.
 
-The encrypted backup stays exact. The restored copy pauses unfinished generation, removes dispatch authorization, and retains terminal task records. Opening it cannot automatically resume paid work. Approved images and completed outcomes remain; an explicit retry starts a new paid request. The result reports the number of paused jobs.
+The encrypted backup stays exact. The restored copy pauses unfinished generation, removes dispatch authorisation, and retains terminal task records. Opening it cannot automatically resume paid work. Approved images and completed outcomes remain; an explicit retry starts a new paid request. The result reports the number of paused jobs.
 
-Inspect through a separate local server with `WARDROBE_DATA_DIR` set to the recovery directory and `WARDROBE_MODEL_REFERENCE` to its `model-reference.png`. For a drill, use a checkout without development secrets and leave `OPENAI_API_KEY` empty. The app may perform normal housekeeping on this working copy. See [local storage and recovery](LOCAL_STORAGE.md) for local-server storage behavior.
+Inspect through a separate local server with `WARDROBE_DATA_DIR` set to the recovery directory and `WARDROBE_MODEL_REFERENCE` to its `model-reference.png`. For a drill, use a checkout without development secrets and leave `OPENAI_API_KEY` empty. The app may perform normal housekeeping on this working copy. See [local storage and recovery](LOCAL_STORAGE.md) for local-server storage behaviour.
 
 ## Restore to cloud
 
@@ -77,7 +77,7 @@ A new destination must already have the application schema. It still needs a rev
 
 ## Daily backups on an always-on host
 
-Use a stable checkout, installed dependencies, private credentials, and the backup key on the chosen always-on host. Initialize a new repository/key there, or transfer the complete encrypted repository and its key separately. Use permanent paths rather than a temporary verification machine or Codex worktree.
+Use a stable checkout, installed dependencies, private credentials, and the backup key on the chosen always-on host. Initialise a new repository/key there, or transfer the complete encrypted repository and its key separately. Use permanent paths rather than a temporary verification machine or Codex worktree.
 
 The portable scheduler command is:
 

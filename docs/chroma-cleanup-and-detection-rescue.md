@@ -1,6 +1,6 @@
 # Garment colour preservation and difficult detection
 
-The handbag report exposed a reproducible cleanup bug: global cyan suppression altered legitimate blue fabric and reduced its opacity. The cleanup now identifies the actual key-coloured background and confines colour unmixing to its boundary. Opaque garment interiors and existing transparent cutouts retain their colour and alpha. Matching background in handle openings is removed too. Ambiguous near-key edges remain intact and fail strict cleanup rather than being neutralized.
+The handbag report exposed a reproducible cleanup bug: global cyan suppression altered legitimate blue fabric and reduced its opacity. The cleanup now identifies the actual key-coloured background and confines colour unmixing to its boundary. Opaque garment interiors and existing transparent cutouts retain their colour and alpha. Matching background in handle openings is removed too. Ambiguous near-key edges remain intact and fail strict cleanup rather than being neutralised.
 
 At the time of [PR #12](https://github.com/eyeb0l/wardrobe/pull/12), production detection used `gpt-5.6-luna` with reasoning effort omitted. The earlier evaluation compared that behaviour with explicit medium. That PR deployed this colour fix and a manual GPT-5.6 Terra medium retry. The current [manual retry](terra-detection-retry.md) uses GPT-6.1 Sol, while the default uses GPT-6 Luna.
 
@@ -20,7 +20,7 @@ Exact key-coloured fabric cannot reliably be distinguished from a same-coloured 
 
 ## Terra rescue protocol
 
-Twelve images: eight difficult/intermittent cases and four controls. Three configurations, two repeats each, 72 fresh calls: Luna medium, Terra low and Terra medium. The same production detection instructions, schema, image bytes, existing labels and strict acceptance rubric are reused. The supplied transparent handbag has an alpha-derived and visually checked box label frozen before the new calls. Textual fidelity is graded from anonymized answers; matching and box coverage are scored deterministically.
+Twelve images: eight difficult/intermittent cases and four controls. Three configurations, two repeats each, 72 fresh calls: Luna medium, Terra low and Terra medium. The same production detection instructions, schema, image bytes, existing labels and strict acceptance rubric are reused. The supplied transparent handbag has an alpha-derived and visually checked box label frozen before the new calls. Textual fidelity is graded from anonymised answers; matching and box coverage are scored deterministically.
 
 This is a failure-selected exploratory suite. Earlier Terra outputs were already seen for three difficult images, including a known Terra win. Several images share a product family. Repeats are correlated. Fresh Luna baselines and controls measure variability and regressions but do not remove selection bias.
 
@@ -52,7 +52,7 @@ Medians use the mean of the two middle observations. The generic HTML report use
 
 Terra medium rescued **5 of 13** fresh Luna failures across **four difficult images**, with **zero regressions among Luna's three difficult-case successes**. Difficult-case acceptance improved by 31.25 percentage points. Control totals were unchanged, but one control call improved and a different control call regressed. Terra low rescued four failures but lost all three Luna successes on the difficult subset, leaving only a 6.25-point net gain; its controls had two gains and two regressions.
 
-Medium meets the frozen exploratory fallback rule; low does not. Examples supporting medium: the small earring with brown knit (both repeats), a tight sweater/skirt/boots crop (one rescued repeat), the user's transparent handbag (one repeat), and a layered plum outfit (one repeat). It still failed both repeats of the denim/cream separates image, busy blazer image and scarf/skirt image. The handbag improvement was recognizing a usable clean product shot; this is separate from repairing the deterministic colour bug.
+Medium meets the frozen exploratory fallback rule; low does not. Examples supporting medium: the small earring with brown knit (both repeats), a tight sweater/skirt/boots crop (one rescued repeat), the user's transparent handbag (one repeat), and a layered plum outfit (one repeat). It still failed both repeats of the denim/cream separates image, busy blazer image and scarf/skirt image. The handbag improvement was recognising a usable clean product shot; this is separate from repairing the deterministic colour bug.
 
 A counterfactual policy that retried all 13 failed difficult Luna calls with Terra medium would spend $0.19228 extra and rescue five: **3.85 cents extra per rescue**, or **4.30 cents including the initial Luna attempts** in that failed subset. This uses gold failure labels unavailable to the app and is not a deployment traffic estimate. The released retry uses the user’s request as the failure signal and presents candidates for review before replacing the crop.
 
@@ -64,7 +64,7 @@ This 72-call extension recorded **$0.694681607** usage. Its conservative upper a
 
 Private artifacts:
 
-- `data/vision-eval-api-2026-09-20/detection-rescue/`: frozen suite, protocol, labels, hashes, phase ledger, cumulative ledger, anonymized grades, scores, paired analysis and `report.html` with reference/predicted boxes.
+- `data/vision-eval-api-2026-09-20/detection-rescue/`: frozen suite, protocol, labels, hashes, phase ledger, cumulative ledger, anonymised grades, scores, paired analysis and `report.html` with reference/predicted boxes.
 - `data/vision-eval-api-2026-09-20/cleanup-fix/`: old/new controlled replay, comparison image, full-image metrics and final source/test validation hashes.
 
 The shared live ledger remains `data/vision-eval-api-2026-09-20/run/ledger.json`; earlier historical ledger snapshots were preserved. Private images and responses are ignored by Git. The evaluator adds a named `rescue` phase and explicit `terra-medium` configuration while retaining the original cumulative cap and reservation safeguards.

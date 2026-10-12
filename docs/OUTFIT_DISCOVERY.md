@@ -1,6 +1,6 @@
 # Image-aware discovery and checks with OpenAI Decisions
 
-Wardrobe uses the [Decisions API](https://developers.openai.com/api/reference/resources/decisions/methods/create) for small, constrained visual judgments. This replaces the TypeSafe Jev adapter. Decisions receives actual saved photographs and garment cutouts alongside bounded metadata.
+Wardrobe uses the [Decisions API](https://developers.openai.com/api/reference/resources/decisions/methods/create) for small, constrained visual judgements. This replaces the TypeSafe Jev adapter. Decisions receives actual saved photographs and garment cutouts alongside bounded metadata.
 
 ## Enable
 
@@ -13,12 +13,12 @@ OPENAI_DECISIONS_MODEL=gpt-6-luna
 
 The flag defaults off. `OPENAI_API_KEY` and the existing `OPENAI_API_BASE_URL` configuration are shared with other OpenAI features. No new credential or SDK dependency is required. Do not prefix these variables with `VITE_`, expose the key to the browser or commit secrets. The old `WARDROBE_JEV_ENABLED` and `TYPESAFE_API_KEY` variables are unused; they do not enable Decisions or provide a fallback provider.
 
-For hosted use, add the new flag to the intended deployment environment and redeploy while retaining All Deployments authentication. Enabling a flag is separate from verifying API access. The public reference lists Decisions as a beta API; account access, actual latency, visual quality and Decisions billing must be checked in a separately authorized bounded live evaluation. Offline fixtures prove integration contracts, not model accuracy or savings.
+For hosted use, add the new flag to the intended deployment environment and redeploy while retaining All Deployments authentication. Enabling a flag is separate from verifying API access. The public reference lists Decisions as a beta API; account access, actual latency, visual quality and Decisions billing must be checked in a separately authorised bounded live evaluation. Offline fixtures prove integration contracts, not model accuracy or savings.
 
 ## Saved-look search and owned-piece swaps
 
 - **Find a saved look** searches accepted looks against an occasion or mood. Each candidate includes its saved photo and the actual cutouts of its selected garments.
-- **Best match / More understated / More striking** and **Favour pieces in fewer saved looks** reorder the existing judgments locally. Saved appearances are not wearing history.
+- **Best match / More understated / More striking** and **Favour pieces in fewer saved looks** reorder the existing judgements locally. Saved appearances are not wearing history.
 - **Change one piece** compares up to six owned alternatives in the same category. Decisions sees the original outfit photo, original piece, fixed-piece cutouts and candidate cutouts. Its prompt explicitly distinguishes the existing photograph from the proposed replacement. It does not generate a preview or change the saved look.
 
 | Route | Request / result |
@@ -29,13 +29,13 @@ For hosted use, add the new flag to the intended deployment environment and rede
 
 POSTs require same-origin JSON, a nonempty brief of at most 500 characters and a body of at most 4 KiB. The server reads current inventory; requests cannot supply arbitrary source files or candidate records. Hidden/deleted garments, missing cutouts and unavailable saved photos are excluded. All selected pieces must still exist.
 
-OpenAI receives the brief, bounded names/categories/tags/approximate colour names, occasions, styling notes and labeled visual evidence. Private storage URLs, local paths, credentials, identity-reference files, generation prompts and arbitrary internal record fields are omitted. The selected photos themselves can depict the user. Images are sent as inline JPEG data URLs, as required by Decisions; they are never fetched through caller-provided URLs.
+OpenAI receives the brief, bounded names/categories/tags/approximate colour names, occasions, styling notes and labelled visual evidence. Private storage URLs, local paths, credentials, identity-reference files, generation prompts and arbitrary internal record fields are omitted. The selected photos themselves can depict the user. Images are sent as inline JPEG data URLs, as required by Decisions; they are never fetched through caller-provided URLs.
 
 Three named choice questions judge suitability, evidence sufficiency and statement level for each candidate. Suitability choices map to ordinal weights `0, 1/3, 2/3, 1`; statement choices map to `0, 1/2, 1`. These probability-weighted values are ordinal heuristics, not calibrated quality percentages. The common rubric does not establish calibration across independent requests. IDs always come from server candidates. A refusal in any question, an unknown evidence answer or evidence confidence below `0.6` makes that candidate unknown.
 
-Every eligible candidate is judged independently against the same fixed rubric: one candidate, its own visual evidence and three choice questions per request. Saved-look search includes that look's photo and garment cutouts; each swap request includes just one alternative plus the original photo and fixed pieces. Two requests run concurrently. There is no metadata shortlist, cohort promotion, reduction or shared finalist comparison in the runtime flow. All candidate judgments are merged in canonical ID order before local sorting. `candidateCount` reports all evaluated candidates and `scoringMethod` is `absolute`.
+Every eligible candidate is judged independently against the same fixed rubric: one candidate, its own visual evidence and three choice questions per request. Saved-look search includes that look's photo and garment cutouts; each swap request includes just one alternative plus the original photo and fixed pieces. Two requests run concurrently. There is no metadata shortlist, cohort promotion, reduction or shared finalist comparison in the runtime flow. All candidate judgements are merged in canonical ID order before local sorting. `candidateCount` reports all evaluated candidates and `scoringMethod` is `absolute`.
 
-The selected implementation shares its one-candidate path with the evaluation runner. It removes dependence on the other candidates shown in a request, but does not establish that independently produced scores are calibrated or that a stable answer is correct. Style and saved-usage refinements operate on all eligible judgments. A failed, cancelled or timed-out candidate makes the whole search fail; it never publishes partial recommendations. Unknown evidence stays unknown. Cached completed judgments can be reused by a later explicit search, within the existing cache and freshness limits.
+The selected implementation shares its one-candidate path with the evaluation runner. It removes dependence on the other candidates shown in a request, but does not establish that independently produced scores are calibrated or that a stable answer is correct. Style and saved-usage refinements operate on all eligible judgements. A failed, cancelled or timed-out candidate makes the whole search fail; it never publishes partial recommendations. Unknown evidence stays unknown. Cached completed judgements can be reused by a later explicit search, within the existing cache and freshness limits.
 
 The existing display threshold requires sufficient evidence and suitability at least `0.5`. Local style preferences add up to `0.2`, and lower saved usage adds up to `0.15`, only for sorting already qualifying candidates. These values are uncalibrated product heuristics. Empty results remain an explicit no-match state. Errors preserve ordinary browsing.
 
@@ -43,12 +43,12 @@ The existing display threshold requires sufficient evidence and suitability at l
 
 Checks run only when the user clicks a button. Opening, polling, generation, crop approval and photo acceptance do not invoke Decisions automatically.
 
-| Control and route | Evidence and judgments |
+| Control and route | Evidence and judgements |
 | --- | --- |
 | **Check crop quality**; `POST /api/import/jobs/:id/preflight` | Original source and current detected crop; item completeness, selection clarity and visible detail |
 | **Check photo against pieces**; `POST /api/outfits/jobs/:id/outfits/:outfitId/check` | Current review photo and every selected garment cutout; fidelity, visibility, anatomy, framing and extra pieces |
 
-These routes accept an empty JSON object, require a current review state, and retain the existing origin, authentication and quota boundaries. They return `{ checks, status, cached, inputTokens, usage, model }` with independent `clear / concern / unknown` judgments. Per-question refusals and confidence below `0.75` become unknown. The combined status is `needs-review`, `uncertain` or `no-obvious-issues`; none is an acceptance decision.
+These routes accept an empty JSON object, require a current review state, and retain the existing origin, authentication and quota boundaries. They return `{ checks, status, cached, inputTokens, usage, model }` with independent `clear / concern / unknown` judgements. Per-question refusals and confidence below `0.75` become unknown. The combined status is `needs-review`, `uncertain` or `no-obvious-issues`; none is an acceptance decision.
 
 ### Preview outfit-review candidate
 
@@ -64,10 +64,10 @@ Plain black/brown tights, invisible basics and plain neutral shoes when no shoe 
 
 ## Bounds, freshness and cost controls
 
-- Discovery makes at most one request per eligible candidate, with two requests concurrent. A shared deadline of 12 seconds includes image preparation, queue waiting and all candidate judgments. Each newly dispatched candidate reserves one text allowance. Larger collections need more request waves and may exceed the deadline; no automatic retry or partial result is returned. A later explicit search can reuse completed cached judgments.
-- Source images are limited to 30 MiB and 50 million decoded pixels. Preparation rotates, flattens transparent cutouts onto white, strips metadata and resizes to at most 768 by 768 pixels. It preserves originals. Provider bodies are limited to 8 MiB; discovery metadata to 24,000 UTF-8 bytes. Image evidence is labeled explicitly.
-- The shared client validates exact model, answer count/order/names/types, allowed choices and probability distributions. Provider errors are sanitized. Timeouts bound fetch and response parsing even if a transport ignores abort.
-- A process cache holds up to 64 validated result sets for 15 minutes. Keys incorporate purpose/version, model, endpoint, a credential hash, metadata and actual prepared visual evidence. Duplicate in-flight calls share work; at most two distinct requests run per process. Excess work queues within its original timeout and uses the supplied writer-lease release hook while waiting; a stale revision after reacquisition frees the acquired slot without dispatching. Quota reservation and dispatch intent are serialized while provider work overlaps.
+- Discovery makes at most one request per eligible candidate, with two requests concurrent. A shared deadline of 12 seconds includes image preparation, queue waiting and all candidate judgements. Each newly dispatched candidate reserves one text allowance. Larger collections need more request waves and may exceed the deadline; no automatic retry or partial result is returned. A later explicit search can reuse completed cached judgements.
+- Source images are limited to 30 MiB and 50 million decoded pixels. Preparation rotates, flattens transparent cutouts onto white, strips metadata and resizes to at most 768 by 768 pixels. It preserves originals. Provider bodies are limited to 8 MiB; discovery metadata to 24,000 UTF-8 bytes. Image evidence is labelled explicitly.
+- The shared client validates exact model, answer count/order/names/types, allowed choices and probability distributions. Provider errors are sanitised. Timeouts bound fetch and response parsing even if a transport ignores abort.
+- A process cache holds up to 64 validated result sets for 15 minutes. Keys incorporate purpose/version, model, endpoint, a credential hash, metadata and actual prepared visual evidence. Duplicate in-flight calls share work; at most two distinct requests run per process. Excess work queues within its original timeout and uses the supplied writer-lease release hook while waiting; a stale revision after reacquisition frees the acquired slot without dispatching. Quota reservation and dispatch intent are serialised while provider work overlaps.
 - A separate image-preparation cache holds up to 64 entries and 16 MiB. Hosted cache identity comes from a fresh immutable Blob lookup; mutable local files are hashed from bytes. Warm hosted repeats can reuse prepared images without downloading originals again. Cold starts can repeat work.
 - Each actual hosted dispatch reserves one existing text API allowance. Cache hits and duplicate callers reserve none. Failed or uncertain dispatches count. `inputTokens` reports newly dispatched input usage, zero for cached work, or null when absent. Private `decision-usage/` records retain all supplied counters and distinguish provider, cache and shared callers; interruptions and missing counters remain unknown. Usage logging never persists visual advice or changes an approval.
 - Provider work uses the existing lease-release hook when supplied, then checks current metadata, review state and image identities after reacquiring ownership. A changed/deleted image or record returns 409 instead of stale advice. Disconnected discovery requests stop subsequent candidates; already dispatched work may finish and populate the cache.
@@ -84,9 +84,9 @@ git diff --check
 
 Use synthetic fixtures for contract, cache, quota, timeout, refusal, origin, deletion/replacement and review-state tests. Browser verification should cover image checks, search, refinements without another request, swaps, empty/error states and phone widths.
 
-Before relying on the model judgments, compare live outputs with human-reviewed representative cases. Measure missed defects, unnecessary flags, ranking usefulness, input usage and latency. Keep uncertain cases visible and human acceptance in place; do not skip fuller audits or enable automatic rejection based only on fixture tests.
+Before relying on the model judgements, compare live outputs with human-reviewed representative cases. Measure missed defects, unnecessary flags, ranking usefulness, input usage and latency. Keep uncertain cases visible and human acceptance in place; do not skip fuller audits or enable automatic rejection based only on fixture tests.
 
-The [Decisions evaluation runner](DECISIONS_EVALUATION.md) prepares a private 25-case scaffold, shares the production image-review rubric, freezes run inputs and human labels, replays calibration thresholds offline, and reports complete usage with rate-based cost ranges. `npm run decisions:eval` is offline unless `--run` and a call cap are explicitly supplied. Runtime usage can be summarized with `npm run decisions:usage -- --target local|cloud`.
+The [Decisions evaluation runner](DECISIONS_EVALUATION.md) prepares a private 25-case scaffold, shares the production image-review rubric, freezes run inputs and human labels, replays calibration thresholds offline, and reports complete usage with rate-based cost ranges. `npm run decisions:eval` is offline unless `--run` and a call cap are explicitly supplied. Runtime usage can be summarised with `npm run decisions:usage -- --target local|cloud`.
 
 ### Batch sensitivity
 
@@ -100,7 +100,7 @@ node scripts/discovery-sensitivity-runner.mjs \
   --brief "A relaxed everyday outfit" --brief "An understated dinner outfit"
 ```
 
-Review `maximumProviderCalls`, then use a fresh private run directory and the approved cap for a separately authorized paid run:
+Review `maximumProviderCalls`, then use a fresh private run directory and the approved cap for a separately authorised paid run:
 
 ```sh
 node --env-file=.env scripts/discovery-sensitivity-runner.mjs \
@@ -109,13 +109,13 @@ node --env-file=.env scripts/discovery-sensitivity-runner.mjs \
   --run --max-calls APPROVED_CALL_CAP
 ```
 
-The runner bypasses provider-result caches, reserves calls in an exclusive durable `run.json` before dispatch, writes sanitized usage records and reports latency and known/unknown costs. Existing ledgers cannot be overwritten or resumed; failed/uncertain trials stop the run without retries, and unattempted trials remain explicit. It reads an already available local snapshot and does not download production data or change garments, saved looks or approvals.
+The runner bypasses provider-result caches, reserves calls in an exclusive durable `run.json` before dispatch, writes sanitised usage records and reports latency and known/unknown costs. Existing ledgers cannot be overwritten or resumed; failed/uncertain trials stop the run without retries, and unattempted trials remain explicit. It reads an already available local snapshot and does not download production data or change garments, saved looks or approvals.
 
-An initial 2026-10-08 live run used 20 saved looks, three briefs, four layouts and two repeats (72 calls; no failures). Identical-layout screening scores repeated exactly, but shuffled membership/order moved individual scores by up to `0.49` and changed the screening winner in five of six comparisons. The shared final pass alone did not improve winner/top-three stability on that sample. Reversing batch order preserved finalists but changed their final scores; canonical finalist ordering was added afterward and checked offline against those real cohorts. The live run did not evaluate that subsequent ordering change. The sample has no human ranking labels and establishes sensitivity, not which recommendations are better. Keep the private run ledger and report separate from source control.
+An initial 2026-10-08 live run used 20 saved looks, three briefs, four layouts and two repeats (72 calls; no failures). Identical-layout screening scores repeated exactly, but shuffled membership/order moved individual scores by up to `0.49` and changed the screening winner in five of six comparisons. The shared final pass alone did not improve winner/top-three stability on that sample. Reversing batch order preserved finalists but changed their final scores; canonical finalist ordering was added afterwards and checked offline against those real cohorts. The live run did not evaluate that subsequent ordering change. The sample has no human ranking labels and establishes sensitivity, not which recommendations are better. Keep the private run ledger and report separate from source control.
 
 ### Human accuracy comparison
 
-The [three-method runner](../scripts/discovery-comparison-runner.mjs) compares independent absolute judging, the frozen screening/finalist baseline, and shuffled-cohort consensus on the same private frozen examples. Prepare the human review before running any model judgments:
+The [three-method runner](../scripts/discovery-comparison-runner.mjs) compares independent absolute judging, the frozen screening/finalist baseline, and shuffled-cohort consensus on the same private frozen examples. Prepare the human review before running any model judgements:
 
 ```sh
 node scripts/discovery-comparison-runner.mjs \
@@ -127,13 +127,13 @@ node scripts/discovery-comparison-review.mjs PRIVATE_LABELS.json
 
 The loopback review shows saved photos and the same garment references used by the models, with no model results. Grade every candidate as unsuitable (0), partly suitable (1), good (2), excellent (3), or unknown. Mark one to three preferred good/excellent picks per brief, or explicitly mark none suitable. Save progress is reversible; Finish review confirms the complete labels. The runner rejects unfinished labels, protocol edits and changed snapshot metadata or candidate membership. Human labels are retained for offline scoring and never included in provider requests.
 
-Method settings are frozen in `COMPARISON_PROTOCOL` before labeling:
+Method settings are frozen in `COMPARISON_PROTOCOL` before labelling:
 
 | Method | Work and variants |
 | --- | --- |
-| Absolute | One candidate per request, judged against the same fixed rubric; scores sorted afterward. One layout, two repeats. |
+| Absolute | One candidate per request, judged against the same fixed rubric; scores sorted afterwards. One layout, two repeats. |
 | Current (frozen baseline) | Historical screening and shared final comparison, with original and two seeded initial layouts; two repeats each. |
-| Shuffled consensus | Three shuffled screenings nominate within-cohort finalists. Nomination count, then normalized within-cohort rank, choose up to 12 for the same shared final comparison. Two seed ensembles, two repeats each. Raw scores from different cohorts are never averaged. |
+| Shuffled consensus | Three shuffled screenings nominate within-cohort finalists. Nomination count, then normalised within-cohort rank, choose up to 12 for the same shared final comparison. Two seed ensembles, two repeats each. Raw scores from different cohorts are never averaged. |
 
 All methods share the visual preparation, rubric, evidence/confidence gates, suitability cutoff, canonical finalist order and two-request concurrency limit. The experiment allows a common 60-second trial deadline so independent judging can finish; each provider request remains capped at 12 seconds. It separately reports whether each trial fits the product's 12-second overall deadline. This experiment changes no production recommendation logic.
 
@@ -153,7 +153,7 @@ After a stopped run, `--continue-unattempted-from PRIVATE_RUN_DIR/run.json` prep
 
 ### Selected absolute-scoring candidate
 
-The 2026-10-08 human-labeled comparison used the same 20 saved looks under three briefs, with 60 human grades and preferred picks finalized before any model results. All 36 planned trials were attempted: 35 succeeded, one screening trial failed with provider HTTP 504 and was not retried. A fresh ledger continued only unattempted trials, keeping 257 calls within the 258-call cap. The failed call returned no usage; known-usage cost was estimated at $0.43–$0.86, with the actual invoice unknown. Raw photographs, labels and ledgers remain private and outside source control.
+The 2026-10-08 human-labelled comparison used the same 20 saved looks under three briefs, with 60 human grades and preferred picks finalised before any model results. All 36 planned trials were attempted: 35 succeeded, one screening trial failed with provider HTTP 504 and was not retried. A fresh ledger continued only unattempted trials, keeping 257 calls within the 258-call cap. The failed call returned no usage; known-usage cost was estimated at $0.43–$0.86, with the actual invoice unknown. Raw photographs, labels and ledgers remain private and outside source control.
 
 | Method | Case-weighted nDCG@3 | Preferred-pick recall@3 | Mean latency |
 | --- | ---: | ---: | ---: |
@@ -163,4 +163,4 @@ The 2026-10-08 human-labeled comparison used the same 20 saved looks under three
 
 These accuracy and latency averages include successful trials; the baseline has five rather than six successful everyday trials. nDCG@3 measures ordering against graded relevance (1 is ideal), not a probability of correctness. Identical-input repeats had identical scores for all methods. Consensus preserved its winner across the two ensembles for every brief, yet two winners were not preferred human picks. Consensus had the strongest dinner result; absolute judging led overall and for the other two briefs. All successful trials fit the 12-second deadline on this local 20-look collection.
 
-Absolute judging is selected for the draft implementation, with the evaluated rubric and concurrency bound unchanged. Three briefs from one collection do not establish general quality, cross-request calibration or latency for larger wardrobes. Continue measuring these separately; keep uncertain/no-match behavior and manual control in place.
+Absolute judging is selected for the draft implementation, with the evaluated rubric and concurrency bound unchanged. Three briefs from one collection do not establish general quality, cross-request calibration or latency for larger wardrobes. Continue measuring these separately; keep uncertain/no-match behaviour and manual control in place.
