@@ -27,6 +27,8 @@
     "@vercel/functions": "^3.9.7",
     "@vitejs/plugin-react": "5.0.4",
     "heic-to": "1.5.2",
+    "htmlparser2": "^12.0.0",
+    "ipaddr.js": "^2.5.0",
     "ipx": "^3.1.1",
     "nitro": "^3.0.260903-beta",
     "react": "19.2.0",

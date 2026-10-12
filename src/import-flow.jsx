@@ -3,7 +3,7 @@ import { prepareOriginalCutout } from "./background-removal.mjs";
 import { CopyPrompt, ModeledPhotoUpload } from "./modeled-photo-controls.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowCounterClockwise, Check, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, Check, LinkSimple, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { IMAGE_ACCEPT, isImageUpload, prepareUploadImage } from "./image-upload.mjs";
 import { activeImportJobIds } from "./import-polling.mjs";
 import { isDetectionRetryRunning } from "./detection-retry.mjs";
@@ -163,6 +163,7 @@ function ReviewEditor({ cleanupEditor, job, stage, draft, setDraft, regenPrompt,
       <div className="import-fields">
         {isCrop ? <ImageCheck kind="preflight" endpoint={`${API}/${job.id}/preflight`} fingerprint={JSON.stringify([job.updatedAt, job.metadata, job.stages.crop])} enabled={imageChecksReady} active={active} disabled={decisionBusy || cropping} /> : null}
         <p className="import-editor__stage">{isCrop ? "Detected item" : isGarment ? "Garment image" : "Modelled photo"}</p>
+        {job.websiteSource && <div className="import-website-source"><a href={job.websiteSource.url} target="_blank" rel="noopener noreferrer">{job.websiteSource.name} <LinkSimple size={14} aria-hidden="true" /></a><p className="import-card__detail">{[job.websiteSource.brand, job.websiteSource.material].filter(Boolean).join(" · ")}</p>{isCrop && <p className="import-card__detail">Check that the crop shows the product and colour you want to import.</p>}</div>}
         {isCrop ? (
           <fieldset className="import-image-choice" disabled={decisionBusy || cropping}>
             <legend>{job.canUseOriginal ? "This looks like a clean product photo" : "How would you like to prepare this item?"}</legend>
@@ -262,6 +263,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   const [cleanupTolerances, setCleanupTolerances] = useState({});
   const [dragging, setDragging] = useState(false);
   const [open, setOpen] = useState(false);
+  const [websiteUrl, setWebsiteUrl] = useState("");
   useEffect(() => {
     if (!open) return undefined;
     const dialog = dialogRef.current;
@@ -439,6 +441,27 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   };
   const endMutation = () => { mutationRef.current = false; setBusyId(null); };
 
+  const submitWebsite = async (event) => {
+    event.preventDefault();
+    if (!setup?.ready || !websiteUrl.trim() || !beginMutation("website")) return;
+    setNotice(null);
+    const lifecycle = uploadLifecycle.current;
+    try {
+      const result = await api(API, { method: "POST", body: JSON.stringify({ websiteUrl: websiteUrl.trim() }) });
+      if (lifecycle !== uploadLifecycle.current) return;
+      const createdJobs = result.jobs || [];
+      if (!createdJobs.length) {
+        setError("We couldn’t identify the product in this website’s photo. Try another product link or upload a clearer photo.");
+        return;
+      }
+      setJobs((current) => [...current, ...createdJobs]);
+      setDrafts((current) => ({ ...current, ...Object.fromEntries(createdJobs.map((job) => [job.id, defaultDraft(job)])) }));
+      setSelectedReviewId(createdJobs[0].id);
+      setWebsiteUrl("");
+    } catch (requestError) { if (lifecycle === uploadLifecycle.current) setError(requestError.message); }
+    finally { if (lifecycle === uploadLifecycle.current) endMutation(); }
+  };
+
   const performDetection = async (job, action, body) => {
     if (!beginMutation(job.id)) return;
     if (action === "retry") setDetectionBusyId(job.id);
@@ -482,7 +505,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
         await api(`${API}/${job.id}/metadata`, { method: "PATCH", body: JSON.stringify({ metadata }) });
         const updated = await api(`${API}/${job.id}/stages/garment/approve`, { method: "POST", body: JSON.stringify({ modelReferenceId, previewUrl: job.stages.garment.assetUrl }) });
         const garmentPath = `/api/import/library/import-${job.id}-garment.png`;
-        onGarmentApproved?.({ id: `import-${job.id}`, ...metadata, image: garmentPath, thumbnail: garmentPath, modeledImage: null, palette: [metadata.color, metadata.secondaryColor].filter(Boolean), importJobId: job.id });
+        onGarmentApproved?.({ id: `import-${job.id}`, ...metadata, image: garmentPath, thumbnail: garmentPath, modeledImage: null, palette: [metadata.color, metadata.secondaryColor].filter(Boolean), importJobId: job.id, ...(job.websiteSource ? { websiteSource: job.websiteSource } : {}) });
         setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
       } else {
         let originalInput;
@@ -555,21 +578,21 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   const active = jobs[jobs.length - 1];
   const setupRequired = setup?.ready === false;
   const jobStatus = active ? deriveStatus(active) : notice;
-  const activeStatus = setupRequired ? { tone: "error", text: "Setup required" } : uploads.length ? { tone: "processing", text: uploads.length === 1 ? "Adding image…" : `Adding ${uploads.length} images…` } : error ? { tone: "error", text: "Import needs attention" } : jobStatus;
+  const activeStatus = setupRequired ? { tone: "error", text: "Setup required" } : busyId === "website" ? { tone: "processing", text: "Importing product…" } : uploads.length ? { tone: "processing", text: uploads.length === 1 ? "Adding image…" : `Adding ${uploads.length} images…` } : error ? { tone: "error", text: "Import needs attention" } : jobStatus;
   const readyCount = jobs.filter((job) => deriveStatus(job).tone === "ready").length;
   const selectedReviewJob = jobs.find((job) => job.id === selectedReviewId && (reviewStageFor(job) || hasCleanupFailure(job)));
   const reviewJob = selectedReviewJob || jobs.find((job) => reviewStageFor(job)) || jobs.find((job) => hasCleanupFailure(job)) || active;
   const reviewStage = reviewJob ? reviewStageFor(reviewJob) : null;
   const reviewStatus = reviewJob ? deriveStatus(reviewJob) : jobStatus;
   const progress = 0;
-  const hasImportActivity = Boolean(uploads.length || jobs.length || notice || error || setupRequired);
+  const hasImportActivity = Boolean(uploads.length || jobs.length || notice || error || setupRequired || busyId === "website");
 
   return (
     <>
       <input ref={inputRef} type="file" accept={IMAGE_ACCEPT} aria-label="Choose wardrobe images" multiple hidden disabled={!setup?.ready || Boolean(busyId)} onChange={(event) => { submitFiles(event.target.files); event.target.value = ""; }} />
       <div className="import-drop-overlay" data-active={dragging && !setupRequired} aria-hidden={!dragging || setupRequired}><div className="import-drop-target is-over"><UploadSimple size={34} weight="light" /><h2>Drop clothing images here</h2><p>Add a product photo or a full outfit. You’ll review each item before saving it.</p></div></div>
       <aside className={`import-tray${hasImportActivity ? " is-expanded" : ""}`} aria-label="Wardrobe imports">
-        <button className="import-tray__button" type="button" onClick={() => setupRequired || hasImportActivity ? setOpen(true) : inputRef.current?.click()} aria-label={setupRequired ? "Open setup instructions" : hasImportActivity ? "Open import progress" : "Add clothes"}>{activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
+        <button className="import-tray__button" type="button" onClick={() => setOpen(true)} aria-label={setupRequired ? "Open setup instructions" : hasImportActivity ? "Open import progress" : "Add clothes"}>{activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
         <div className="import-tray__actions">{(uploads[0]?.previewUrl || (!uploads.length && active)) && <OptimizedImage className="import-tray__preview" sizes="80px" src={uploads[0]?.previewUrl || active?.stages?.garment?.assetUrl || active?.stages?.garment?.failedAssetUrl || active?.stages?.crop?.assetUrl || active?.originalAssetUrl} alt="" />}<span className="import-tray__label" role="status">{activeStatus?.text || "Add clothes"}</span>{!setupRequired && <button className="import-icon-button" type="button" disabled={Boolean(busyId)} onClick={() => inputRef.current?.click()} aria-label="Choose images"><UploadSimple size={17} /></button>}</div>
       </aside>
       <dialog ref={dialogRef} className="import-popover-backdrop" aria-labelledby="import-title"
@@ -587,6 +610,11 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
         <section ref={panelRef} className="import-popover">
           <header className="import-popover__header"><div><p className="import-popover__eyebrow">{reviewJob?.modeledReplacement ? "Modelled photo" : "Wardrobe import"}</p><h2 className="import-popover__title" id="import-title">{uploads.length ? activeStatus.text : reviewJob && hasCleanupFailure(reviewJob) ? "Review garment edges" : reviewJob?.stages?.modeled?.status === "ready" ? "Create a modelled photo" : readyCount ? `${readyCount} ready for review` : activeStatus?.tone === "error" ? "Import needs attention" : jobs.length ? "Preparing new pieces" : notice?.text || "Add to your wardrobe"}</h2></div><button ref={closeRef} className="import-icon-button" type="button" onClick={() => setOpen(false)} aria-label="Close import progress"><X size={20} /></button></header>
           <div className="import-popover__body">
+          {!setupRequired && <form className="import-website-form" onSubmit={submitWebsite} aria-busy={busyId === "website"}>
+            <div className="import-field"><label htmlFor="import-website-url">Import from a website</label><div className="import-website-input"><input id="import-website-url" type="url" required placeholder="https://shop.com/product" value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} disabled={!setup?.ready || Boolean(busyId) || uploads.length > 0} aria-describedby="import-website-help" /><button className="import-button import-button--primary" type="submit" disabled={!setup?.ready || Boolean(busyId) || uploads.length > 0 || !websiteUrl.trim()}>{busyId === "website" ? <SpinnerGap size={16} className="import-spinner" /> : <LinkSimple size={16} />} {busyId === "website" ? "Importing…" : "Import link"}</button></div></div>
+            <p className="import-card__detail" id="import-website-help">Paste a product link to import its photo and details, then review the cutout and modelled shot.</p>
+            {busyId === "website" && <p className="import-card__detail" role="status">Reading the product page and checking its photo…</p>}
+          </form>}
           {uploads.length > 0 && <div className="import-upload-list" aria-label="Images being added" aria-busy="true">
             {uploads.map((upload) => <div className="import-upload" key={upload.id}>
               {upload.previewUrl ? <OptimizedImage className="import-upload__preview" src={upload.previewUrl} alt="" /> : <div className="import-upload__preview" aria-hidden="true" />}

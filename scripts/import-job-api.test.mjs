@@ -25,7 +25,7 @@ test("chroma selection protects either recorded garment color", () => {
   assert.match(chooseChromaKey("invalid", null), /^#[0-9a-f]{6}$/);
 });
 
-async function harness(t, env = {}, beforePaidCall) {
+async function harness(t, env = {}, beforePaidCall, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-model-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   // Never read .env or allow a real network request in these tests.
@@ -90,7 +90,7 @@ async function harness(t, env = {}, beforePaidCall) {
     }
     return Response.json({ data: [{ b64_json: output.toString("base64") }] });
   });
-  const plugin = wardrobeImportApi({ beforePaidCall, env: {
+  const plugin = wardrobeImportApi({ ...options, beforePaidCall, env: {
     OPENAI_API_KEY: "test-key", OPENAI_API_BASE_URL: "https://wardrobe-test.invalid",
     WARDROBE_DATA_DIR: path.join(root, "data"), WARDROBE_MODEL_REFERENCE: "identity.png", ...env,
   } });
@@ -120,6 +120,51 @@ async function harness(t, env = {}, beforePaidCall) {
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
+
+test("website imports carry product metadata through crop, cutout and modeled approval", async (t) => {
+  const image = await productImage();
+  const websiteRequests = [];
+  const h = await harness(t, {}, undefined, { fetchWebsiteResource: async (url, { kind }) => {
+    websiteRequests.push({ url, kind });
+    return { url, bytes: kind === "image" ? image : Buffer.from(`<script type="application/ld+json">${JSON.stringify({ "@type": "Product", name: "Blue linen dress", brand: { name: "Example" }, material: "Linen", image: "/dress.png" })}</script>`) };
+  } });
+  h.setAnalysis([{ ...dress, name: "Blue linen dress", tags: ["linen", "sleeveless"] }]);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/dress" });
+  assert.deepEqual(websiteRequests, [{ url: "https://shop.example/dress", kind: "page" }, { url: "https://shop.example/dress.png", kind: "image" }]);
+  assert.equal(job.stages.crop.status, "review");
+  assert.equal(job.websiteSource.material, "Linen");
+  assert.equal(job.metadata.part, "dresses");
+  const analysisText = h.requests[0].request.input[0].content.filter(c => c.type === "input_text").map(c => c.text).join("\n");
+  assert.match(analysisText, /at most ONE item/);
+  assert.match(analysisText, /untrusted retailer data/);
+  assert.match(analysisText, /Blue linen dress/);
+  await h.restart();
+  assert.deepEqual((await h.request("GET", `/api/import/jobs/${job.id}`)).websiteSource, job.websiteSource);
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  await h.waitForStage(job.id, "garment");
+  await h.request("PATCH", `/api/import/jobs/${job.id}/metadata`, { metadata: { name: "My linen dress" } });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`);
+  await h.waitForStage(job.id, "modeled");
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/modeled/approve`);
+  const library = await h.request("GET", "/api/import/wardrobe");
+  assert.equal(library[0].name, "My linen dress");
+  assert.deepEqual(library[0].websiteSource, job.websiteSource);
+  assert.ok(library[0].image);
+  assert.ok(library[0].modeledImage);
+  assert.deepEqual(h.requests.filter(r => r.type === "edit").map(r => r.images.length), [1, 2]);
+});
+
+test("website failures and ambiguous input create no jobs and spend no model credits", async (t) => {
+  let downloads = 0;
+  const h = await harness(t, {}, undefined, { fetchWebsiteResource: async () => { downloads++; throw Object.assign(new Error("Retailer blocked access. Upload a product photo instead."), { status: 422 }); } });
+  await h.request("POST", "/api/import/jobs", { websiteUrl: "file:///etc/passwd" }, 400);
+  await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/item", imageBase64: h.source.toString("base64") }, 400);
+  assert.equal(downloads, 0);
+  const result = await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/item" }, 422);
+  assert.match(result.error, /Upload a product photo/);
+  assert.equal(h.requests.length, 0);
+  assert.deepEqual(await h.request("GET", "/api/import/jobs"), []);
+});
 
 async function productImage(transparent = false) {
   const item = await sharp({ create: { width: 48, height: 72, channels: 4, background: "#123456" } }).png().toBuffer();

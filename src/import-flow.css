@@ -406,3 +406,15 @@ body.import-open { overflow: hidden; }
 .import-cutout-frame svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .import-edge-options { margin-top: 16px; }
 .import-edge-options > summary { cursor: pointer; padding: 12px 0; }
+
+.import-website-form { display: grid; gap: 9px; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--import-line); }
+.import-website-input { display: flex; align-items: stretch; gap: 10px; }
+.import-website-input input { min-width: 0; flex: 1; }
+.import-website-input button { flex-shrink: 0; }
+.import-website-source { display: grid; gap: 6px; overflow-wrap: anywhere; }
+.import-website-source a { color: var(--import-ink); font-size: 13px; }
+.import-website-source svg { vertical-align: middle; }
+@media (max-width: 480px) {
+  .import-website-input { flex-direction: column; }
+  .import-website-input button { align-self: flex-start; }
+}
