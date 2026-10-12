@@ -25,9 +25,10 @@ test("chroma selection protects either recorded garment color", () => {
   assert.match(chooseChromaKey("invalid", null), /^#[0-9a-f]{6}$/);
 });
 
-async function harness(t, env = {}, beforePaidCall) {
+async function harness(t, env = {}, beforePaidCall, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-model-test-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  // Review can be persisted just before the background task finishes telemetry.
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 3 }));
   // Never read .env or allow a real network request in these tests.
   for (const name of ["OPENAI_IMAGE_MODEL", "OPENAI_VISION_MODEL", "OPENAI_GARMENT_MODEL", "OPENAI_MODELED_MODEL", "OPENAI_IMAGE_QUALITY"]) {
     const previous = process.env[name];
@@ -41,11 +42,17 @@ async function harness(t, env = {}, beforePaidCall) {
   const imageReads = [];
   const libraryReads = [];
   let failCandidateSave = false;
+  let jobSavedHook;
   const storage = { ...fileSystem, async readFile(filename, ...args) {
     const bytes = await fileSystem.readFile(filename, ...args);
     if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
     if (path.basename(String(filename)) === "library.json") libraryReads.push(String(filename));
     return bytes;
+  }, async rename(source, destination) {
+    await fileSystem.rename(source, destination);
+    if (jobSavedHook && path.basename(destination) === 'job.json') {
+      await jobSavedHook(JSON.parse(await fileSystem.readFile(destination, 'utf8')));
+    }
   }, async writeFile(filename, data, ...args) {
     if (failCandidateSave && String(filename).includes("job.json") && String(data).includes('"detectionRetry":')) {
       failCandidateSave = false;
@@ -90,7 +97,7 @@ async function harness(t, env = {}, beforePaidCall) {
     }
     return Response.json({ data: [{ b64_json: output.toString("base64") }] });
   });
-  const plugin = wardrobeImportApi({ beforePaidCall, env: {
+  const plugin = wardrobeImportApi({ ...options, beforePaidCall, env: {
     OPENAI_API_KEY: "test-key", OPENAI_API_BASE_URL: "https://wardrobe-test.invalid",
     WARDROBE_DATA_DIR: path.join(root, "data"), WARDROBE_MODEL_REFERENCE: "identity.png", ...env,
   } });
@@ -103,7 +110,8 @@ async function harness(t, env = {}, beforePaidCall) {
     let result;
     const res = { statusCode: 200, setHeader() {}, end(value) { result = Buffer.isBuffer(value) ? value : JSON.parse(value); } };
     await withStorage(storage, () => handler(req, res, () => assert.fail("Unexpected middleware fallthrough")));
-    if (expectedStatus) assert.equal(res.statusCode, expectedStatus, JSON.stringify(result));
+    if (Array.isArray(expectedStatus)) assert.ok(expectedStatus.includes(res.statusCode), `${res.statusCode}: ${JSON.stringify(result)}`);
+    else if (expectedStatus) assert.equal(res.statusCode, expectedStatus, JSON.stringify(result));
     else assert.ok(res.statusCode < 300, JSON.stringify(result));
     return result;
   }
@@ -116,10 +124,93 @@ async function harness(t, env = {}, beforePaidCall) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
+  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, setJobSavedHook(value) { jobSavedHook = value; }, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
+
+test("website imports carry product metadata through crop, cutout and modeled approval", async (t) => {
+  const image = await productImage();
+  const websiteRequests = [];
+  const h = await harness(t, {}, undefined, { fetchWebsiteResource: async (url, { kind }) => {
+    websiteRequests.push({ url, kind });
+    return { url, bytes: kind === "image" ? image : Buffer.from(`<script type="application/ld+json">${JSON.stringify({ "@type": "Product", name: "Blue linen dress", brand: { name: "Example" }, material: "Linen", image: "/dress.png" })}</script>`) };
+  } });
+  h.setAnalysis([{ ...dress, name: "Blue linen dress", tags: ["linen", "sleeveless"] }]);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/dress" });
+  assert.deepEqual(websiteRequests, [{ url: "https://shop.example/dress", kind: "page" }, { url: "https://shop.example/dress.png", kind: "image" }]);
+  assert.equal(job.stages.crop.status, "review");
+  assert.equal(job.websiteSource.material, "Linen");
+  assert.equal(job.metadata.part, "dresses");
+  const analysisText = h.requests[0].request.input[0].content.filter(c => c.type === "input_text").map(c => c.text).join("\n");
+  assert.match(analysisText, /at most ONE item/);
+  assert.match(analysisText, /untrusted retailer data/);
+  assert.match(analysisText, /Blue linen dress/);
+  await h.restart();
+  assert.deepEqual((await h.request("GET", `/api/import/jobs/${job.id}`)).websiteSource, job.websiteSource);
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  await h.waitForStage(job.id, "garment");
+  await h.request("PATCH", `/api/import/jobs/${job.id}/metadata`, { metadata: { name: "My linen dress" } });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`);
+  await h.waitForStage(job.id, "modeled");
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/modeled/approve`);
+  const library = await h.request("GET", "/api/import/wardrobe");
+  assert.equal(library[0].name, "My linen dress");
+  assert.deepEqual(library[0].websiteSource, job.websiteSource);
+  assert.ok(library[0].image);
+  assert.ok(library[0].modeledImage);
+  assert.deepEqual(h.requests.filter(r => r.type === "edit").map(r => r.images.length), [1, 2]);
+});
+
+test("website detection retries reject multiple products without changing the crop or provenance", async t => {
+  const image = await productImage();
+  const h = await harness(t, {}, undefined, { fetchWebsiteResource: async (url, { kind }) => ({
+    url, bytes: kind === "image" ? image : Buffer.from('<meta property="og:title" content="Blue dress"><meta property="og:image" content="/dress.png">'),
+  }) });
+  h.setAnalysis([dress]);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/dress" });
+  const base = `/api/import/jobs/${job.id}`;
+  const initialCrop = await h.request("GET", job.stages.crop.assetUrl);
+  const requestId = "00000000-0000-4000-8000-000000000030";
+  h.setAnalysis([dress, { ...dress, name: "Other garment", part: "accessories_up" }]);
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 422);
+  await h.restart();
+  const failed = await h.request("GET", base);
+  assert.equal(failed.detectionRetry, undefined);
+  assert.equal(failed.detectionRetryAttempt.status, "failed");
+  assert.deepEqual(failed.metadata, job.metadata);
+  assert.deepEqual(failed.stages, job.stages);
+  assert.deepEqual(failed.websiteSource, job.websiteSource);
+  assert.deepEqual(await h.request("GET", job.stages.crop.assetUrl), initialCrop);
+  assert.equal((await fileSystem.readdir(path.join(h.root, "data", "jobs", job.id))).some(file => file.startsWith("detection-")), false);
+  await h.request("POST", `${base}/detection/accept`, { retryId: requestId, candidateId: "missing" }, 409);
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 409);
+  assert.equal(h.requests.length, 2, "failed request remains spent across restart");
+  h.setAnalysis([dress]);
+  const review = await h.request("POST", `${base}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000031" });
+  assert.equal(review.detectionRetry.candidates.length, 1, "a fresh single-product retry still succeeds");
+  assert.deepEqual(review.websiteSource, job.websiteSource);
+});
+
+test("photo detection retries still allow multiple candidates", async t => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  h.setAnalysis([dress, { ...dress, name: "Other garment", part: "accessories_up" }]);
+  const review = await h.request("POST", `/api/import/jobs/${job.id}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000032" });
+  assert.equal(review.detectionRetry.candidates.length, 2);
+});
+
+test("website failures and ambiguous input create no jobs and spend no model credits", async (t) => {
+  let downloads = 0;
+  const h = await harness(t, {}, undefined, { fetchWebsiteResource: async () => { downloads++; throw Object.assign(new Error("Retailer blocked access. Upload a product photo instead."), { status: 422 }); } });
+  await h.request("POST", "/api/import/jobs", { websiteUrl: "file:///etc/passwd" }, 400);
+  await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/item", imageBase64: h.source.toString("base64") }, 400);
+  assert.equal(downloads, 0);
+  const result = await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/item" }, 422);
+  assert.match(result.error, /Upload a product photo/);
+  assert.equal(h.requests.length, 0);
+  assert.deepEqual(await h.request("GET", "/api/import/jobs"), []);
+});
 
 async function productImage(transparent = false) {
   const item = await sharp({ create: { width: 48, height: 72, channels: 4, background: "#123456" } }).png().toBuffer();
@@ -759,6 +850,13 @@ test("modeled retry telemetry skips scene-planning failures and keeps image atte
   const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: (await productImage(true)).toString('base64') });
   const url = `/api/import/jobs/${job.id}`;
   await h.request('POST', `${url}/stages/crop/use-original`);
+  // Force the persisted-failure/active-task overlap instead of depending on CI
+  // filesystem timing. The retry below releases each held save after its 409.
+  let releaseSave, handoffs = 0;
+  h.setJobSavedHook(saved => {
+    if (saved.stages.modeled.status === 'failed') return new Promise(resolve => { releaseSave = resolve; });
+  });
+  t.after(() => releaseSave?.());
   let images = 0, planningFails = false;
   t.mock.method(globalThis, 'fetch', async endpoint => {
     if (endpoint.endsWith('/responses')) return planningFails
@@ -775,15 +873,29 @@ test("modeled retry telemetry skips scene-planning failures and keeps image atte
     }
     assert.fail('Expected failed modeled stage');
   }
+  async function regenerateAfterFailure() {
+    // The failed state is readable after rename, while atomic-save cleanup and
+    // the generation lock's finally handler may still be finishing. A 409 in
+    // that handoff starts no work; only retry that specific response.
+    for (let i = 0; i < 100; i++) {
+      const result = await h.request('POST', `${url}/stages/modeled/regenerate`, {}, [202, 409]);
+      if (!result.error) return;
+      assert.equal(result.error, 'Modeled generation is already running');
+      if (releaseSave) { handoffs++; releaseSave(); releaseSave = undefined; }
+      await delay(10);
+    }
+    assert.fail('Expected the previous modeled generation to release its lock');
+  }
   await h.request('POST', `${url}/stages/garment/approve`);
   await waitForFailure();
   planningFails = true;
-  await h.request('POST', `${url}/stages/modeled/regenerate`, {});
+  await regenerateAfterFailure();
   await waitForFailure();
   assert.equal((await readTelemetry(path.join(h.root, 'data'))).length, 1);
   planningFails = false;
-  await h.request('POST', `${url}/stages/modeled/regenerate`, {});
+  await regenerateAfterFailure();
   await h.waitForStage(job.id, 'modeled');
+  assert.equal(handoffs, 2, 'both failed attempts exercise the active-task handoff');
   // Stage state is saved before the best-effort telemetry completion.
   let records;
   for (let i = 0; i < 100; i++) {

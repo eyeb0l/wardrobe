@@ -670,7 +670,7 @@ export function App() {
         {syncNotice && <p className="status" role="status">{syncNotice}</p>}
         {error && <p className="status error">{uiErrorMessage(error)}</p>}
         {!error && loading && <p className="status">Loading wardrobe</p>}
-        {!error && !loading && !items.length && <p className="status empty">Drop, paste, or add a photo to import your first piece.</p>}
+        {!error && !loading && !items.length && <p className="status empty">Add a product link or drop, paste, or choose a photo to import your first piece.</p>}
 
         {!loading && !!items.length && !visibleItems.length && <p className="status empty">No {TYPE_MAP[activeType]?.label.toLowerCase()} yet. Choose another category or add a photo.</p>}
 
