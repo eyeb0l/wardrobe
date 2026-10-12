@@ -27,7 +27,8 @@ test("chroma selection protects either recorded garment color", () => {
 
 async function harness(t, env = {}, beforePaidCall, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-model-test-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  // Review can be persisted just before the background task finishes telemetry.
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 3 }));
   // Never read .env or allow a real network request in these tests.
   for (const name of ["OPENAI_IMAGE_MODEL", "OPENAI_VISION_MODEL", "OPENAI_GARMENT_MODEL", "OPENAI_MODELED_MODEL", "OPENAI_IMAGE_QUALITY"]) {
     const previous = process.env[name];
