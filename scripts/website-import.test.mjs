@@ -16,6 +16,54 @@ test("extracts JSON-LD graph product details, image objects and relative URLs", 
   assert.deepEqual(result.source, { type: "website", url, name: product.name, description: "A linen shirt.", brand: "Example", material: "Linen", color: "Blue", category: "Shirts", sku: "SKU-1" });
 });
 
+test("resolves referenced JSON-LD image objects across graph nodes and script blocks", () => {
+  const base = "https://cdn.example/catalog/";
+  for (const imagesFirst of [false, true]) {
+    const nodes = [
+      { ...product, image: [{ "@id": "#front" }, { "@id": `${base}#back` }, { "@id": "#front" }] },
+      { "@type": "ImageObject", "@id": `${base}#front`, contentUrl: "images/front.png" },
+      { "@type": "ImageObject", "@id": "#back", url: "//images.example/back.png" },
+    ];
+    if (imagesFirst) nodes.reverse();
+    for (const html of [ld({ "@graph": nodes }), nodes.map(ld).join("")]) {
+      const result = extractWebsiteProduct(html + `<base href="${base}">`, url);
+      assert.deepEqual(result.imageUrls, [base + "images/front.png", "https://images.example/back.png"]);
+      assert.equal(result.source.name, product.name);
+      assert.equal(result.source.url, url);
+    }
+  }
+});
+
+test("downloads a referenced image object without social metadata", async () => {
+  const png = await sharp({ create: { width: 80, height: 120, channels: 4, background: "#333333" } }).png().toBuffer();
+  const html = ld({ "@graph": [
+    { ...product, image: { "@id": "#primary-image" } },
+    { "@type": "ImageObject", "@id": "#primary-image", contentUrl: "/full-size.png" },
+  ] });
+  const calls = [];
+  const result = await importWebsiteProduct(url, { fetchResource: async (value, { kind }) => {
+    calls.push({ value, kind });
+    return { url: value, bytes: kind === "page" ? Buffer.from(html) : png };
+  } });
+  assert.deepEqual(calls, [{ value: url, kind: "page" }, { value: "https://shop.example/full-size.png", kind: "image" }]);
+  assert.equal(result.source.imageUrl, "https://shop.example/full-size.png");
+  assert.equal(result.source.sku, "SKU-1");
+});
+
+test("unresolved image references are skipped and inline image URLs take precedence", () => {
+  const records = ld({ "@graph": [
+    { ...product, image: [{ "@id": "#missing" }, { "@id": "#cycle" }] },
+    { "@type": "ImageObject", "@id": "#cycle" },
+  ] });
+  assert.throws(() => extractWebsiteProduct(records, url), /No product photo/);
+  assert.deepEqual(extractWebsiteProduct(records + '<meta property="og:image" content="/social.png">', url).imageUrls,
+    ["https://shop.example/social.png"]);
+  assert.deepEqual(extractWebsiteProduct(ld({ "@graph": [
+    { ...product, image: { "@id": "#image", contentUrl: "/inline.png" } },
+    { "@type": "ImageObject", "@id": "#image", contentUrl: "/other.png" },
+  ] }), url).imageUrls, ["https://shop.example/inline.png"]);
+});
+
 test("falls back to social metadata, decoding HTML entities and ignoring malformed JSON-LD", () => {
   const result = extractWebsiteProduct(`<script type="application/ld+json">broken</script><meta content='Blue &amp; cream shirt' property='og:title'><meta name='twitter:image' content='/shirt.png?a=1&amp;b=2'><meta name='description' content='Soft &amp; light'>`, url);
   assert.equal(result.source.name, product.name);

@@ -172,12 +172,19 @@ export function extractWebsiteProduct(html, pageUrl) {
   // first valid document base. Keep pageUrl as the source and requested page.
   const metadataBase = documentBase || pageUrl;
   const products = [];
+  const imageNodes = new Map();
+  const nodeId = value => {
+    if (typeof value !== "string" || !value.trim()) return null;
+    try { return new URL(value, metadataBase).href; } catch { return value; }
+  };
   const queue = [...documents];
   // Iterative and bounded: retailer JSON can be deeply nested or contain lists
   // of related products. Prefer the product whose URL matches the requested page.
   for (let visited = 0; visited < queue.length && visited < 10_000; visited++) {
     const node = queue[visited];
     if (!node || typeof node !== "object") continue;
+    const id = nodeId(node["@id"]);
+    if (id && (node.contentUrl || node.url) && !imageNodes.has(id)) imageNodes.set(id, node);
     if ([node["@type"]].flat().some(type => typeof type === "string" && /(?:^|\/)Product$/.test(type))) products.push(node);
     for (const value of Object.values(node)) {
       if (queue.length >= 10_000) break;
@@ -204,11 +211,16 @@ export function extractWebsiteProduct(html, pageUrl) {
   const imageCandidates = values => [...new Set(values.filter(Boolean).flatMap(value => {
     try { return [websiteUrl(value, metadataBase).href]; } catch { return []; }
   }))].slice(0, 3);
+  const imageUrl = image => {
+    if (typeof image === "string") return image;
+    const referenced = imageNodes.get(nodeId(image?.["@id"]));
+    return image?.contentUrl || image?.url || referenced?.contentUrl || referenced?.url;
+  };
   // Duplicate blocks can be incomplete. Prefer a record with usable image URLs,
   // then the most details, keeping its images first and using its metadata.
   const ranked = primary.map(product => ({
     product,
-    images: imageCandidates([product.image].flat().map(image => typeof image === "string" ? image : image?.contentUrl || image?.url)),
+    images: imageCandidates([product.image].flat().map(imageUrl)),
     details: [product.name, product.description, typeof product.brand === "object" ? product.brand?.name : product.brand,
       product.material, product.color, product.category, product.sku].filter(value => plain(value)).length,
   }));
