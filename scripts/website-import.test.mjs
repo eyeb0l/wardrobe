@@ -106,6 +106,36 @@ test("duplicate product blocks and same-page variants do not make a page ambiguo
   }
 });
 
+test("distinct fragment product IDs on the same page remain ambiguous", () => {
+  for (const ids of [["#shirt", "#trousers"], [`${url}#shirt`, `${url}#trousers`], ["#shirt", `${url}/?utm_source=email#trousers`]]) {
+    // Even identical identifying metadata must not collapse distinct entities.
+    const records = ld(ids.map(id => ({ ...product, "@id": id })));
+    for (const metadata of ["", `<link rel="canonical" href="${url}"><meta property="og:url" content="${url}">`]) {
+      assert.throws(() => extractWebsiteProduct(metadata + records, url), /several products/);
+    }
+  }
+});
+
+test("one fragment product identity and its duplicate blocks still import", () => {
+  for (const records of [
+    [{ ...product, "@id": "#shirt" }],
+    [{ ...product, "@id": "#shirt" }, { ...product, "@id": `${url}/?utm_source=email#shirt`, image: "/alternate.png" }],
+  ]) {
+    const result = extractWebsiteProduct(ld(records), url);
+    assert.equal(result.source.name, product.name);
+    assert.equal(result.imageUrls[0], "https://shop.example/shirt.png");
+  }
+});
+
+test("an explicit primary product URL wins over unrelated local fragment entities", () => {
+  const result = extractWebsiteProduct(ld([
+    { ...product, "@id": "#trousers", name: "Other product", image: "/trousers.png" },
+    { "@type": "Product", url, name: "Primary product", image: "/primary.png" },
+  ]), url);
+  assert.equal(result.source.name, "Primary product");
+  assert.deepEqual(result.imageUrls, ["https://shop.example/primary.png"]);
+});
+
 test("incomplete matching blocks do not hide a richer record's structured images and details", () => {
   for (const image of [undefined, { unsupported: true }, "data:image/png;base64,AAAA", "/thumbnail.png"]) {
     for (const social of ["", '<meta property="og:image" content="/social.png">']) {

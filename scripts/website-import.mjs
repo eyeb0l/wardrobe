@@ -114,7 +114,11 @@ function comparablePageUrl(value, pageUrl) {
 }
 
 function productPage(product, pageUrl) {
-  return comparablePageUrl(product.url || product["@id"], pageUrl);
+  const value = product.url || product["@id"];
+  const page = comparablePageUrl(value, pageUrl);
+  // A product URL identifies its page; an @id fragment identifies an entity
+  // within that page and must not collapse with neighbouring products.
+  return page && !product.url ? page + new URL(value, pageUrl).hash : page;
 }
 
 function productIdentity(product, pageUrl) {
@@ -186,10 +190,14 @@ export function extractWebsiteProduct(html, pageUrl) {
   const pageIdentities = [pageUrl, canonicalUrl, meta.get("og:url")]
     .map(value => comparablePageUrl(value, metadataBase))
     .filter(value => value && new URL(value).origin === pageOrigin);
-  const matching = pageIdentities.map(identity => products.filter(product => productPage(product, metadataBase) === identity))
+  let matching = pageIdentities.map(identity => products.filter(product => productPage(product, metadataBase) === identity))
     .find(matches => matches.length) || [];
-  const identities = new Set(products.map(product => productIdentity(product, metadataBase)));
-  if (!matching.length && identities.size > 1) throw fail(`This page lists several products. Open an individual product page. ${fallback}`);
+  // Without a direct page match, local entities can identify the product only
+  // when they resolve to one identity. Keep their fragments for this check.
+  if (!matching.length) matching = pageIdentities.map(identity => products.filter(product =>
+    !product.url && comparablePageUrl(product["@id"], metadataBase) === identity)).find(matches => matches.length) || [];
+  const identities = new Set((matching.length ? matching : products).map(product => productIdentity(product, metadataBase)));
+  if (identities.size > 1) throw fail(`This page lists several products. Open an individual product page. ${fallback}`);
   // An explicit URL must identify this page, even when there is only one
   // product record. Otherwise use URL-less records or the page's social data.
   const primary = matching.length ? matching : products.filter(product => !product.url && !product["@id"]);
