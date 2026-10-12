@@ -187,13 +187,21 @@ export function extractWebsiteProduct(html, pageUrl) {
     .find(matches => matches.length) || [];
   const identities = new Set(products.map(product => productIdentity(product, metadataBase)));
   if (!matching.length && identities.size > 1) throw fail(`This page lists several products. Open an individual product page. ${fallback}`);
-  const product = matching[0] || products[0] || {};
   const imageCandidates = values => [...new Set(values.filter(Boolean).flatMap(value => {
     try { return [websiteUrl(value, metadataBase).href]; } catch { return []; }
   }))].slice(0, 3);
+  // Duplicate blocks can be incomplete. Prefer a record with usable image URLs,
+  // then the most details, keeping its images and variant metadata together.
+  const ranked = (matching.length ? matching : products).map(product => ({
+    product,
+    images: imageCandidates([product.image].flat().map(image => typeof image === "string" ? image : image?.contentUrl || image?.url)),
+    details: [product.name, product.description, typeof product.brand === "object" ? product.brand?.name : product.brand,
+      product.material, product.color, product.category, product.sku].filter(value => plain(value)).length,
+  }));
+  ranked.sort((a, b) => Number(b.images.length > 0) - Number(a.images.length > 0) || b.details - a.details);
+  const { product = {}, images: structuredImages = [] } = ranked[0] || {};
   // Bound each source separately so a full structured-image list cannot crowd
   // out social fallbacks when those preferred images fail to load or decode.
-  const structuredImages = imageCandidates([product.image].flat().map(image => typeof image === "string" ? image : image?.contentUrl || image?.url));
   const socialImages = imageCandidates([meta.get("og:image"), meta.get("twitter:image"), meta.get("twitter:image:src")]);
   const imageUrls = [...new Set([...structuredImages, ...socialImages])];
   if (!imageUrls.length) throw fail(`No product photo was found on this page. ${fallback}`);

@@ -106,6 +106,35 @@ test("duplicate product blocks and same-page variants do not make a page ambiguo
   }
 });
 
+test("incomplete matching blocks do not hide a richer record's structured images and details", () => {
+  for (const image of [undefined, { unsupported: true }, "data:image/png;base64,AAAA", "/thumbnail.png"]) {
+    for (const social of ["", '<meta property="og:image" content="/social.png">']) {
+      const result = extractWebsiteProduct(social + ld([
+        { ...product, name: "Recommended", url: "/recommended", image: "/recommended.png" },
+        { "@type": "Product", url, name: product.name, image },
+        { ...product, url, image: { contentUrl: "/full-size.png" } },
+      ]), url);
+      assert.equal(result.source.name, product.name);
+      assert.equal(result.source.brand, "Example");
+      assert.equal(result.source.material, "Linen");
+      assert.equal(result.source.sku, "SKU-1");
+      assert.deepEqual(result.imageUrls, ["https://shop.example/full-size.png", ...(social ? ["https://shop.example/social.png"] : [])]);
+    }
+  }
+});
+
+test("matching record selection keeps the chosen photo and variant details together", () => {
+  const result = extractWebsiteProduct(ld([
+    { ...product, url, image: undefined },
+    { "@type": "Product", url, name: "Cream shirt", color: "Cream", sku: "SKU-2", image: "/cream.png" },
+  ]), url);
+  assert.equal(result.source.name, "Cream shirt");
+  assert.equal(result.source.color, "Cream");
+  assert.equal(result.source.sku, "SKU-2");
+  assert.equal(result.source.material, "");
+  assert.deepEqual(result.imageUrls, ["https://shop.example/cream.png"]);
+});
+
 test("tracking parameters and trailing slashes match the primary product ahead of recommendations", () => {
   for (const pageUrl of [url + "/", url + "?utm_source=email&utm_campaign=sale&fbclid=123", url + "/?gclid=123&msclkid=456"]) {
     const result = extractWebsiteProduct(ld([
