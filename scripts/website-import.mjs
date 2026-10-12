@@ -98,10 +98,23 @@ function plain(value, max = 500) {
   return text.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-function productPage(product, pageUrl) {
-  const value = product.url || product["@id"];
+function comparablePageUrl(value, pageUrl) {
   if (typeof value !== "string" || !value.trim()) return null;
-  try { return websiteUrl(value, pageUrl).href; } catch { return null; }
+  try {
+    const url = websiteUrl(value, pageUrl);
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    // Compare page identities without changing download URLs. Keep meaningful
+    // selectors such as product IDs, colours and variants distinct.
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_.*|gclid|dclid|fbclid|msclkid|gbraid|wbraid)$/i.test(key)) url.searchParams.delete(key);
+    }
+    url.searchParams.sort();
+    return url.href;
+  } catch { return null; }
+}
+
+function productPage(product, pageUrl) {
+  return comparablePageUrl(product.url || product["@id"], pageUrl);
 }
 
 function productIdentity(product, pageUrl) {
@@ -125,13 +138,14 @@ function productIdentity(product, pageUrl) {
 export function extractWebsiteProduct(html, pageUrl) {
   const meta = new Map();
   const documents = [];
-  let script = null, title = "", inTitle = false;
+  let script = null, title = "", inTitle = false, canonicalUrl = null;
   new Parser({
     onopentag(tag, attrs) {
       if (tag === "meta") {
         const key = (attrs.property || attrs.name || "").toLowerCase();
         if (attrs.content && !meta.has(key)) meta.set(key, attrs.content);
       }
+      if (tag === "link" && !canonicalUrl && attrs.rel?.toLowerCase().split(/\s+/).includes("canonical")) canonicalUrl = attrs.href;
       if (tag === "script" && attrs.type?.split(";")[0].trim().toLowerCase() === "application/ld+json") script = "";
       if (tag === "title") inTitle = true;
     },
@@ -157,7 +171,14 @@ export function extractWebsiteProduct(html, pageUrl) {
       if (value && typeof value === "object") queue.push(value);
     }
   }
-  const matching = products.filter(product => productPage(product, pageUrl) === pageUrl);
+  // Prefer the requested variant over a retailer's generic canonical product.
+  // Same-site metadata also connects collection-path aliases to their product.
+  const pageOrigin = new URL(pageUrl).origin;
+  const pageIdentities = [pageUrl, canonicalUrl, meta.get("og:url")]
+    .map(value => comparablePageUrl(value, pageUrl))
+    .filter(value => value && new URL(value).origin === pageOrigin);
+  const matching = pageIdentities.map(identity => products.filter(product => productPage(product, pageUrl) === identity))
+    .find(matches => matches.length) || [];
   const identities = new Set(products.map(product => productIdentity(product, pageUrl)));
   if (!matching.length && identities.size > 1) throw fail(`This page lists several products. Open an individual product page. ${fallback}`);
   const product = matching[0] || products[0] || {};

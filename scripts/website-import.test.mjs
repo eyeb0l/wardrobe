@@ -48,6 +48,60 @@ test("duplicate product blocks and same-page variants do not make a page ambiguo
   }
 });
 
+test("tracking parameters and trailing slashes match the primary product ahead of recommendations", () => {
+  for (const pageUrl of [url + "/", url + "?utm_source=email&utm_campaign=sale&fbclid=123", url + "/?gclid=123&msclkid=456"]) {
+    const result = extractWebsiteProduct(ld([
+      { ...product, name: "Recommended", url: "/recommended", image: "/recommended.png" },
+      { ...product, url },
+    ]), pageUrl);
+    assert.equal(result.source.name, product.name);
+    assert.equal(result.source.url, pageUrl, "retain the actual source URL");
+    assert.deepEqual(result.imageUrls, ["https://shop.example/shirt.png"]);
+  }
+  const result = extractWebsiteProduct(ld([
+    { ...product, url: url + "/?utm_source=email" }, { ...product, url },
+  ]), "https://shop.example/alias");
+  assert.equal(result.source.name, product.name, "equivalent record URLs also deduplicate");
+});
+
+test("same-site canonical and og:url metadata identify product pages served through aliases", () => {
+  const pageUrl = "https://shop.example/collections/sale/products/shirt?campaign=summer";
+  const records = ld([{ ...product, name: "Recommended", url: "/recommended" }, { ...product, url }]);
+  for (const metadata of [
+    '<link rel="alternate CANONICAL" href="/products/shirt/">',
+    '<meta property="og:url" content="/products/shirt?utm_source=social">',
+    '<link rel="canonical" href="javascript:invalid"><meta property="og:url" content="/products/shirt">',
+  ]) {
+    const result = extractWebsiteProduct(metadata + records, pageUrl);
+    assert.equal(result.source.name, product.name);
+    assert.equal(result.source.url, pageUrl);
+  }
+});
+
+test("meaningful product selectors remain distinct and requested variants take priority over canonical metadata", () => {
+  const selectedUrl = url + "?variant=blue&size=m";
+  const records = ld([
+    { ...product, name: "Canonical product", url },
+    { ...product, name: "Red shirt", url: url + "?variant=red&size=m" },
+    { ...product, url: selectedUrl },
+  ]);
+  const result = extractWebsiteProduct(`<link rel="canonical" href="${url}">` + records, url + "/?size=m&utm_source=email&variant=blue");
+  assert.equal(result.source.name, product.name);
+  assert.throws(() => extractWebsiteProduct(records, url + "?variant=green&size=m"), /several products/);
+  assert.throws(() => extractWebsiteProduct(ld([
+    { ...product, url: "/product?id=1" }, { ...product, url: "/product?id=2" },
+  ]), "https://shop.example/product?utm_source=email"), /several products/);
+});
+
+test("unrelated pages and invalid or off-site canonical metadata remain ambiguous", () => {
+  const records = ld([{ ...product, url }, { ...product, name: "Other", url: "/other" }]);
+  for (const metadata of ["", '<link rel="canonical" href="javascript:invalid">', '<meta property="og:url" content="https://elsewhere.example/products/shirt">']) {
+    assert.throws(() => extractWebsiteProduct(metadata + records, "https://shop.example/collection?utm_source=email"), /several products/);
+  }
+  assert.throws(() => extractWebsiteProduct('<link rel="canonical" href="https://elsewhere.example/products/shirt">'
+    + ld([{ ...product, url: "https://elsewhere.example/products/shirt" }, { ...product, url: "/other" }]), "https://shop.example/collection"), /several products/);
+});
+
 test("URL-less variants with a shared product group retain one consistent primary record", () => {
   for (const group of [{ productGroupID: "shirt" }, { isVariantOf: { "@id": `${url}#group` } }]) {
     const result = extractWebsiteProduct(ld([
