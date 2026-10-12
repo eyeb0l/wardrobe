@@ -118,7 +118,7 @@ test("incomplete matching blocks do not hide a richer record's structured images
       assert.equal(result.source.brand, "Example");
       assert.equal(result.source.material, "Linen");
       assert.equal(result.source.sku, "SKU-1");
-      assert.deepEqual(result.imageUrls, ["https://shop.example/full-size.png", ...(social ? ["https://shop.example/social.png"] : [])]);
+      assert.deepEqual(result.imageUrls, ["https://shop.example/full-size.png", ...(image === "/thumbnail.png" ? ["https://shop.example/thumbnail.png"] : []), ...(social ? ["https://shop.example/social.png"] : [])]);
     }
   }
 });
@@ -222,6 +222,42 @@ test("structured image candidates cannot crowd out deduplicated social fallbacks
     assert.deepEqual(extractWebsiteProduct(html + ld({ ...product, image }), url).imageUrls,
       ["https://shop.example/social.png", "https://shop.example/twitter.png"]);
   }
+});
+
+test("import tries duplicate-record images after the richest record fails, retaining its metadata", async () => {
+  const png = await sharp({ create: { width: 80, height: 120, channels: 4, background: "#333333" } }).png().toBuffer();
+  const html = ld([
+    { ...product, url, image: ["/missing.png", "/corrupt.png", "/unavailable.png"] },
+    { "@type": "Product", url, name: product.name, image: ["/missing.png", "/alternate.png"] },
+    { "@type": "Product", url, name: product.name, image: "/alternate.png" },
+    { ...product, url: "/recommended", image: "/recommended.png" },
+  ]);
+  assert.deepEqual(extractWebsiteProduct(html, url).imageUrls,
+    ["https://shop.example/missing.png", "https://shop.example/corrupt.png", "https://shop.example/unavailable.png", "https://shop.example/alternate.png"]);
+  const calls = [];
+  const result = await importWebsiteProduct(url, { fetchResource: async (value, { kind }) => {
+    if (kind === "page") return { url: value, bytes: Buffer.from(html) };
+    calls.push(value);
+    if (value.endsWith("missing.png") || value.endsWith("unavailable.png")) throw new Error("Unavailable");
+    return { url: value, bytes: value.endsWith("corrupt.png") ? Buffer.from("invalid image") : png };
+  } });
+  assert.deepEqual(calls, extractWebsiteProduct(html, url).imageUrls);
+  assert.equal(result.source.imageUrl, "https://shop.example/alternate.png");
+  assert.equal(result.source.brand, "Example");
+  assert.equal(result.source.material, "Linen");
+  assert.equal(result.source.sku, "SKU-1");
+});
+
+test("duplicate image fallbacks are bounded, preserve social fallbacks and exclude conflicting variants", () => {
+  const records = [{ ...product, url }];
+  for (const field of ["sku", "productID", "mpn", "color", "size"]) {
+    records[0][field] ||= "primary";
+    records.push({ ...records[0], [field]: "other", image: `/other-${field}.png` });
+  }
+  records.push(...Array.from({ length: 5 }, (_, i) => ({ "@type": "Product", url, image: `/alternate-${i}.png` })));
+  const result = extractWebsiteProduct(ld(records) + '<meta property="og:image" content="/social.png">', url);
+  assert.deepEqual(result.imageUrls, ["https://shop.example/shirt.png",
+    "https://shop.example/alternate-0.png", "https://shop.example/alternate-1.png", "https://shop.example/alternate-2.png", "https://shop.example/social.png"]);
 });
 
 test("import falls back to social images after private, unavailable and undecodable structured images", async () => {

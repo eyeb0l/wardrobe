@@ -191,7 +191,7 @@ export function extractWebsiteProduct(html, pageUrl) {
     try { return [websiteUrl(value, metadataBase).href]; } catch { return []; }
   }))].slice(0, 3);
   // Duplicate blocks can be incomplete. Prefer a record with usable image URLs,
-  // then the most details, keeping its images and variant metadata together.
+  // then the most details, keeping its images first and using its metadata.
   const ranked = (matching.length ? matching : products).map(product => ({
     product,
     images: imageCandidates([product.image].flat().map(image => typeof image === "string" ? image : image?.contentUrl || image?.url)),
@@ -200,10 +200,16 @@ export function extractWebsiteProduct(html, pageUrl) {
   }));
   ranked.sort((a, b) => Number(b.images.length > 0) - Number(a.images.length > 0) || b.details - a.details);
   const { product = {}, images: structuredImages = [] } = ranked[0] || {};
+  // Reuse duplicate photos, but never pair a known different variant's image
+  // with the selected record's metadata. Missing fields can be complementary.
+  const duplicateImages = imageCandidates(ranked.slice(1).filter(({ product: other }) =>
+    ["sku", "productID", "mpn", "color", "size"].every(field =>
+      !plain(product[field]) || !plain(other[field]) || plain(product[field]) === plain(other[field])))
+    .flatMap(({ images }) => images).filter(image => !structuredImages.includes(image)));
   // Bound each source separately so a full structured-image list cannot crowd
   // out social fallbacks when those preferred images fail to load or decode.
   const socialImages = imageCandidates([meta.get("og:image"), meta.get("twitter:image"), meta.get("twitter:image:src")]);
-  const imageUrls = [...new Set([...structuredImages, ...socialImages])];
+  const imageUrls = [...new Set([...structuredImages, ...duplicateImages, ...socialImages])];
   if (!imageUrls.length) throw fail(`No product photo was found on this page. ${fallback}`);
   const name = plain(product.name || meta.get("og:title") || meta.get("twitter:title") || title, 120);
   if (!name) throw fail(`No product details were found on this page. ${fallback}`);
