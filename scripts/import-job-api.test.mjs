@@ -41,11 +41,17 @@ async function harness(t, env = {}, beforePaidCall, options = {}) {
   const imageReads = [];
   const libraryReads = [];
   let failCandidateSave = false;
+  let jobSavedHook;
   const storage = { ...fileSystem, async readFile(filename, ...args) {
     const bytes = await fileSystem.readFile(filename, ...args);
     if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
     if (path.basename(String(filename)) === "library.json") libraryReads.push(String(filename));
     return bytes;
+  }, async rename(source, destination) {
+    await fileSystem.rename(source, destination);
+    if (jobSavedHook && path.basename(destination) === 'job.json') {
+      await jobSavedHook(JSON.parse(await fileSystem.readFile(destination, 'utf8')));
+    }
   }, async writeFile(filename, data, ...args) {
     if (failCandidateSave && String(filename).includes("job.json") && String(data).includes('"detectionRetry":')) {
       failCandidateSave = false;
@@ -103,7 +109,8 @@ async function harness(t, env = {}, beforePaidCall, options = {}) {
     let result;
     const res = { statusCode: 200, setHeader() {}, end(value) { result = Buffer.isBuffer(value) ? value : JSON.parse(value); } };
     await withStorage(storage, () => handler(req, res, () => assert.fail("Unexpected middleware fallthrough")));
-    if (expectedStatus) assert.equal(res.statusCode, expectedStatus, JSON.stringify(result));
+    if (Array.isArray(expectedStatus)) assert.ok(expectedStatus.includes(res.statusCode), `${res.statusCode}: ${JSON.stringify(result)}`);
+    else if (expectedStatus) assert.equal(res.statusCode, expectedStatus, JSON.stringify(result));
     else assert.ok(res.statusCode < 300, JSON.stringify(result));
     return result;
   }
@@ -116,7 +123,7 @@ async function harness(t, env = {}, beforePaidCall, options = {}) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
+  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, setJobSavedHook(value) { jobSavedHook = value; }, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
@@ -804,6 +811,13 @@ test("modeled retry telemetry skips scene-planning failures and keeps image atte
   const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: (await productImage(true)).toString('base64') });
   const url = `/api/import/jobs/${job.id}`;
   await h.request('POST', `${url}/stages/crop/use-original`);
+  // Force the persisted-failure/active-task overlap instead of depending on CI
+  // filesystem timing. The retry below releases each held save after its 409.
+  let releaseSave, handoffs = 0;
+  h.setJobSavedHook(saved => {
+    if (saved.stages.modeled.status === 'failed') return new Promise(resolve => { releaseSave = resolve; });
+  });
+  t.after(() => releaseSave?.());
   let images = 0, planningFails = false;
   t.mock.method(globalThis, 'fetch', async endpoint => {
     if (endpoint.endsWith('/responses')) return planningFails
@@ -820,15 +834,29 @@ test("modeled retry telemetry skips scene-planning failures and keeps image atte
     }
     assert.fail('Expected failed modeled stage');
   }
+  async function regenerateAfterFailure() {
+    // The failed state is readable after rename, while atomic-save cleanup and
+    // the generation lock's finally handler may still be finishing. A 409 in
+    // that handoff starts no work; only retry that specific response.
+    for (let i = 0; i < 100; i++) {
+      const result = await h.request('POST', `${url}/stages/modeled/regenerate`, {}, [202, 409]);
+      if (!result.error) return;
+      assert.equal(result.error, 'Modeled generation is already running');
+      if (releaseSave) { handoffs++; releaseSave(); releaseSave = undefined; }
+      await delay(10);
+    }
+    assert.fail('Expected the previous modeled generation to release its lock');
+  }
   await h.request('POST', `${url}/stages/garment/approve`);
   await waitForFailure();
   planningFails = true;
-  await h.request('POST', `${url}/stages/modeled/regenerate`, {});
+  await regenerateAfterFailure();
   await waitForFailure();
   assert.equal((await readTelemetry(path.join(h.root, 'data'))).length, 1);
   planningFails = false;
-  await h.request('POST', `${url}/stages/modeled/regenerate`, {});
+  await regenerateAfterFailure();
   await h.waitForStage(job.id, 'modeled');
+  assert.equal(handoffs, 2, 'both failed attempts exercise the active-task handoff');
   // Stage state is saved before the best-effort telemetry completion.
   let records;
   for (let i = 0; i < 100; i++) {
