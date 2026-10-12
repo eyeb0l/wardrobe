@@ -58,7 +58,7 @@ test("relative product and canonical URLs use the same document base for primary
     assert.deepEqual(result.imageUrls, ["https://shop.example/catalog/shirt.png"]);
     assert.equal(result.source.url, url);
   }
-  assert.equal(extractWebsiteProduct(base + ld([{ ...product, url: "shirt" }, { ...product, url: canonical }]), url).source.name, product.name);
+  assert.equal(extractWebsiteProduct(base + '<link rel="canonical" href="shirt">' + ld([{ ...product, url: "shirt" }, { ...product, url: canonical }]), url).source.name, product.name);
 });
 
 test("import downloads a base-relative image and still rejects private-network bases", async () => {
@@ -145,7 +145,7 @@ test("tracking parameters and trailing slashes match the primary product ahead o
     assert.equal(result.source.url, pageUrl, "retain the actual source URL");
     assert.deepEqual(result.imageUrls, ["https://shop.example/shirt.png"]);
   }
-  const result = extractWebsiteProduct(ld([
+  const result = extractWebsiteProduct(`<link rel="canonical" href="${url}">` + ld([
     { ...product, url: url + "/?utm_source=email" }, { ...product, url },
   ]), "https://shop.example/alias");
   assert.equal(result.source.name, product.name, "equivalent record URLs also deduplicate");
@@ -189,6 +189,17 @@ test("unrelated pages and invalid or off-site canonical metadata remain ambiguou
     + ld([{ ...product, url: "https://elsewhere.example/products/shirt" }, { ...product, url: "/other" }]), "https://shop.example/collection"), /several products/);
 });
 
+test("unmatched URL-bearing records cannot supply the page's product details or images", () => {
+  for (const identity of [{ url: "/recommended" }, { "@id": "https://other.example/product" }, { url: "javascript:invalid" }]) {
+    const records = ld([{ ...product, ...identity }, { ...product, ...identity }]);
+    const result = extractWebsiteProduct(records + '<meta property="og:title" content="Actual product"><meta property="og:image" content="/actual.png">', url);
+    assert.deepEqual(result.source, { type: "website", url, name: "Actual product", description: "", brand: "", material: "", color: "", category: "", sku: "" });
+    assert.deepEqual(result.imageUrls, ["https://shop.example/actual.png"]);
+    assert.throws(() => extractWebsiteProduct(ld({ ...product, ...identity }), url), /No product photo/);
+    assert.throws(() => extractWebsiteProduct(records + '<meta property="og:image" content="/actual.png">', url), /No product details/);
+  }
+});
+
 test("URL-less variants with a shared product group retain one consistent primary record", () => {
   for (const group of [{ productGroupID: "shirt" }, { isVariantOf: { "@id": `${url}#group` } }]) {
     const result = extractWebsiteProduct(ld([
@@ -221,6 +232,35 @@ test("structured image candidates cannot crowd out deduplicated social fallbacks
   for (const image of ["data:image/png;base64,AAAA", { unsupported: true }, 42]) {
     assert.deepEqual(extractWebsiteProduct(html + ld({ ...product, image }), url).imageUrls,
       ["https://shop.example/social.png", "https://shop.example/twitter.png"]);
+  }
+});
+
+test("repeated social images are ordered, deduplicated and bounded per metadata key", () => {
+  const images = ["og:image", "twitter:image", "twitter:image:src"].flatMap(key =>
+    ["one", "one", "two", "three", "four"].map(name => `<meta property="${key}" content="./${key}/${name}.png">`)).join("");
+  const result = extractWebsiteProduct('<meta property="og:title" content="First title"><meta property="og:title" content="Later title">'
+    + images + '<base href="https://cdn.example/">', url);
+  assert.equal(result.source.name, "First title");
+  assert.deepEqual(result.imageUrls, ["og:image", "twitter:image", "twitter:image:src"].flatMap(key =>
+    ["one", "two", "three"].map(name => `https://cdn.example/${key}/${name}.png`)));
+});
+
+test("import tries later repeated social images after private, unavailable or corrupt photos", async () => {
+  const png = await sharp({ create: { width: 80, height: 120, channels: 4, background: "#333333" } }).png().toBuffer();
+  for (const key of ["og:image", "twitter:image", "twitter:image:src"]) {
+    for (const first of ["http://127.0.0.1/private.png", "/missing.png", "/corrupt.png"]) {
+      const html = `<meta property="og:title" content="Actual product"><meta name="${key}" content="${first}"><meta name="${key}" content="/valid.png">`;
+      const calls = [];
+      const result = await importWebsiteProduct(url, { fetchResource: async (value, options) => {
+        if (options.kind === "page") return { url: value, bytes: Buffer.from(html) };
+        calls.push(value);
+        if (value.startsWith("http://127.")) return fetchWebsiteResource(value, { ...options, request() { assert.fail("Private addresses must not be fetched"); } });
+        if (value.endsWith("missing.png")) throw new Error("Unavailable");
+        return { url: value, bytes: value.endsWith("corrupt.png") ? Buffer.from("invalid image") : png };
+      } });
+      assert.deepEqual(calls, [new URL(first, url).href, "https://shop.example/valid.png"]);
+      assert.equal(result.source.imageUrl, "https://shop.example/valid.png");
+    }
   }
 });
 

@@ -137,6 +137,7 @@ function productIdentity(product, pageUrl) {
 
 export function extractWebsiteProduct(html, pageUrl) {
   const meta = new Map();
+  const socialImageMeta = new Map(["og:image", "twitter:image", "twitter:image:src"].map(key => [key, []]));
   const documents = [];
   let script = null, title = "", inTitle = false, canonicalUrl = null, documentBase = null;
   new Parser({
@@ -144,6 +145,8 @@ export function extractWebsiteProduct(html, pageUrl) {
       if (tag === "meta") {
         const key = (attrs.property || attrs.name || "").toLowerCase();
         if (attrs.content && !meta.has(key)) meta.set(key, attrs.content);
+        const images = socialImageMeta.get(key);
+        if (attrs.content && images && images.length < 3 && !images.includes(attrs.content)) images.push(attrs.content);
       }
       if (tag === "base" && documentBase === null && typeof attrs.href === "string") {
         try { documentBase = websiteUrl(attrs.href, pageUrl).href; } catch { /* Keep looking for a valid HTTP(S) base. */ }
@@ -187,12 +190,15 @@ export function extractWebsiteProduct(html, pageUrl) {
     .find(matches => matches.length) || [];
   const identities = new Set(products.map(product => productIdentity(product, metadataBase)));
   if (!matching.length && identities.size > 1) throw fail(`This page lists several products. Open an individual product page. ${fallback}`);
+  // An explicit URL must identify this page, even when there is only one
+  // product record. Otherwise use URL-less records or the page's social data.
+  const primary = matching.length ? matching : products.filter(product => !product.url && !product["@id"]);
   const imageCandidates = values => [...new Set(values.filter(Boolean).flatMap(value => {
     try { return [websiteUrl(value, metadataBase).href]; } catch { return []; }
   }))].slice(0, 3);
   // Duplicate blocks can be incomplete. Prefer a record with usable image URLs,
   // then the most details, keeping its images first and using its metadata.
-  const ranked = (matching.length ? matching : products).map(product => ({
+  const ranked = primary.map(product => ({
     product,
     images: imageCandidates([product.image].flat().map(image => typeof image === "string" ? image : image?.contentUrl || image?.url)),
     details: [product.name, product.description, typeof product.brand === "object" ? product.brand?.name : product.brand,
@@ -208,7 +214,7 @@ export function extractWebsiteProduct(html, pageUrl) {
     .flatMap(({ images }) => images).filter(image => !structuredImages.includes(image)));
   // Bound each source separately so a full structured-image list cannot crowd
   // out social fallbacks when those preferred images fail to load or decode.
-  const socialImages = imageCandidates([meta.get("og:image"), meta.get("twitter:image"), meta.get("twitter:image:src")]);
+  const socialImages = [...socialImageMeta.values()].flatMap(imageCandidates);
   const imageUrls = [...new Set([...structuredImages, ...duplicateImages, ...socialImages])];
   if (!imageUrls.length) throw fail(`No product photo was found on this page. ${fallback}`);
   const name = plain(product.name || meta.get("og:title") || meta.get("twitter:title") || title, 120);
