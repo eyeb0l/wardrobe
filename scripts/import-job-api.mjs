@@ -426,6 +426,7 @@ export function wardrobeImportApi(options = {}) {
       const analysis = await openAIAnalyze({ beforePaidCall: options.beforePaidCall,
         timeoutMs: Math.min(timeoutMs ?? 210_000, 210_000), key, baseUrl: apiBaseUrl(),
         model: RETRY_VISION_MODEL, effort: RETRY_VISION_EFFORT, image, mime: "image/png", websiteSource: job.websiteSource });
+      if (job.websiteSource && analysis.items.length > 1) throw Object.assign(new Error("The product could not be distinguished from other clothes in the photo. Upload a clearer product photo instead."), { status: 422 });
       const canUseOriginal = await recommendOriginal(image, analysis);
       const candidates = [];
       const dimensions = analysis.items.length ? await sharp(image).metadata() : null;

@@ -161,6 +161,44 @@ test("website imports carry product metadata through crop, cutout and modeled ap
   assert.deepEqual(h.requests.filter(r => r.type === "edit").map(r => r.images.length), [1, 2]);
 });
 
+test("website detection retries reject multiple products without changing the crop or provenance", async t => {
+  const image = await productImage();
+  const h = await harness(t, {}, undefined, { fetchWebsiteResource: async (url, { kind }) => ({
+    url, bytes: kind === "image" ? image : Buffer.from('<meta property="og:title" content="Blue dress"><meta property="og:image" content="/dress.png">'),
+  }) });
+  h.setAnalysis([dress]);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/dress" });
+  const base = `/api/import/jobs/${job.id}`;
+  const initialCrop = await h.request("GET", job.stages.crop.assetUrl);
+  const requestId = "00000000-0000-4000-8000-000000000030";
+  h.setAnalysis([dress, { ...dress, name: "Other garment", part: "accessories_up" }]);
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 422);
+  await h.restart();
+  const failed = await h.request("GET", base);
+  assert.equal(failed.detectionRetry, undefined);
+  assert.equal(failed.detectionRetryAttempt.status, "failed");
+  assert.deepEqual(failed.metadata, job.metadata);
+  assert.deepEqual(failed.stages, job.stages);
+  assert.deepEqual(failed.websiteSource, job.websiteSource);
+  assert.deepEqual(await h.request("GET", job.stages.crop.assetUrl), initialCrop);
+  assert.equal((await fileSystem.readdir(path.join(h.root, "data", "jobs", job.id))).some(file => file.startsWith("detection-")), false);
+  await h.request("POST", `${base}/detection/accept`, { retryId: requestId, candidateId: "missing" }, 409);
+  await h.request("POST", `${base}/detection/retry`, { requestId }, 409);
+  assert.equal(h.requests.length, 2, "failed request remains spent across restart");
+  h.setAnalysis([dress]);
+  const review = await h.request("POST", `${base}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000031" });
+  assert.equal(review.detectionRetry.candidates.length, 1, "a fresh single-product retry still succeeds");
+  assert.deepEqual(review.websiteSource, job.websiteSource);
+});
+
+test("photo detection retries still allow multiple candidates", async t => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  h.setAnalysis([dress, { ...dress, name: "Other garment", part: "accessories_up" }]);
+  const review = await h.request("POST", `/api/import/jobs/${job.id}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000032" });
+  assert.equal(review.detectionRetry.candidates.length, 2);
+});
+
 test("website failures and ambiguous input create no jobs and spend no model credits", async (t) => {
   let downloads = 0;
   const h = await harness(t, {}, undefined, { fetchWebsiteResource: async () => { downloads++; throw Object.assign(new Error("Retailer blocked access. Upload a product photo instead."), { status: 422 }); } });
