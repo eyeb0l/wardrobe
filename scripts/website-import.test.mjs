@@ -33,6 +33,73 @@ test("prefers product data over site social tags and refuses ambiguous collectio
   assert.throws(() => extractWebsiteProduct(ld({ ...product, image: "data:image/png;base64,AAAA" }), url), /No product photo/);
 });
 
+test("duplicate product blocks and same-page variants do not make a page ambiguous", () => {
+  for (const records of [
+    [product, { ...product }],
+    [product, { ...product, image: "/alternate.png", description: "Another view of the same product" }],
+    [{ ...product, sku: undefined }, { ...product, sku: undefined }],
+    [{ ...product, url }, { ...product, url, sku: "SKU-2", color: "Cream" }],
+    [{ ...product, url: "/products/shirt#blue" }, { ...product, "@id": `${url}#cream`, sku: "SKU-2", color: "Cream" }],
+  ]) {
+    const result = extractWebsiteProduct(records.map(ld).join(""), url);
+    assert.equal(result.source.sku, records[0].sku || "");
+    assert.equal(result.source.color, "Blue");
+    assert.equal(result.imageUrls[0], "https://shop.example/shirt.png");
+  }
+});
+
+test("URL-less variants with a shared product group retain one consistent primary record", () => {
+  for (const group of [{ productGroupID: "shirt" }, { isVariantOf: { "@id": `${url}#group` } }]) {
+    const result = extractWebsiteProduct(ld([
+      { ...product, ...group },
+      { ...product, ...group, color: "Cream", sku: "SKU-2", image: "/cream.png" },
+    ]), url);
+    assert.equal(result.source.color, "Blue");
+    assert.equal(result.source.sku, "SKU-1");
+    assert.deepEqual(result.imageUrls, ["https://shop.example/shirt.png"]);
+  }
+});
+
+test("repeated matching primary records take precedence over recommendations; distinct products still fail", () => {
+  const result = extractWebsiteProduct(ld([
+    { ...product, name: "Recommended", url: "/recommended" },
+    { ...product, url }, { ...product, url },
+  ]), url);
+  assert.equal(result.source.name, product.name);
+  for (const records of [
+    [{ ...product, url: "/one" }, { ...product, url: "/two" }],
+    [product, { ...product, sku: "DIFFERENT", image: "/different.png" }],
+    [{ ...product, productGroupID: "one" }, { ...product, productGroupID: "two" }],
+  ]) assert.throws(() => extractWebsiteProduct(ld(records), url), /several products/);
+});
+
+test("structured image candidates cannot crowd out deduplicated social fallbacks", () => {
+  const html = `<meta property="og:image" content="/social.png"><meta name="twitter:image" content="/social.png"><meta name="twitter:image:src" content="/twitter.png">`;
+  assert.deepEqual(extractWebsiteProduct(html + ld({ ...product, image: ["/one.png", "/two.png", "/three.png", "/four.png"] }), url).imageUrls,
+    ["https://shop.example/one.png", "https://shop.example/two.png", "https://shop.example/three.png", "https://shop.example/social.png", "https://shop.example/twitter.png"]);
+  for (const image of ["data:image/png;base64,AAAA", { unsupported: true }, 42]) {
+    assert.deepEqual(extractWebsiteProduct(html + ld({ ...product, image }), url).imageUrls,
+      ["https://shop.example/social.png", "https://shop.example/twitter.png"]);
+  }
+});
+
+test("import falls back to social images after private, unavailable and undecodable structured images", async () => {
+  const png = await sharp({ create: { width: 80, height: 120, channels: 4, background: "#333333" } }).png().toBuffer();
+  const html = ld({ ...product, image: ["http://127.0.0.1/private.png", "/missing.png", "/corrupt.png"] })
+    + '<meta property="og:image" content="/social.png"><meta name="twitter:image" content="/twitter.png">';
+  const calls = [];
+  const result = await importWebsiteProduct(url, { fetchResource: async (value, options) => {
+    if (options.kind === "page") return { url: value, bytes: Buffer.from(html) };
+    calls.push(value);
+    if (value.startsWith("http://127.")) return fetchWebsiteResource(value, { ...options, request() { assert.fail("Private addresses must not be fetched"); } });
+    if (value.endsWith("missing.png") || value.endsWith("social.png")) throw new Error("Unavailable");
+    return { url: value, bytes: value.endsWith("corrupt.png") ? Buffer.from("invalid image") : png };
+  } });
+  assert.deepEqual(calls, ["http://127.0.0.1/private.png", "https://shop.example/missing.png", "https://shop.example/corrupt.png", "https://shop.example/social.png", "https://shop.example/twitter.png"]);
+  assert.equal(result.source.imageUrl, "https://shop.example/twitter.png");
+  assert.equal(result.source.name, product.name);
+});
+
 test("rejects unsafe URLs and non-public IP address forms", async () => {
   for (const value of [null, 1, "no url", "file:///etc/passwd", "ftp://shop.example/a", "https://user:pass@shop.example", "https://shop.example:8443"]) assert.throws(() => websiteUrl(value));
   for (const address of ["127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.100.100.100", "0.0.0.0", "224.0.0.1", "::1", "::", "fc00::1", "fe80::1", "::ffff:127.0.0.1", "2001:db8::1", "2002:7f00:1::", "64:ff9b::7f00:1"]) assert.equal(isPublicAddress(address), false, address);

@@ -98,6 +98,30 @@ function plain(value, max = 500) {
   return text.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+function productPage(product, pageUrl) {
+  const value = product.url || product["@id"];
+  if (typeof value !== "string" || !value.trim()) return null;
+  try { return websiteUrl(value, pageUrl).href; } catch { return null; }
+}
+
+function productIdentity(product, pageUrl) {
+  const page = productPage(product, pageUrl);
+  if (page) return `page:${page}`;
+  const group = product.productGroupID || product.isVariantOf?.productGroupID || product.isVariantOf?.["@id"] || product.isVariantOf?.url
+    || (typeof product.isVariantOf === "string" ? product.isVariantOf : "");
+  if (typeof group === "string" && group.trim()) return `group:${group.trim()}`;
+  // Without a shared page/group, require matching identifying details. Names
+  // alone can describe unrelated products on a collection page.
+  const name = plain(product.name);
+  const brand = plain(typeof product.brand === "object" ? product.brand?.name : product.brand);
+  const identifier = plain(product.productID || product.sku || product.mpn);
+  if (identifier) return `item:${JSON.stringify([name, brand, identifier])}`;
+  return JSON.stringify([
+    name, brand,
+    plain(product.color), plain(product.material), plain(product.description, 2000), product.image,
+  ]);
+}
+
 export function extractWebsiteProduct(html, pageUrl) {
   const meta = new Map();
   const documents = [];
@@ -133,16 +157,18 @@ export function extractWebsiteProduct(html, pageUrl) {
       if (value && typeof value === "object") queue.push(value);
     }
   }
-  const matching = products.filter(product => {
-    try { return websiteUrl(product.url || product["@id"], pageUrl).href === pageUrl; } catch { return false; }
-  });
-  if (products.length > 1 && matching.length !== 1) throw fail(`This page lists several products. Open an individual product page. ${fallback}`);
+  const matching = products.filter(product => productPage(product, pageUrl) === pageUrl);
+  const identities = new Set(products.map(product => productIdentity(product, pageUrl)));
+  if (!matching.length && identities.size > 1) throw fail(`This page lists several products. Open an individual product page. ${fallback}`);
   const product = matching[0] || products[0] || {};
-  const images = [product.image].flat().map(image => typeof image === "string" ? image : image?.contentUrl || image?.url);
-  if (!images.some(Boolean)) images.push(meta.get("og:image"), meta.get("twitter:image"), meta.get("twitter:image:src"));
-  const imageUrls = [...new Set(images.filter(Boolean).flatMap(value => {
+  const imageCandidates = values => [...new Set(values.filter(Boolean).flatMap(value => {
     try { return [websiteUrl(value, pageUrl).href]; } catch { return []; }
   }))].slice(0, 3);
+  // Bound each source separately so a full structured-image list cannot crowd
+  // out social fallbacks when those preferred images fail to load or decode.
+  const structuredImages = imageCandidates([product.image].flat().map(image => typeof image === "string" ? image : image?.contentUrl || image?.url));
+  const socialImages = imageCandidates([meta.get("og:image"), meta.get("twitter:image"), meta.get("twitter:image:src")]);
+  const imageUrls = [...new Set([...structuredImages, ...socialImages])];
   if (!imageUrls.length) throw fail(`No product photo was found on this page. ${fallback}`);
   const name = plain(product.name || meta.get("og:title") || meta.get("twitter:title") || title, 120);
   if (!name) throw fail(`No product details were found on this page. ${fallback}`);
