@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from './storage-fs.mjs';
 import { atomicJson } from './outfit-storage.mjs';
+import { compareWardrobeItems, resetOrderOnCategoryChange } from '../shared/wardrobe-order.mjs';
 
 const locks = new Map();
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -64,9 +65,29 @@ export function saveLibraryEdit(file, id, payload) {
   return withLibraryLock(file, async () => {
     const records = await readLibrary(file);
     const item = checkedItem(records, id, revision);
-    const updated = { ...item, ...edit, _editVersion: randomUUID() };
+    const updated = resetOrderOnCategoryChange(item, { ...item, ...edit, _editVersion: randomUUID() });
     await atomicJson(file, records.map(value => value === item ? updated : value));
     return publicLibraryItem(updated);
+  });
+}
+
+export function reorderLibrary(file, payload) {
+  const validIds = ids => Array.isArray(ids) && ids.length > 0 && ids.length <= 10000
+    && ids.every(id => typeof id === 'string') && new Set(ids).size === ids.length;
+  if (!object(payload) || !parts.has(payload.part) || !validIds(payload.ids) || !validIds(payload.expectedIds)
+    || payload.ids.length !== payload.expectedIds.length) throw fail('Invalid wardrobe order.');
+  const expected = new Set(payload.expectedIds);
+  if (payload.ids.some(id => !expected.has(id))) throw fail('Invalid wardrobe order.');
+  return withLibraryLock(file, async () => {
+    const records = await readLibrary(file);
+    const current = records.filter(item => !item.hidden && item.part === payload.part).sort(compareWardrobeItems);
+    if (current.length !== payload.expectedIds.length || current.some((item, index) => item.id !== payload.expectedIds[index])) {
+      throw fail('This category changed on another device. Refresh the wardrobe and try again.', 409);
+    }
+    const positions = new Map(payload.ids.map((id, index) => [id, index]));
+    const next = records.map(item => positions.has(item.id) ? { ...item, sortOrder: positions.get(item.id) } : item);
+    await atomicJson(file, next);
+    return next.filter(item => !item.hidden).map(publicLibraryItem);
   });
 }
 
@@ -100,7 +121,7 @@ export function migrateLibraryEdits(file, payload) {
       // records are never recreated, making migration safe to retry.
       if (item._editVersion) { skipped.push(item.id); return item; }
       migrated.push(item.id);
-      return { ...item, ...(validated.get(item.id) || {}), hidden: hidden.has(item.id) || item.hidden === true, _editVersion: randomUUID() };
+      return resetOrderOnCategoryChange(item, { ...item, ...(validated.get(item.id) || {}), hidden: hidden.has(item.id) || item.hidden === true, _editVersion: randomUUID() });
     });
     if (migrated.length) await atomicJson(file, next);
     return { migrated, skipped };

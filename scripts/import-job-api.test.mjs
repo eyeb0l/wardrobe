@@ -1018,3 +1018,25 @@ test('preflight never returns judgments for a crop replaced during inference', a
   assert.match(result.error, /changed/);
   assert.equal((await h.request('GET', `/api/import/jobs/${job.id}`)).stages.crop.status, 'review');
 });
+
+for (const part of ['upperbody', 'dresses']) {
+  test(`import republication handles saved positions when the final category is ${part}`, async t => {
+    const h = await harness(t);
+    const { jobs: [job] } = await h.request('POST', '/api/import/jobs', { imageBase64: h.source.toString('base64') });
+    await h.request('POST', `/api/import/jobs/${job.id}/stages/crop/approve`);
+    await h.waitForStage(job.id, 'garment');
+    await h.request('POST', `/api/import/jobs/${job.id}/stages/garment/approve`);
+    await h.waitForStage(job.id, 'modeled');
+    const library = path.join(h.root, 'data', 'library.json');
+    const [existing] = JSON.parse(await readFile(library, 'utf8'));
+    await writeFile(library, JSON.stringify([{ ...existing, sortOrder: 0, custom: 'retained' }]));
+    await h.request('PATCH', `/api/import/jobs/${job.id}/metadata`, { metadata: { part } });
+    const approved = await h.request('POST', `/api/import/jobs/${job.id}/stages/modeled/approve`);
+    const [saved] = JSON.parse(await readFile(library, 'utf8'));
+    assert.equal(saved.part, part);
+    assert.equal(Object.hasOwn(saved, 'sortOrder'), part === existing.part);
+    assert.equal(approved.libraryItem.sortOrder, part === existing.part ? 0 : undefined);
+    assert.equal(saved.custom, 'retained');
+    assert.equal(saved.image, existing.image);
+  });
+}

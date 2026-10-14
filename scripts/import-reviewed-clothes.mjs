@@ -9,6 +9,7 @@ import { acquireOutfitStoreLock } from './outfit-store-lock.mjs';
 import { atomicJson, publishImage } from './outfit-storage.mjs';
 import { withStorage } from './storage-fs.mjs';
 import { skillStorage, parseSkillArgs } from './skill-storage.mjs';
+import { resetOrderOnCategoryChange } from '../shared/wardrobe-order.mjs';
 
 const PARTS = new Set(["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -125,11 +126,11 @@ export async function importReviewedClothes({ items, modeled, manifest, selected
       const referenceId = item.modelReferenceId || existing.modelReferenceId || 'default';
       if (target === 'cloud' && item.modeledBytes) await store.stat(path.join(dataDir, referenceId === 'default' ? 'model-reference.png' : `${referenceId}.png`));
       const image = `/api/import/library/${item.assetName}`;
-      const record = { ...existing, id: item.id, name: item.name, part: item.part, color: item.color,
+      const record = resetOrderOnCategoryChange(existing, { ...existing, id: item.id, name: item.name, part: item.part, color: item.color,
         secondaryColor: item.secondaryColor, palette: [item.color, item.secondaryColor].filter(Boolean), tags: item.tags,
         image, thumbnail: image, modeledImage: item.modeledAssetName ? `/api/import/library/${item.modeledAssetName}` : existing.modeledImage || null,
         importJobId: existing.importJobId || item.uuid,
-        ...(item.modeledBytes ? { modelReferenceId: referenceId, modeledSetting: item.modeledSetting || null } : {}) };
+        ...(item.modeledBytes ? { modelReferenceId: referenceId, modeledSetting: item.modeledSetting || null } : {}) });
       if (index < 0) next.push(record); else next[index] = record;
     }
     if (!dryRun) {

@@ -930,3 +930,18 @@ button { font: inherit; }
   .viewer-actions .action-spacer { display: none; }
   .viewer-actions .delete-button { margin-right: auto; }
 }
+
+.reorder-help, .reorder-feedback { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 14px 0 0; }
+.reorder-feedback:empty { display: none; }
+.reorder-feedback.error { color: var(--accent); }
+.reorder-item { min-width: 0; border: 1px solid var(--line); }
+.reorder-grip { touch-action: none; cursor: grab; user-select: none; }
+.reorder-grip .gallery-item { cursor: inherit; }
+.reorder-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.reorder-item.is-dragging { opacity: .55; }
+.reorder-item.is-drop-target { border: 2px solid var(--accent); background: rgba(110, 48, 46, .06); }
+.reorder-controls { display: flex; align-items: center; gap: 4px; padding: 4px; border-top: 1px solid var(--line); }
+.reorder-controls span { flex: 1; min-width: 0; text-align: center; font-size: 12px; overflow-wrap: anywhere; }
+.reorder-controls button { display: grid; place-items: center; flex: 0 0 36px; min-height: 44px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.reorder-controls button:disabled { opacity: .25; cursor: default; }
+.reorder-controls button:focus-visible { outline: 2px solid var(--accent); }
