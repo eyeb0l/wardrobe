@@ -21,7 +21,7 @@ const test = base.extend({
     await page.addInitScript(() => localStorage.setItem('wardrobe:welcome:v1', 'complete'));
     await page.route('**/api/**', async route => {
       const path = new URL(route.request().url()).pathname;
-      if (path === '/api/import/wardrobe') return route.fulfill({ json: state.items });
+      if (path === '/api/import/wardrobe') return state.readHandler ? state.readHandler(route) : route.fulfill({ json: state.items });
       if (path === '/api/import/jobs') return route.fulfill({ json: [] });
       if (path === '/api/import/config') return route.fulfill({ json: { ready: true, hasApiKey: true, hasModelReference: true, modelReferences: [] } });
       if (path === '/api/import/wardrobe/reorder') {
@@ -95,6 +95,48 @@ test('failed saves keep the previous order and allow retry', async ({ page, ward
   await expect.poll(() => order(page)).toEqual(['b', 'a', 'c', 'd', 'e']);
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
+
+for (const backgroundRefresh of [false, true]) {
+  test(`conflict waits for fresh state before retry (background refresh: ${backgroundRefresh})`, async ({ page, wardrobe }) => {
+    await page.getByRole('button', { name: 'Rearrange', exact: true }).click();
+    const pendingReads = [];
+    wardrobe.readHandler = route => new Promise(resolve => {
+      const snapshot = structuredClone(wardrobe.items);
+      pendingReads.push(async () => { await route.fulfill({ json: snapshot }); resolve(); });
+    });
+    if (backgroundRefresh) {
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect.poll(() => pendingReads.length).toBe(1);
+    }
+    // Another device reordered the tops after this client's last accepted read.
+    const remoteIds = ['c', 'a', 'b'];
+    wardrobe.items = wardrobe.items.map(item => remoteIds.includes(item.id) ? { ...item, sortOrder: remoteIds.indexOf(item.id) } : item);
+    wardrobe.fail = true;
+    await page.getByRole('button', { name: 'Move Blue top later', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('changed on another device');
+    const retry = page.getByRole('button', { name: 'Move Blue top later', exact: true });
+    await expect(retry).toBeDisabled();
+    if (backgroundRefresh) await pendingReads[0]();
+    await expect.poll(() => pendingReads.length).toBe(backgroundRefresh ? 2 : 1);
+    expect(await order(page)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    await expect(retry).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Done', exact: true })).toBeDisabled();
+    // Neither a button nor a keyboard move may invalidate the recovery read.
+    await retry.dispatchEvent('click');
+    await page.getByRole('button', { name: 'Rearrange Blue top', exact: true }).press('ArrowRight');
+    expect(wardrobe.moves).toHaveLength(1);
+    wardrobe.fail = false;
+    wardrobe.readHandler = null;
+    await pendingReads.at(-1)();
+    await expect.poll(() => order(page)).toEqual(['c', 'a', 'b', 'd', 'e']);
+    await expect(retry).toBeEnabled();
+    await retry.click();
+    await expect.poll(() => wardrobe.moves.length).toBe(2);
+    expect(wardrobe.moves[1].expectedIds).toEqual(remoteIds);
+    await expect.poll(() => order(page)).toEqual(['c', 'b', 'a', 'd', 'e']);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  });
+}
 
 test('direct pointer dragging supports touch and canceling a move', async ({ page, wardrobe, isMobile }) => {
   await page.getByRole('button', { name: 'Rearrange', exact: true }).click();

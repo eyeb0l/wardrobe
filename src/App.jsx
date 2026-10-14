@@ -535,7 +535,7 @@ export function App() {
   const [drag, setDrag] = useState(null);
   const requestVersion = useRef(0);
   const mutating = useRef(false);
-  const refreshing = useRef(false);
+  const refreshing = useRef(null);
 
   useEffect(() => { if (route === "/shopping") setShoppingOpened(true); }, [route]);
   useEffect(() => { if (route === "/outfits") setOutfitsOpened(true); }, [route]);
@@ -555,20 +555,27 @@ export function App() {
     window.scrollTo(0, 0);
   };
 
-  const refreshWardrobe = useCallback(async () => {
-    if (mutating.current || refreshing.current) return;
-    refreshing.current = true;
+  const refreshWardrobe = useCallback(async ({ force = false } = {}) => {
+    // A mutation invalidates an older read. Wait for it, then start a new read
+    // even while the mutation keeps its controls locked for recovery.
+    if (force) await refreshing.current;
+    else if (mutating.current || refreshing.current) return;
     const version = ++requestVersion.current;
-    try {
-      let migrationError = "";
-      try { setSyncNotice(await migrateBrowserEdits(window.localStorage)); }
-      catch (error) { migrationError = error.message; }
-      const loaded = await wardrobeRequest("/api/import/wardrobe");
-      if (version !== requestVersion.current) return;
-      setItems(loaded);
-      setError(migrationError);
-    } catch (error) { if (version === requestVersion.current) setError(error.message); }
-    finally { refreshing.current = false; setLoading(false); }
+    const refresh = (async () => {
+      try {
+        let migrationError = "";
+        try { setSyncNotice(await migrateBrowserEdits(window.localStorage)); }
+        catch (error) { migrationError = error.message; }
+        const loaded = await wardrobeRequest("/api/import/wardrobe");
+        if (version !== requestVersion.current) return;
+        setItems(loaded);
+        setError(migrationError);
+      } catch (error) { if (version === requestVersion.current) setError(error.message); }
+      finally { setLoading(false); }
+    })();
+    refreshing.current = refresh;
+    try { await refresh; }
+    finally { if (refreshing.current === refresh) refreshing.current = null; }
   }, []);
 
   useEffect(() => {
@@ -600,7 +607,10 @@ export function App() {
       setItems(saved);
       setOrderNotice(`${items.find(item => item.id === id)?.name || "Piece"} moved to position ${move.ids.indexOf(id) + 1} in ${TYPE_MAP[move.part]?.label.toLowerCase()}. Order saved.`);
     } catch (error) { setOrderError(error.message); }
-    finally { mutating.current = false; setOrderSaving(false); refreshWardrobe(); }
+    finally {
+      try { await refreshWardrobe({ force: true }); }
+      finally { mutating.current = false; setOrderSaving(false); }
+    }
   };
 
   const chooseType = (typeId) => {
