@@ -165,3 +165,37 @@ test('snapshot reuse rejects escaping cache symlinks and detects replacement eve
   await assert.rejects(snapshotForSkill({...h.selected,store:unstable,out:h.root+'/unstable',reuse:h.root+'/safe'}),/changed during snapshot/);
   await assert.rejects(fs.stat(h.root+'/unstable/snapshot.json'),{code:'ENOENT'});
 });
+
+for (const target of ['local', 'cloud']) {
+  test(`${target} reviewed reimports clear saved positions only when the category changes`, async t => {
+    const h = await setup(t);
+    const selected = target === 'cloud' ? h.selected : await skillStorage({ target, repo: h.root, dataDir: h.root + '/ranked-data' });
+    const options = { ...h.options, selected };
+    const library = path.join(selected.dataDir, 'library.json');
+    const readRecords = async () => JSON.parse(await selected.store.readFile(library, 'utf8'));
+    const saved = await importReviewedClothes(options);
+    const id = saved.items[0].id;
+    const records = (await readRecords()).map(item => item.id === id ? { ...item, sortOrder: 0, custom: 'retained' } : item);
+    const destination = { id: 'destination', part: 'dresses', sortOrder: 0 };
+    records.push(destination);
+    const write = () => selected.store.writeFile(library, JSON.stringify(records));
+    if (target === 'cloud') await selected.store.withLease(write); else await write();
+    const original = records.find(item => item.id === id);
+    await importReviewedClothes(options);
+    assert.deepEqual((await readRecords()).find(item => item.id === id), original, 'same-category rerun keeps order and unknown metadata');
+    await fs.writeFile(h.manifest, JSON.stringify({ items: [{ ...h.item, part: 'dresses' }] }));
+    await importReviewedClothes({ ...options, dryRun: true });
+    assert.deepEqual(await readRecords(), records, 'dry run never clears the live position');
+    await importReviewedClothes(options);
+    const updated = await readRecords();
+    const item = updated.find(item => item.id === id);
+    assert.equal(Object.hasOwn(item, 'sortOrder'), false);
+    assert.equal(item.part, 'dresses');
+    assert.equal(item.custom, original.custom);
+    assert.equal(item.image, original.image);
+    assert.equal(item.modeledImage, original.modeledImage);
+    assert.deepEqual(updated.find(item => item.id === destination.id), destination);
+    const { compareWardrobeItems } = await import('../shared/wardrobe-order.mjs');
+    assert.deepEqual(updated.filter(item => item.part === 'dresses').sort(compareWardrobeItems).map(item => item.id), ['destination', id]);
+  });
+}

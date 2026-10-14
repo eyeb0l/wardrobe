@@ -1,5 +1,13 @@
 const categories = ['upperbody', 'dresses', 'wholebody_up', 'lowerbody', 'accessories_up', 'shoes'];
 
+// Saved positions belong to a category. Apply this after resolving all metadata
+// overrides so unchanged categories retain their order across every writer.
+export function resetOrderOnCategoryChange(previous, next) {
+  if (!previous || previous.part === next.part) return next;
+  const { sortOrder, ...record } = next;
+  return record;
+}
+
 export function compareWardrobeItems(a, b) {
   const category = part => categories.includes(part) ? categories.indexOf(part) : categories.length;
   const group = category(a.part) - category(b.part) || (a.part === b.part ? 0 : String(a.part).localeCompare(String(b.part)));

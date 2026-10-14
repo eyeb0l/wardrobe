@@ -6,6 +6,7 @@ import { CHROMA_CLEANUP_RECIPE } from "../shared/chroma-cleanup.mjs";
 import { inspectProductBackground, applyProductMask } from "./product-cutout.mjs";
 import { generationAttempt, garmentTelemetry, manualTelemetry } from "./generation-telemetry.mjs";
 import { readLibrary, withLibraryLock, publicLibraryItem, saveLibraryEdit, deleteLibraryItem, migrateLibraryEdits, reorderLibrary, editableFields } from './wardrobe-library.mjs';
+import { resetOrderOnCategoryChange } from '../shared/wardrobe-order.mjs';
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile, containedFiles } from "./storage-fs.mjs";
 import { decisionsConfig, hashEvidence } from "./decisions.mjs";
@@ -511,9 +512,10 @@ export function wardrobeImportApi(options = {}) {
       record._editVersion = existing._editVersion;
       record.hidden = existing.hidden;
     }
-    const next = [...records.filter((item) => item.id !== id), record];
+    const updated = resetOrderOnCategoryChange(existing, record);
+    const next = [...records.filter((item) => item.id !== id), updated];
     await atomicJson(importedFile, next);
-    return publicLibraryItem(record);
+    return publicLibraryItem(updated);
   }
 
   function telemetryContext(job, stageName) {

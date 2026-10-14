@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from './storage-fs.mjs';
 import { atomicJson } from './outfit-storage.mjs';
-import { compareWardrobeItems } from '../shared/wardrobe-order.mjs';
+import { compareWardrobeItems, resetOrderOnCategoryChange } from '../shared/wardrobe-order.mjs';
 
 const locks = new Map();
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -65,8 +65,7 @@ export function saveLibraryEdit(file, id, payload) {
   return withLibraryLock(file, async () => {
     const records = await readLibrary(file);
     const item = checkedItem(records, id, revision);
-    const updated = { ...item, ...edit, _editVersion: randomUUID() };
-    if (edit.part && edit.part !== item.part) delete updated.sortOrder;
+    const updated = resetOrderOnCategoryChange(item, { ...item, ...edit, _editVersion: randomUUID() });
     await atomicJson(file, records.map(value => value === item ? updated : value));
     return publicLibraryItem(updated);
   });
@@ -122,7 +121,7 @@ export function migrateLibraryEdits(file, payload) {
       // records are never recreated, making migration safe to retry.
       if (item._editVersion) { skipped.push(item.id); return item; }
       migrated.push(item.id);
-      return { ...item, ...(validated.get(item.id) || {}), hidden: hidden.has(item.id) || item.hidden === true, _editVersion: randomUUID() };
+      return resetOrderOnCategoryChange(item, { ...item, ...(validated.get(item.id) || {}), hidden: hidden.has(item.id) || item.hidden === true, _editVersion: randomUUID() });
     });
     if (migrated.length) await atomicJson(file, next);
     return { migrated, skipped };

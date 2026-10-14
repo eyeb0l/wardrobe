@@ -141,3 +141,21 @@ test('new unranked pieces follow saved positions; moves cannot cross category bo
   assert.equal(moveWithinCategory(items, 'dress', 'top'), null);
   assert.deepEqual(moveWithinCategory(items, 'new', 'top'), { part: 'upperbody', expectedIds: ['top', 'new'], ids: ['new', 'top'] });
 });
+
+test('legacy category migration clears saved positions while same-category edits preserve them', async t => {
+  const h = await fixture(t);
+  const file = path.join(h.data, 'library.json');
+  await writeFile(file, JSON.stringify(h.originals.map(item => ({ ...item, sortOrder: 0 }))));
+  const result = await h.request('POST', '/api/import/wardrobe/migrate-edits', { edits: {
+    'outside-1': { part: 'shoes' }, 'outside-2': { part: 'shoes', name: 'Renamed shoes' },
+  } });
+  assert.equal(result.status, 200);
+  const records = JSON.parse(await readFile(file, 'utf8'));
+  assert.equal(Object.hasOwn(records[0], 'sortOrder'), false);
+  assert.equal(records[0].part, 'shoes');
+  assert.deepEqual(records[0].custom, h.originals[0].custom);
+  assert.equal(records[0].image, h.originals[0].image);
+  assert.equal(records[1].sortOrder, 0);
+  const { compareWardrobeItems } = await import('../shared/wardrobe-order.mjs');
+  assert.deepEqual([...records].sort(compareWardrobeItems).map(item => item.id), ['outside-2', 'outside-1']);
+});
