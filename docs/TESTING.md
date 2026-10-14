@@ -80,6 +80,19 @@ Run just the affected file or viewport when diagnosing a failure:
 npm run test:browser -- tests/browser/shopping-website.spec.mjs --project=desktop
 ```
 
+The wardrobe reordering suite uses the same setup and both viewports:
+
+```bash
+WARDROBE_BROWSER_PORT=5217 WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-reorder-check npm run test:browser -- tests/browser/wardrobe-reorder.spec.mjs
+```
+
+It checks mouse/touch dragging, touch buttons, keyboard moves, category boundaries,
+filtering, reload persistence, ordinary item viewing and failed-save recovery with
+synthetic API fixtures. The Node suite separately exercises the real reorder route,
+storage persistence, concurrent edits and rejected requests. Screenshots are saved
+as `wardrobe-rearrange.png` and `wardrobe-saved-order.png` beneath the chosen artifact
+directory, alongside `browser-health.json`. Inspect both viewport screenshots.
+
 Each test's artifact directory includes `browser-health.json`. The import and
 assessment test saves `shopping-web-import.png` and `shopping-web-assessment.png`;
 failures also retain a screenshot and trace. List the evidence with:

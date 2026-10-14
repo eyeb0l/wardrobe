@@ -7,6 +7,8 @@ import { SetupFlow } from "./setup-flow.jsx";
 import { uiErrorMessage } from "./ui-error.mjs";
 
 import { wardrobeRequest, migrateBrowserEdits } from "./wardrobe-sync.mjs";
+import { compareWardrobeItems, moveWithinCategory } from "../shared/wardrobe-order.mjs";
+import { ReorderableItem } from "./reorderable-item.jsx";
 
 const OutfitView = lazy(() => import("./outfit-view.jsx").then((module) => ({ default: module.OutfitView })));
 const ShoppingView = lazy(() => import("./shopping-view.jsx").then((module) => ({ default: module.ShoppingView })));
@@ -22,7 +24,6 @@ const TYPES = [
 ];
 
 const TYPE_MAP = Object.fromEntries(TYPES.map((type) => [type.id, type]));
-const TYPE_ORDER = Object.fromEntries(TYPES.slice(1).map((type, index) => [type.id, index]));
 
 
 function rgbToHex(red, green, blue) {
@@ -117,25 +118,27 @@ function sampleImageColor(image, canvas, event) {
   return null;
 }
 
-function GalleryItem({ item, selected, onOpen }) {
+function GalleryItem({ item, selected, onOpen, rearranging }) {
   const type = TYPE_MAP[item.part]?.singular || "wardrobe item";
+  const Tag = rearranging ? "div" : "button";
 
   return (
-    <button
+    <Tag
       className={`gallery-item${selected ? " selected" : ""}`}
-      type="button"
-      onClick={() => onOpen(item.id)}
-      aria-label={`View ${item.name || type}`}
-      aria-pressed={selected}
+      type={rearranging ? undefined : "button"}
+      onClick={rearranging ? undefined : () => onOpen(item.id)}
+      aria-label={rearranging ? undefined : `View ${item.name || type}`}
+      aria-pressed={rearranging ? undefined : selected}
       data-testid={`wardrobe-item-${item.id}`}
     >
       <OptimizedImage
+        draggable={false}
         src={item.thumbnail || item.image}
         alt=""
         sizes="(max-width: 520px) calc(50vw - 16px), (max-width: 860px) calc(33vw - 18px), 180px"
         breakpoints={[120, 180, 240, 320, 480]}
       />
-    </button>
+    </Tag>
   );
 }
 
@@ -525,6 +528,11 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [syncNotice, setSyncNotice] = useState("");
+  const [rearranging, setRearranging] = useState(false);
+  const [orderSaving, setOrderSaving] = useState(false);
+  const [orderError, setOrderError] = useState("");
+  const [orderNotice, setOrderNotice] = useState("");
+  const [drag, setDrag] = useState(null);
   const requestVersion = useRef(0);
   const mutating = useRef(false);
   const refreshing = useRef(false);
@@ -576,14 +584,24 @@ export function App() {
 
   const visibleItems = useMemo(() => {
     const filtered = activeType === "all" ? items : items.filter((item) => item.part === activeType);
-    return [...filtered].sort((a, b) => {
-      if (activeType === "all") {
-        const typeDifference = (TYPE_ORDER[a.part] ?? 99) - (TYPE_ORDER[b.part] ?? 99);
-        if (typeDifference) return typeDifference;
-      }
-      return a.id.localeCompare(b.id);
-    });
+    return [...filtered].sort(compareWardrobeItems);
   }, [activeType, items]);
+
+  const reorderItem = async (id, targetId) => {
+    if (mutating.current) return;
+    const move = moveWithinCategory(items, id, targetId);
+    if (!move) return;
+    mutating.current = true; ++requestVersion.current;
+    setOrderSaving(true); setOrderError(""); setOrderNotice("");
+    try {
+      const saved = await wardrobeRequest("/api/import/wardrobe/reorder", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(move),
+      });
+      setItems(saved);
+      setOrderNotice(`${items.find(item => item.id === id)?.name || "Piece"} moved to position ${move.ids.indexOf(id) + 1} in ${TYPE_MAP[move.part]?.label.toLowerCase()}. Order saved.`);
+    } catch (error) { setOrderError(error.message); }
+    finally { mutating.current = false; setOrderSaving(false); refreshWardrobe(); }
+  };
 
   const chooseType = (typeId) => {
     setActiveType(typeId);
@@ -651,6 +669,7 @@ export function App() {
         <header className="gallery-header">
           <div className="gallery-meta-row">
             <p className="piece-count" role="status">{loading ? "Your wardrobe" : `${visibleItems.length} ${visibleItems.length === 1 ? "piece" : "pieces"}`}</p>
+            {!!items.length && <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>}
           </div>
           <nav className="category-nav" aria-label="Filter wardrobe by item type">
             {TYPES.map((type) => (
@@ -665,6 +684,9 @@ export function App() {
               </button>
             ))}
           </nav>
+          {rearranging && <p className="reorder-help" id="reorder-help">Drag pieces or use the arrows to rearrange within each category. Changes save automatically.</p>}
+          <p className="reorder-feedback" role="status">{orderSaving ? "Saving order…" : orderNotice}</p>
+          {orderError && <p className="reorder-feedback error" role="alert">{uiErrorMessage(orderError)}</p>}
         </header>
 
         {syncNotice && <p className="status" role="status">{syncNotice}</p>}
@@ -676,7 +698,13 @@ export function App() {
 
         {!!items.length && (
           <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>
-            {visibleItems.map((item) => (
+            {visibleItems.map((item, index) => rearranging ? (
+              <ReorderableItem key={item.id} item={item} busy={orderSaving} drag={drag} setDrag={setDrag} onMove={reorderItem}
+                previous={visibleItems[index - 1]?.part === item.part ? visibleItems[index - 1] : null}
+                next={visibleItems[index + 1]?.part === item.part ? visibleItems[index + 1] : null}>
+                <GalleryItem item={item} rearranging />
+              </ReorderableItem>
+            ) : (
               <GalleryItem
                 key={item.id}
                 item={item}

@@ -5,7 +5,7 @@ import { normalizeGeneratedTransparency, NATIVE_TRANSPARENCY_RECIPE } from "./na
 import { CHROMA_CLEANUP_RECIPE } from "../shared/chroma-cleanup.mjs";
 import { inspectProductBackground, applyProductMask } from "./product-cutout.mjs";
 import { generationAttempt, garmentTelemetry, manualTelemetry } from "./generation-telemetry.mjs";
-import { readLibrary, withLibraryLock, publicLibraryItem, saveLibraryEdit, deleteLibraryItem, migrateLibraryEdits, editableFields } from './wardrobe-library.mjs';
+import { readLibrary, withLibraryLock, publicLibraryItem, saveLibraryEdit, deleteLibraryItem, migrateLibraryEdits, reorderLibrary, editableFields } from './wardrobe-library.mjs';
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile, containedFiles } from "./storage-fs.mjs";
 import { decisionsConfig, hashEvidence } from "./decisions.mjs";
@@ -832,6 +832,9 @@ export function wardrobeImportApi(options = {}) {
       }
       if (url.pathname === "/api/import/wardrobe/migrate-edits" && req.method === "POST") {
         return json(res, 200, await migrateLibraryEdits(importedFile, await body(req, 1024 * 1024, true)));
+      }
+      if (url.pathname === "/api/import/wardrobe/reorder" && req.method === "POST") {
+        return json(res, 200, await reorderLibrary(importedFile, await body(req, 1024 * 1024, true)));
       }
       const wardrobeEditMatch = url.pathname.match(/^\/api\/import\/wardrobe\/([a-z0-9][a-z0-9._-]{0,159})$/i);
       if (wardrobeEditMatch && req.method === "PATCH") {
