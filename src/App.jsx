@@ -530,6 +530,7 @@ export function App() {
   const [syncNotice, setSyncNotice] = useState("");
   const [rearranging, setRearranging] = useState(false);
   const [orderSaving, setOrderSaving] = useState(false);
+  const [orderNeedsRefresh, setOrderNeedsRefresh] = useState(false);
   const [orderError, setOrderError] = useState("");
   const [orderNotice, setOrderNotice] = useState("");
   const [drag, setDrag] = useState(null);
@@ -569,6 +570,7 @@ export function App() {
         const loaded = await wardrobeRequest("/api/import/wardrobe");
         if (version !== requestVersion.current) return;
         setItems(loaded);
+        setOrderNeedsRefresh(false);
         setError(migrationError);
       } catch (error) { if (version === requestVersion.current) setError(error.message); }
       finally { setLoading(false); }
@@ -595,7 +597,7 @@ export function App() {
   }, [activeType, items]);
 
   const reorderItem = async (id, targetId) => {
-    if (mutating.current) return;
+    if (mutating.current || orderNeedsRefresh) return;
     const move = moveWithinCategory(items, id, targetId);
     if (!move) return;
     mutating.current = true; ++requestVersion.current;
@@ -606,11 +608,21 @@ export function App() {
       });
       setItems(saved);
       setOrderNotice(`${items.find(item => item.id === id)?.name || "Piece"} moved to position ${move.ids.indexOf(id) + 1} in ${TYPE_MAP[move.part]?.label.toLowerCase()}. Order saved.`);
-    } catch (error) { setOrderError(error.message); }
+    } catch (error) {
+      setOrderError(error.message);
+      // A failed recovery read must not unlock moves based on stale expectedIds.
+      setOrderNeedsRefresh(true);
+    }
     finally {
       try { await refreshWardrobe({ force: true }); }
       finally { mutating.current = false; setOrderSaving(false); }
     }
+  };
+
+  const retryOrderRefresh = async () => {
+    setOrderSaving(true);
+    try { await refreshWardrobe(); }
+    finally { setOrderSaving(false); }
   };
 
   const chooseType = (typeId) => {
@@ -695,8 +707,12 @@ export function App() {
             ))}
           </nav>
           {rearranging && <p className="reorder-help" id="reorder-help">Drag pieces or use the arrows to rearrange within each category. Changes save automatically.</p>}
-          <p className="reorder-feedback" role="status">{orderSaving ? "Saving order…" : orderNotice}</p>
+          <p className="reorder-feedback" role="status">{orderSaving ? (orderNeedsRefresh ? "Refreshing wardrobe…" : "Saving order…") : orderNotice}</p>
           {orderError && <p className="reorder-feedback error" role="alert">{uiErrorMessage(orderError)}</p>}
+          {orderNeedsRefresh && <div className="reorder-feedback">
+            <p>Refresh your wardrobe before rearranging again.</p>
+            <button className="secondary-button" type="button" disabled={orderSaving} onClick={retryOrderRefresh}>Refresh wardrobe</button>
+          </div>}
         </header>
 
         {syncNotice && <p className="status" role="status">{syncNotice}</p>}
@@ -709,7 +725,7 @@ export function App() {
         {!!items.length && (
           <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>
             {visibleItems.map((item, index) => rearranging ? (
-              <ReorderableItem key={item.id} item={item} busy={orderSaving} drag={drag} setDrag={setDrag} onMove={reorderItem}
+              <ReorderableItem key={item.id} item={item} busy={orderSaving || orderNeedsRefresh} drag={drag} setDrag={setDrag} onMove={reorderItem}
                 previous={visibleItems[index - 1]?.part === item.part ? visibleItems[index - 1] : null}
                 next={visibleItems[index + 1]?.part === item.part ? visibleItems[index + 1] : null}>
                 <GalleryItem item={item} rearranging />

@@ -12,12 +12,14 @@ const fixtures = await Promise.all([
 
 const test = base.extend({
   wardrobe: async ({ page }, use, testInfo) => {
-    const state = { items: structuredClone(fixtures), moves: [], fail: false };
+    const state = { items: structuredClone(fixtures), moves: [], fail: false, allowReadFailure: false };
     const health = { errors: [], failedRequests: [], httpErrors: [] };
     page.on('pageerror', error => health.errors.push(error.message));
-    page.on('console', message => { if (message.type() === 'error' && !message.text().includes('409 (Conflict)')) health.errors.push(message.text()); });
+    page.on('console', message => { if (message.type() === 'error' && !message.text().includes('409 (Conflict)')
+      && !(state.allowReadFailure && message.text() === 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)')) health.errors.push(message.text()); });
     page.on('requestfailed', request => { if (!request.failure()?.errorText.includes('ERR_ABORTED')) health.failedRequests.push(request.url()); });
-    page.on('response', response => { if (response.status() >= 400 && response.status() !== 409) health.httpErrors.push(response.url()); });
+    page.on('response', response => { if (response.status() >= 400 && response.status() !== 409
+      && !(state.allowReadFailure && response.status() === 503 && new URL(response.url()).pathname === '/api/import/wardrobe')) health.httpErrors.push(response.url()); });
     await page.addInitScript(() => localStorage.setItem('wardrobe:welcome:v1', 'complete'));
     await page.route('**/api/**', async route => {
       const path = new URL(route.request().url()).pathname;
@@ -135,6 +137,55 @@ for (const backgroundRefresh of [false, true]) {
     expect(wardrobe.moves[1].expectedIds).toEqual(remoteIds);
     await expect.poll(() => order(page)).toEqual(['c', 'b', 'a', 'd', 'e']);
     await expect(page.getByRole('alert')).toHaveCount(0);
+  });
+}
+
+for (const recovery of ['button', 'focus']) {
+  test(`failed conflict recovery stays locked until a successful ${recovery} refresh`, async ({ page, wardrobe }, testInfo) => {
+    await page.getByRole('button', { name: 'Rearrange', exact: true }).click();
+    const remoteIds = ['c', 'a', 'b'];
+    wardrobe.items = wardrobe.items.map(item => remoteIds.includes(item.id) ? { ...item, sortOrder: remoteIds.indexOf(item.id) } : item);
+    wardrobe.fail = true;
+    wardrobe.allowReadFailure = true;
+    let reads = 0;
+    wardrobe.readHandler = route => {
+      reads++;
+      return route.fulfill({ status: 503, json: { error: 'Wardrobe temporarily unavailable.' } });
+    };
+    const move = page.getByRole('button', { name: 'Move Blue top later', exact: true });
+    await move.click();
+    await expect(page.getByText('Wardrobe temporarily unavailable.', { exact: true })).toBeVisible();
+    await expect(move).toBeDisabled();
+    await move.dispatchEvent('click');
+    await page.getByRole('button', { name: 'Rearrange Blue top', exact: true }).press('ArrowRight');
+    expect(wardrobe.moves).toHaveLength(1);
+    expect(await order(page)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    const refresh = () => recovery === 'button'
+      ? page.getByRole('button', { name: 'Refresh wardrobe', exact: true }).click()
+      : page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    if (recovery === 'button') {
+      const previousReads = reads;
+      await refresh();
+      await expect.poll(() => reads).toBeGreaterThan(previousReads);
+      await expect(page.getByRole('button', { name: 'Refresh wardrobe', exact: true })).toBeEnabled();
+      await expect(move).toBeDisabled();
+      await page.screenshot({ path: testInfo.outputPath('wardrobe-recovery-failed.png'), fullPage: true });
+    }
+    let release;
+    wardrobe.readHandler = route => new Promise(resolve => { release = async () => { await route.fulfill({ json: wardrobe.items }); resolve(); }; });
+    await refresh();
+    await expect.poll(() => typeof release).toBe('function');
+    await expect(move).toBeDisabled();
+    wardrobe.fail = false;
+    await release();
+    wardrobe.readHandler = null;
+    await expect.poll(() => order(page)).toEqual(['c', 'a', 'b', 'd', 'e']);
+    await expect(move).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Refresh wardrobe', exact: true })).toHaveCount(0);
+    await move.click();
+    await expect.poll(() => wardrobe.moves.length).toBe(2);
+    expect(wardrobe.moves[1].expectedIds).toEqual(remoteIds);
+    await expect.poll(() => order(page)).toEqual(['c', 'b', 'a', 'd', 'e']);
   });
 }
 
