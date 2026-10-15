@@ -11,3 +11,5 @@ data/
 .nitro/
 .output/
 /.swc
+/AGENTS.md
+/CLAUDE.md
