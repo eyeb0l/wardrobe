@@ -411,6 +411,8 @@ button { font: inherit; }
 }
 
 .viewer-details.editing { padding-top: 8px; }
+.viewer-style-action { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.viewer-style-action p { margin: 9px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
 .has-modeled-image .viewer-details.editing {
   padding: 12px 34px 46px;

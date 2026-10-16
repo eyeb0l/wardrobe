@@ -109,3 +109,29 @@ In a restricted Codex sandbox, starting Vite can fail with
 `listen EPERM: operation not permitted 127.0.0.1:5198`. Run the same browser-test
 command with the permitted localhost/browser execution approval. This is a
 sandbox permission issue and does not require GUI setup.
+
+## Outfits built around a piece
+
+The focused suite covers Wardrobe → **Style this piece** → Generate outfits on
+both desktop and mobile, including explicit submission, removal, cancellation,
+repeat openings, unsaved edits, exhausted combinations and unavailable pieces.
+It uses synthetic cutouts and a synthetic reference; no paid AI calls are made.
+The Node integration tests separately enforce inclusion, validate availability,
+count unused pairs and check persistence through retries, restarts and approval.
+
+```bash
+node --test scripts/outfit-required-piece.test.mjs
+PLAYWRIGHT_BROWSERS_PATH=/tmp/wardrobe-piece-browsers npx playwright install chromium
+PLAYWRIGHT_BROWSERS_PATH=/tmp/wardrobe-piece-browsers \
+  WARDROBE_BROWSER_PORT=5236 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-piece-browser \
+  npm run test:browser -- tests/browser/outfit-required-piece.spec.mjs
+rg --files /tmp/wardrobe-piece-browser
+```
+
+Use Node 22 and `npm ci` as above. The matching Chromium revision 1248 is now
+also installed at `/tmp/wardrobe-piece-browsers`; omit the install command when
+reusing it. Playwright starts, waits for and stops its isolated Vite server.
+Choose another unused port and unique artifact directory for concurrent tasks.
+The first test saves `style-this-piece.png` and `outfits-with-piece.png` under
+each viewport's artifact directory. Inspect those images and `browser-health.json`.

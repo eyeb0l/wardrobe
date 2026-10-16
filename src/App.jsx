@@ -302,7 +302,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   );
 }
 
-function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
+function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle }) {
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
   const samplingCanvasRef = useRef(null);
@@ -484,6 +484,10 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate }) {
       )}
 
       <fieldset className="viewer-details editing" disabled={saving} style={{ border: 0, minWidth: 0, margin: 0 }}>
+        {["upperbody", "lowerbody", "wholebody_up", "shoes", "accessories_up"].includes(item.part) ? <div className="viewer-style-action">
+          <button className="secondary-button" type="button" disabled={isDirty} title={isDirty ? "Save or discard your changes first" : undefined} onClick={() => onStyle(item)}>Style this piece</button>
+          <p>{isDirty ? "Save or discard your changes to style this piece." : "Create outfits with this piece in every look."}</p>
+        </div> : null}
         <ItemEditor
           draft={draft}
           setDraft={setDraft}
@@ -525,6 +529,7 @@ export function App() {
   const [regenerationRequest, setRegenerationRequest] = useState(null);
   const [activeType, setActiveType] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
+  const [outfitRequest, setOutfitRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [syncNotice, setSyncNotice] = useState("");
@@ -682,7 +687,7 @@ export function App() {
       {(outfitsOpened || route === "/outfits") ? (
         <div hidden={route !== "/outfits"}>
           <Suspense fallback={<p className="status" role="status">Loading Outfits</p>}>
-            <OutfitView items={items} active={route === "/outfits"} />
+            <OutfitView items={items} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
           </Suspense>
         </div>
       ) : null}
@@ -742,7 +747,13 @@ export function App() {
         )}
       </main>
 
-      {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} />}
+      {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} onStyle={(item) => {
+        setOutfitRequest({ garmentId: item.id });
+        setSelectedId(null);
+        window.history.pushState({}, "", "/outfits");
+        setRoute("/outfits");
+        window.scrollTo(0, 0);
+      }} />}
       <WardrobeImportFlow regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} onOpenSetup={() => setSetupRequested(value => value + 1)} />
       </>}
     </div>

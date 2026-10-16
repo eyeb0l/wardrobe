@@ -11,6 +11,7 @@ import { acquireOutfitStoreLock } from "./outfit-store-lock.mjs";
 import { decisionsConfig, hashEvidence } from "./decisions.mjs";
 import { checkDecisionImages, imageCheckConfig } from "./decision-checks.mjs";
 import { decisionUsageLog } from "./decision-usage.mjs";
+import { outfitCombinations } from "../shared/outfit-combinations.mjs";
 
 const API = "/api/outfits";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -420,8 +421,9 @@ export function wardrobeOutfitApi(options = {}) {
     const counts = Object.fromEntries(PARTS.map((part) => [part, [...items.values()].filter((item) => item.part === part).length]));
     const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
     const hasModelReference = refs.length > 0;
-    const availableCombinations = Math.max(0, counts.upperbody * counts.lowerbody - (await usedPairs(items)).size);
-    return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), counts, maxCount: 12, availableCombinations, models: models(), imageChecks: imageCheckConfig("outfit-review", { ...process.env, ...options.env }) };
+    const combinations = outfitCombinations(items, await usedPairs(items));
+    const availableCombinations = combinations.total;
+    return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), counts, maxCount: 12, availableCombinations, garmentCombinations: combinations.byGarment, models: models(), imageChecks: imageCheckConfig("outfit-review", { ...process.env, ...options.env }) };
   }
 
   async function apiRequest(endpoint, init, telemetry, beforeTelemetry) {
@@ -505,7 +507,9 @@ export function wardrobeOutfitApi(options = {}) {
     }
     const used = await usedPairs(items, job.id);
     const values = [...items.values()];
-    const possible = values.filter((item) => item.part === "upperbody").length * values.filter((item) => item.part === "lowerbody").length - used.size;
+    if (job.requiredGarmentId && !items.has(job.requiredGarmentId)) throw fail("The piece you chose is no longer available for outfits. Refresh your wardrobe.", 409);
+    const combinations = outfitCombinations(items, used);
+    const possible = job.requiredGarmentId ? combinations.byGarment[job.requiredGarmentId] : combinations.total;
     if (possible < job.count) throw fail(`Only ${Math.max(0, possible)} distinct top-and-bottom combinations remain. Request a smaller collection.`, 409);
     await resolveReference(job.modelReferenceId);
     const sheets = await outfitContactSheets(values, thumbnails);
@@ -517,6 +521,7 @@ Use exactly one upperbody top and one lowerbody bottom in every outfit, with at 
 Every top-and-bottom pair must differ, including from the excluded pairs below. Optional layers or footwear cannot turn a repeated pair into a new combination. Favor tonal or analogous harmony, use complementary contrast selectively, let one graphic/pattern/texture/saturated piece dominate, and balance fuller bottoms with cleaner tops. Diversify garment usage using the supplied counts. Choose physically plausible layers: inspect actual outer construction. full-front-opening is allowed ONLY if a real full front opening is visually evident; pullover means no opening; use closed-uncertain when unclear and never invent one. Avoid layering if it would completely hide the selected top. Explain the observed outer construction in outerLayerNote (empty for no outer); use none only when no outer is selected.
 Honor the styling direction when feasible. Otherwise balance casual, smart-casual, warm-weather, layered, dark-tonal and statement looks as wardrobe permits. Rotate restrained warm natural real-world settings with a cohesive editorial art direction. Provide concise names, specific reasons, and stable lowercase hyphenated IDs.
 Styling direction: ${JSON.stringify(job.direction || "Balanced everyday mix")}
+${job.requiredGarmentId ? `Required garment ID: ${JSON.stringify(job.requiredGarmentId)}. Include this exact wardrobe piece in EVERY outfit and keep it visibly identifiable. Diversify the other pieces; this requirement takes priority over styling direction and usage balance.` : ""}
 Excluded top-and-bottom pairs: ${JSON.stringify([...used].map((value) => value.split("|")))}
 Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item, label: `ITEM ${index + 1}`, previousUsage: usage[item.id] })))} `;
     const request = { model: models().vision, input: [{ role: "user", content: [{ type: "input_text", text: prompt }, ...sheets.map((sheet) => ({ type: "input_image", image_url: `data:image/png;base64,${sheet.toString("base64")}`, detail: "high" }))] }], text: { format: { type: "json_schema", name: "wardrobe_outfits", strict: true, schema: curationSchema([...items.keys()], job.count) } } };
@@ -530,6 +535,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if (!record || !validId(record.id) || record.id.length > 70 || seenIds.has(record.id)) throw fail("The curation API returned invalid or duplicate outfit IDs. Retry planning.", 502);
       seenIds.add(record.id);
       const ordered = validateSelection(record.garmentIds, items);
+      if (job.requiredGarmentId && !record.garmentIds.includes(job.requiredGarmentId)) throw fail("The curation API omitted your required piece. Retry planning.", 502);
       const key = pairKey(record.garmentIds, items);
       if (used.has(key)) throw fail("The curation API repeated a top-and-bottom combination. Retry planning.", 502);
       used.add(key);
@@ -898,15 +904,18 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         const input = await readBody(req);
         if (!Number.isInteger(input.count) || input.count < 1 || input.count > 12) throw fail("Choose an integer outfit count from 1 to 12.");
         const direction = input.direction === undefined ? "" : shortText(input.direction, "styling direction (maximum 2000 characters)", 2000, false);
+        if (input.requiredGarmentId !== undefined && !validId(input.requiredGarmentId)) throw fail("Choose a valid wardrobe piece to include.");
         const job = await exclusive(async () => {
           const reference = await readyReference(input.modelReferenceId);
           const setup = await configuration();
-          if (input.count > setup.availableCombinations) throw fail(`Only ${setup.availableCombinations} distinct top-and-bottom combinations remain. Choose a smaller count.`, 409);
+          if (input.requiredGarmentId && !Object.hasOwn(setup.garmentCombinations, input.requiredGarmentId)) throw fail("The piece you chose is no longer available for outfits. Refresh your wardrobe.", 409);
+          const available = input.requiredGarmentId ? setup.garmentCombinations[input.requiredGarmentId] : setup.availableCombinations;
+          if (input.count > available) throw fail(`Only ${available} distinct top-and-bottom combinations remain${input.requiredGarmentId ? " with this piece" : ""}. Choose a smaller count.`, 409);
           if ([...jobs.values()].filter((item) => ["planning", "generating"].includes(item.status)).length >= 8) throw fail("Several outfit collections are already queued. Wait for one to finish before adding another.", 429);
           const id = randomUUID();
           // Persist authorization and its task identity together, so recovery can
           // discover this work even if the process stops before scheduling.
-          const job = { version: 1, id, count: input.count, direction, modelReferenceId: reference.id, status: "planning", createdAt: now(), updatedAt: now(), error: null, outfits: [], internal: options.serverless ? { cloudTaskId: randomUUID() } : {} };
+          const job = { version: 1, id, count: input.count, direction, ...(input.requiredGarmentId ? { requiredGarmentId: input.requiredGarmentId } : {}), modelReferenceId: reference.id, status: "planning", createdAt: now(), updatedAt: now(), error: null, outfits: [], internal: options.serverless ? { cloudTaskId: randomUUID() } : {} };
           await mkdir(path.join(jobsDir, id));
           await save(job);
           jobs.set(id, job);
