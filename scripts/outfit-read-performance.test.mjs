@@ -249,3 +249,67 @@ test('job routes and pending-task discovery retain the collection corruption gua
   }
   await assert.rejects(withStorage(h.store, () => plugin.pendingTasks()), { status: 503 });
 });
+
+test('hosted writers and worker steps read only indexed open jobs, independent of completed history', async t => {
+  const h = await harness(t);
+  const scheduled = [];
+  const env = { WARDROBE_DATA_DIR: CLOUD_ROOT, WARDROBE_MODEL_REFERENCE: `${CLOUD_ROOT}/model-reference.png`, OPENAI_API_KEY: 'test-key' };
+  const writable = () => h.store.withLease(() => withStorage(h.store, async () => {
+    const plugin = wardrobeOutfitApi({ serverless: true, env, fetch: () => assert.fail('no provider calls'), scheduleTask: async task => { scheduled.push(task); } });
+    await plugin.configResolved({ root: '/unused' });
+    t.after(() => plugin.closeBundle());
+    return plugin;
+  }));
+  const call = (plugin, method, url, body) => h.store.withLease(() => withStorage(h.store, async () => {
+    let route;
+    plugin.configureServer({ middlewares: { use(handler) { route = handler; } } });
+    const req = Object.assign(Readable.from(body ? [Buffer.from(JSON.stringify(body))] : []), { url, method, headers: body ? { 'content-type': 'application/json' } : {} });
+    const result = {};
+    const res = { statusCode: 200, setHeader() {}, end(value) { result.status = this.statusCode; result.body = JSON.parse(value); } };
+    await route(req, res, () => assert.fail('unhandled route'));
+    return result;
+  }));
+  const index = async () => JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/outfit-jobs/.open-jobs.json`, 'utf8'));
+  const open = h.job(undefined, 'review');
+  await h.writeJob(open);
+  const history = [];
+  const addHistory = async count => { for (let i = 0; i < count; i++) { const job = h.job(); history.push(job.id); await h.writeJob(job); } };
+  const measure = async () => {
+    await writable(); // Directly written history changes the job count, so this rebuilds once.
+    h.reset();
+    const plugin = await writable();
+    const config = await call(plugin, 'GET', `${API}/config`);
+    const queries = h.queries.length;
+    assert.ok(h.queries.every(({ values }) => !values.some(value => typeof value === 'string' && history.some(id => value.includes(id)))), 'completed jobs are never read');
+    return { queries, available: config.body.availableCombinations, plugin };
+  };
+  await addHistory(3);
+  const small = await measure();
+  assert.equal(small.available, 0, 'an unresolved review outfit still reserves its pair');
+  assert.deepEqual((await index()).open, [open.id]);
+  await addHistory(40);
+  const large = await measure();
+  assert.equal(large.queries, small.queries, 'per-request database calls do not grow with history');
+  t.diagnostic(`Hosted writer startup + config database calls with 4 or 44 jobs: ${small.queries}`);
+
+  const outfit = `${API}/jobs/${open.id}/outfits/look-${open.id}`;
+  assert.equal((await call(large.plugin, 'POST', `${outfit}/reject`, {})).status, 200);
+  assert.deepEqual((await index()).open, [], 'a fully resolved job leaves the index after it is saved');
+  assert.equal((await call(await writable(), 'GET', `${API}/config`)).body.availableCombinations, 1);
+  // A closed job is loaded on demand, and reopening indexes it before saving.
+  const retried = await call(await writable(), 'POST', `${outfit}/retry`, {});
+  assert.equal(retried.status, 202, JSON.stringify(retried.body));
+  assert.deepEqual((await index()).open, [open.id]);
+  const plugin = await writable();
+  assert.equal((await call(plugin, 'GET', `${API}/config`)).body.availableCombinations, 0);
+  assert.deepEqual(plugin.pendingTasks(), [scheduled.at(-1)]);
+  assert.equal((await call(plugin, 'GET', `${API}/jobs`)).body.jobs.length, 44, 'history still lists every job');
+
+  // Jobs written without the index (restore, an older release) force a rebuild.
+  const external = { ...h.job(), status: 'planning', outfits: [], internal: { cloudTaskId: randomUUID() } };
+  await h.writeJob(external);
+  assert.ok((await writable()).pendingTasks().some(task => task.jobId === external.id));
+  assert.ok((await index()).open.includes(external.id));
+  await h.store.withLease(() => h.store.writeFile(`${CLOUD_ROOT}/outfit-jobs/.open-jobs.json`, '{broken'));
+  assert.equal((await writable()).pendingTasks().length, 2, 'an unreadable index is rebuilt from every job');
+});

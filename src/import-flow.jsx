@@ -5,8 +5,8 @@ import { OptimizedImage } from "./OptimizedImage.jsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowCounterClockwise, Check, LinkSimple, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { IMAGE_ACCEPT, isImageUpload, prepareUploadImage } from "./image-upload.mjs";
-import { activeImportJobIds } from "./import-polling.mjs";
-import { isDetectionRetryRunning } from "./detection-retry.mjs";
+import { activeImportJobIds, importPollUrls, nextPollDelay, POLL_MIN_MS } from "./import-polling.mjs";
+import { isDetectionRetryRunning } from "../shared/detection-retry.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
 import { ImageCheck } from "./image-check.jsx";
 import "./import-flow.css";
@@ -342,14 +342,21 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
       .catch(() => {});
   }, []);
 
-  const refresh = useCallback(async (id, signal) => {
+  // Returns a fingerprint of the polled jobs, or null when nothing was applied.
+  const refresh = useCallback(async (ids, signal) => {
     try {
       const version = readVersion.current;
-      const next = await api(`${API}/${id}`, { signal });
-      if (signal.aborted || mutationRef.current || version !== readVersion.current) return;
-      setJobs((current) => current.map((job) => job.id === id ? next : job));
-      setDrafts((current) => current[id] ? current : { ...current, [id]: defaultDraft(next) });
-    } catch (requestError) { if (!signal.aborted) setError(requestError.message); }
+      const results = await Promise.all(importPollUrls(API, ids).map((url) => api(url, { signal })));
+      if (signal.aborted || mutationRef.current || version !== readVersion.current) return null;
+      const updates = new Map(results.flatMap((result) => result.jobs).map((job) => [job.id, job]));
+      setJobs((current) => current.map((job) => updates.get(job.id) || job));
+      setDrafts((current) => {
+        const missing = [...updates.values()].filter((job) => !current[job.id]);
+        return missing.length ? { ...current, ...Object.fromEntries(missing.map((job) => [job.id, defaultDraft(job)])) } : current;
+      });
+      if (results.some((result) => result.missing.length)) setError(uiErrorMessage("Job not found"));
+      return JSON.stringify(ids.map((id) => updates.get(id) || null));
+    } catch (requestError) { if (!signal.aborted) setError(requestError.message); return null; }
   }, []);
 
   // Keep the timer stable across progress updates, but cancel stale reads when
@@ -359,13 +366,15 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
     const ids = JSON.parse(pollingIds);
     if (!ids.length) return undefined;
     const controller = new AbortController();
-    let timer;
+    let timer, delay = POLL_MIN_MS, previous;
     const poll = async () => {
-      await Promise.all(ids.map((id) => refresh(id, controller.signal)));
+      const fingerprint = await refresh(ids, controller.signal);
+      delay = nextPollDelay(delay, fingerprint !== null && fingerprint !== previous);
+      if (fingerprint !== null) previous = fingerprint;
       // Schedule after completion so a slow request cannot overlap itself.
-      if (!controller.signal.aborted) timer = setTimeout(poll, 900);
+      if (!controller.signal.aborted) timer = setTimeout(poll, delay);
     };
-    timer = setTimeout(poll, 900);
+    timer = setTimeout(poll, delay);
     return () => { controller.abort(); clearTimeout(timer); };
   }, [pollingIds, refresh]);
 

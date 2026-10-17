@@ -218,3 +218,20 @@ test("long immutable image and JSON filenames use short temporary siblings", asy
   assert.equal(await readFile(path.join(jsonPath, "preserve-me"), "utf8"), "original");
   assert.deepEqual((await readdir(directory)).sort(), [imageName, jsonName].sort());
 });
+
+test("atomic JSON writes once to an atomic store and through a sibling rename locally", async (t) => {
+  const { withStorage } = await import("./storage-fs.mjs");
+  const calls = [];
+  const atomicStore = { atomicWrites: true, async writeFile(file, data) { calls.push(["writeFile", file, String(data)]); },
+    async rename() { calls.push(["rename"]); }, async rm() { calls.push(["rm"]); } };
+  await withStorage(atomicStore, () => atomicJson("/wardrobe-data/library.json", [{ id: "top-1" }]));
+  assert.deepEqual(calls, [["writeFile", "/wardrobe-data/library.json", `${JSON.stringify([{ id: "top-1" }], null, 2)}\n`]]);
+  const root = await mkdtemp(path.join(os.tmpdir(), "outfit-atomic-json-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const local = [];
+  const fs = await import("node:fs/promises");
+  await withStorage({ ...fs, async rename(source, destination) { local.push(path.basename(destination)); return fs.rename(source, destination); } },
+    () => atomicJson(path.join(root, "library.json"), { ok: true }));
+  assert.deepEqual(local, ["library.json"]);
+  assert.deepEqual(await readdir(root), ["library.json"]);
+});

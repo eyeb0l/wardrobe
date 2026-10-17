@@ -43,7 +43,7 @@ The [import](../scripts/import-reviewed-clothes.mjs) and [outfit-save](../script
 
 Use the command in the relevant skill, keeping generation and visual QA outside the lease. If the store is busy, retain staged results and retry after the active operation finishes; never delete a lease or lock. Cloud saves need no server restart or deployment. After saving, refresh the authenticated production app and verify returned IDs, added item counts, and original/display images.
 
-Check live records before retrying an uncertain save. Identical saves do not duplicate records. Conflicting outfit IDs fail; import IDs derive from cutout content, so reimporting an identical cutout updates its metadata and any supplied modelled photo while retaining unrelated records and fields. Physical-item deduplication still requires source review.
+Check live records before retrying an uncertain save. Identical saves do not duplicate records. Conflicting outfit IDs fail; import IDs derive from cutout content, so reimporting an identical cutout updates its metadata and any supplied modelled photo while retaining unrelated records and fields. Name, category, colour and tag edits already saved in the wardrobe (and the item's position) take precedence over the batch metadata. Physical-item deduplication still requires source review.
 
 Use `scripts/migrate-to-cloud.mjs` only for initial migration, never ongoing sync or skill delivery. During a skill task, do not issue ad hoc SQL, replace `library.json`/`outfits.json` from a snapshot, or garbage-collect originals/derivatives.
 

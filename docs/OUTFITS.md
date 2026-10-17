@@ -10,6 +10,8 @@ The web generator requires exactly one top and one bottom per look, with at most
 
 Jobs and review candidates persist in the selected store. Accept each reviewed look into the collection, reject it, or retry with a correction. Acceptance preserves existing looks. In local mode, interrupted generation becomes retryable after server restart. Hosted jobs run through durable workflows; an uncertain started API call is failed for review, never automatically repeated. Check API usage before explicitly retrying an interrupted paid request.
 
+Hosted requests and workflow steps read only open jobs (planning, generating, or holding a look that is neither accepted nor rejected), so their cost does not grow with completed history; only the history list reads every job. A derived `outfit-jobs/.open-jobs.json` index records them. It is not backed up, and it is rebuilt automatically when it is missing, unreadable, or its job count disagrees with the stored jobs. After running an older release against the same cloud data, delete that file so the next request rebuilds it.
+
 If generation fails, you can supply your own photograph instead; see [manual modelled photos](MODELED_PHOTOS.md). Image generations also collect private [refusal and retry telemetry](GENERATION_TELEMETRY.md), including eventual recovery and manual fallback. The read-only report separates models, generation types and garment categories without duplicating prompts.
 
 ## Find and refine saved looks

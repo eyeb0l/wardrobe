@@ -1,6 +1,6 @@
 import { generationAttempt, garmentTelemetry, manualTelemetry } from "./generation-telemetry.mjs";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, stat, writeFile, imageIdentity, containedFiles } from "./storage-fs.mjs";
+import { mkdir, readFile, readdir, realpath, stat, writeFile, imageIdentity, containedFiles, currentStorage } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
 import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
@@ -12,6 +12,10 @@ import { decisionsConfig, hashEvidence } from "./decisions.mjs";
 import { checkDecisionImages, imageCheckConfig } from "./decision-checks.mjs";
 import { decisionUsageLog } from "./decision-usage.mjs";
 import { outfitCombinations } from "../shared/outfit-combinations.mjs";
+import { assertSameOriginMutation } from "./request-guards.mjs";
+import { mapLimit } from "./map-limit.mjs";
+import { contactThumbnail, contactTiles } from "./contact-tiles.mjs";
+export { contactThumbnail } from "./contact-tiles.mjs";
 
 const API = "/api/outfits";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -25,6 +29,9 @@ const owners = globalThis[OWNERS] ||= new Map();
 const now = () => new Date().toISOString();
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const validId = (id) => typeof id === "string" && /^[a-z0-9][a-z0-9-]{0,119}$/.test(id);
+// Planning/generating jobs and jobs holding an unresolved outfit reserve pairs
+// and may own recoverable tasks. Fully accepted/rejected history does neither.
+const isOpen = (job) => ["planning", "generating"].includes(job.status) || job.outfits.some((outfit) => !["accepted", "rejected"].includes(outfit.status));
 const pairKey = (ids, inventory) => ids.filter((id) => ["upperbody", "lowerbody"].includes(inventory.get(id)?.part)).sort().join("|");
 
 async function readJson(file, fallback) {
@@ -53,17 +60,6 @@ async function readBody(req, limit = 16 * 1024) {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
     return value;
   } catch { throw fail("Expected a JSON object"); }
-}
-
-function mutationOrigin(req) {
-  if (req.headers?.["sec-fetch-site"] === "cross-site") throw fail("Cross-site requests are not allowed", 403);
-  const origin = req.headers?.origin;
-  if (origin) {
-    let parsed;
-    try { parsed = new URL(origin); } catch { throw fail("Invalid request origin", 403); }
-    if (!["http:", "https:"].includes(parsed.protocol) || parsed.host !== req.headers?.host) throw fail("Cross-site requests are not allowed", 403);
-  }
-  if (req.headers?.["content-type"] && !req.headers["content-type"].toLowerCase().startsWith("application/json")) throw fail("Use application/json", 415);
 }
 
 function sendJson(res, status, value) {
@@ -119,7 +115,6 @@ export async function outfitContactSheets(items, thumbnails) {
   return sheets;
 }
 
-export const contactThumbnail = (bytes) => sharp(bytes, { limitInputPixels: 64e6 }).rotate().resize(236, 252, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
 const imageHash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export function buildOutfitPrompt(outfit, items, correction = "", previousImage = false) {
@@ -167,6 +162,13 @@ export function wardrobeOutfitApi(options = {}) {
   let ownership;
   let releaseStore;
   const jobWarnings = [];
+  // Hosted writers keep a derived, non-portable list of open job IDs so warm
+  // requests and worker steps never re-read completed history. An ID is added
+  // before its job can open and removed after it closes, so an interrupted
+  // write leaves a superset. A missing, invalid or miscounted index (restore,
+  // migration, an older release creating jobs) triggers a full rebuild.
+  const OPEN_INDEX = ".open-jobs.json";
+  let openIndex;
   let drainPromise = Promise.resolve();
   let serial = Promise.resolve();
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
@@ -175,10 +177,27 @@ export function wardrobeOutfitApi(options = {}) {
   const ensureWritable = () => { ensureActive(); if (options.readOnly) throw fail("This outfit request is read-only.", 409); };
   const exclusive = (task) => { const result = serial.then(() => { ensureActive(); return task(); }); serial = result.catch(() => {}); return result; };
 
+  async function readOpenIndex() {
+    let value;
+    try { value = JSON.parse(await readFile(path.join(jobsDir, OPEN_INDEX), "utf8")); }
+    catch (error) { if (error.code === "ENOENT" || error instanceof SyntaxError) return null; throw error; }
+    return value?.version === 1 && Number.isSafeInteger(value.jobCount) && value.jobCount >= 0 && Array.isArray(value.open) && value.open.every((id) => typeof id === "string" && UUID.test(id))
+      ? { jobCount: value.jobCount, open: new Set(value.open) } : null;
+  }
+  const writeOpenIndex = () => atomicJson(path.join(jobsDir, OPEN_INDEX), { version: 1, jobCount: openIndex.jobCount, open: [...openIndex.open].sort() });
+  async function indexJob(id, open, created = false) {
+    if (!openIndex || (!created && openIndex.open.has(id) === open)) return;
+    if (open) openIndex.open.add(id); else openIndex.open.delete(id);
+    if (created) openIndex.jobCount += 1;
+    await writeOpenIndex();
+  }
   async function save(job) {
     ensureWritable();
     job.updatedAt = now();
+    const open = isOpen(job);
+    if (open) await indexJob(job.id, true);
     await atomicJson(path.join(jobsDir, job.id, "job.json"), job);
+    if (!open) await indexJob(job.id, false);
   }
 
   function publishJob(job, next) {
@@ -496,15 +515,16 @@ export function wardrobeOutfitApi(options = {}) {
     const items = await inventory({ verifyImages: false });
     const thumbnails = new Map();
     const inputHashes = new Map();
-    // Preparing a contact-sheet tile already fully decodes each cutout. Reuse
-    // that validation and retain only small tiles, not a second full-image pass.
-    for (const [id, item] of items) {
-      try {
-        const bytes = await readFile(item.file);
-        thumbnails.set(id, await contactThumbnail(bytes));
-        inputHashes.set(id, imageHash(bytes));
-      } catch { items.delete(id); }
-    }
+    // A tile exists only for a cutout that decoded, and carries the hash of the
+    // exact bytes it came from. Selected garments are re-read and checked against
+    // these hashes before the plan commits.
+    const entries = [...items];
+    const tiles = await contactTiles(entries.map(([, item]) => [item.file]));
+    entries.forEach(([id], index) => {
+      if (!tiles[index]) return void items.delete(id);
+      thumbnails.set(id, tiles[index].tile);
+      inputHashes.set(id, tiles[index].hash);
+    });
     const used = await usedPairs(items, job.id);
     const values = [...items.values()];
     if (job.requiredGarmentId && !items.has(job.requiredGarmentId)) throw fail("The piece you chose is no longer available for outfits. Refresh your wardrobe.", 409);
@@ -667,7 +687,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     ensureWritable();
     if (!options.serverless) throw fail("External outfit tasks require serverless mode.", 409);
     if (task?.kind !== "outfit" || !UUID.test(task.jobId || "")) throw fail("Invalid outfit task.");
-    const job = jobs.get(task.jobId);
+    const job = jobs.get(task.jobId) ?? await adoptJob(task.jobId);
     if (!job) throw fail("Outfit job not found", 404);
     if (!UUID.test(task.taskId || "") || job.internal.cloudTaskId !== task.taskId) return false;
     if (!["planning", "generating"].includes(job.status)) return false;
@@ -688,7 +708,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     ensureWritable();
     if (!options.serverless) throw fail("External outfit tasks require serverless mode.", 409);
     if (task?.kind !== "outfit" || !UUID.test(task.jobId || "")) throw fail("Invalid outfit task.");
-    const job = jobs.get(task.jobId);
+    const job = jobs.get(task.jobId) ?? await adoptJob(task.jobId);
     if (!job) throw fail("Outfit job not found", 404);
     if (!UUID.test(task.taskId || "") || job.internal.cloudTaskId !== task.taskId) return;
     const detail = shortText(message, "task failure message", 2000);
@@ -816,26 +836,33 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     outfit.image = record.image;
   }
 
-  let loadingJobs;
-  async function loadJobs(saved) {
+  const loadingJobs = new Map();
+  async function loadJobs(saved, { all = false } = {}) {
     // Read-only plugin instances are request scoped in production. Do not load
     // history for collection/image/accessory routes. Refresh when a reused
     // read-only instance serves history or reservations; never cache metadata
     // across requests. Concurrent readers may share one in-flight refresh.
-    if (loadingJobs) return loadingJobs;
-    loadingJobs = (async () => {
+    // Hosted callers read only indexed open jobs unless they list history.
+    const key = all ? "all" : "open";
+    if (loadingJobs.has(key)) return loadingJobs.get(key);
+    const loading = (async () => {
       // Retain the established collection guard when serving job state or
       // discovering recoverable tasks, without hydrating unrelated history.
       saved ??= await manifest();
       const refreshed = new Map();
       const warnings = [];
       const entries = await readdir(jobsDir, { withFileTypes: true }).catch((error) => { if (options.readOnly && error.code === "ENOENT") return []; throw error; });
-      for (const entry of entries) {
-        if (!entry.isDirectory() || !UUID.test(entry.name)) continue;
-        const relative = `outfit-jobs/${entry.name}/job.json`;
+      const names = entries.filter((entry) => entry.isDirectory() && UUID.test(entry.name)).map((entry) => entry.name);
+      let index = options.serverless && !all ? await readOpenIndex() : null;
+      if (index && index.jobCount !== names.length) index = null;
+      const open = new Set();
+      // Hosted reads are independent. Local recovery may rewrite each job in turn.
+      const loaded = await mapLimit(index ? names.filter((name) => index.open.has(name)) : names, options.serverless ? 8 : 1, async (name) => {
+        const relative = `outfit-jobs/${name}/job.json`;
         try {
-          const file = await containedFile(path.join(jobsDir, entry.name), "job.json");
-          const job = validateJob(await readJson(file, null), entry.name);
+          // The cloud store has no symlinks and this name is a validated UUID.
+          const file = currentStorage() ? path.join(jobsDir, name, "job.json") : await containedFile(path.join(jobsDir, name), "job.json");
+          const job = validateJob(await readJson(file, null), name);
           const before = JSON.stringify(job);
           // Hosted instances are short lived. A new instance is not evidence
           // of interrupted work; the external runner owns task recovery and
@@ -856,24 +883,41 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             if (job.outfits.length) recompute(job);
             if (JSON.stringify(job) !== before) await save(job);
           }
-          refreshed.set(job.id, job);
+          if (isOpen(job)) open.add(job.id);
+          return { job };
         } catch (error) {
+          // Keep unreadable jobs indexed so their warning persists until repaired.
+          open.add(name);
           const detail = error.status ? error.message : error instanceof SyntaxError ? "Invalid JSON." : "The file could not be read or recovered.";
-          warnings.push(`${relative}: ${detail} The job was left out of recovery; inspect or restore the original file before restarting.`);
+          return { warning: `${relative}: ${detail} The job was left out of recovery; inspect or restore the original file before restarting.` };
         }
-      }
+      });
+      for (const { job, warning } of loaded) if (job) refreshed.set(job.id, job); else warnings.push(warning);
       jobs.clear();
       for (const [id, job] of refreshed) jobs.set(id, job);
       jobWarnings.splice(0, jobWarnings.length, ...warnings);
+      if (options.serverless && !options.readOnly && !all) {
+        const changed = !index || index.open.size !== open.size || [...index.open].some((id) => !open.has(id));
+        openIndex = { jobCount: names.length, open };
+        if (changed) await writeOpenIndex();
+      }
     })();
-    try { await loadingJobs; }
-    finally { loadingJobs = undefined; }
+    loadingJobs.set(key, loading);
+    try { await loading; }
+    finally { loadingJobs.delete(key); }
+  }
+
+  // A hosted mutation of a closed job loads only that job.
+  async function adoptJob(id) {
+    const job = await requestedJob(id);
+    jobs.set(id, job);
+    return job;
   }
 
   async function requestedJob(id) {
     await manifest();
     try {
-      const file = await containedFile(path.join(jobsDir, id), "job.json");
+      const file = currentStorage() ? path.join(jobsDir, id, "job.json") : await containedFile(path.join(jobsDir, id), "job.json");
       return validateJob(await readJson(file, null), id);
     } catch {
       // The history route reports invalid jobs with their recovery warnings.
@@ -888,8 +932,10 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     if (url.pathname !== API && !url.pathname.startsWith(`${API}/`)) return next();
     try {
       ensureActive();
-      if (req.method !== "GET") { ensureWritable(); mutationOrigin(req); }
-      if (options.readOnly && (url.pathname === `${API}/config` || url.pathname === `${API}/jobs`)) await loadJobs();
+      if (req.method !== "GET") { ensureWritable(); assertSameOriginMutation(req); }
+      if (options.readOnly && url.pathname === `${API}/config`) await loadJobs();
+      // History is the only route that lists completed hosted jobs.
+      if ((options.readOnly || options.serverless) && url.pathname === `${API}/jobs` && req.method === "GET") await loadJobs(undefined, { all: true });
       if (url.pathname === API && req.method === "GET") return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits() });
       if (url.pathname === `${API}/config` && req.method === "GET") return sendJson(res, 200, await configuration({ verifyImages: false }));
       if (url.pathname === `${API}/jobs` && req.method === "GET") return sendJson(res, 200, { jobs: [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob), warnings: jobWarnings });
@@ -916,6 +962,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           // Persist authorization and its task identity together, so recovery can
           // discover this work even if the process stops before scheduling.
           const job = { version: 1, id, count: input.count, direction, ...(input.requiredGarmentId ? { requiredGarmentId: input.requiredGarmentId } : {}), modelReferenceId: reference.id, status: "planning", createdAt: now(), updatedAt: now(), error: null, outfits: [], internal: options.serverless ? { cloudTaskId: randomUUID() } : {} };
+          await indexJob(id, true, true);
           await mkdir(path.join(jobsDir, id));
           await save(job);
           jobs.set(id, job);
@@ -938,7 +985,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       }
       const match = url.pathname.match(/^\/api\/outfits\/jobs\/([^/]+)(?:\/(.*))?$/);
       if (!match || !UUID.test(match[1])) throw fail("Outfit job not found", 404);
-      const job = options.readOnly ? await requestedJob(match[1]) : jobs.get(match[1]);
+      const job = options.readOnly ? await requestedJob(match[1]) : jobs.get(match[1]) ?? (options.serverless ? await adoptJob(match[1]) : undefined);
       if (!job) throw fail("Outfit job not found", 404);
       const action = match[2] || "";
       if (!action && req.method === "GET") return sendJson(res, 200, publicJob(job));

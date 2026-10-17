@@ -7,6 +7,7 @@ const sources = await store.listDisplayImageSources();
 console.log(`${sources.length} originals; WebP widths ${DISPLAY_WIDTHS.join(', ')}. Originals remain unchanged.`);
 if (apply) {
   await store.initializeDisplayImages();
+  await store.initializeContactTiles();
   let count = 0, originalBytes = 0, displayBytes = 0;
   // Small parallel batches keep the database/Blob and encoder load bounded.
   for (let offset = 0; offset < sources.length; offset += 3) {

@@ -16,7 +16,9 @@ export async function generateWardrobe(id) {
   "use workflow";
   for (let step = 0; step < 14;) {
     const result = await runGenerationStep(id, step);
-    if (result.busy) { await sleep("5s"); continue; }
+    // A live detached claim reports when it ends: one durable sleep replaces
+    // polling the writer lease every five seconds until then.
+    if (result.busy) { await sleep(result.retryAt ? new Date(result.retryAt) : "5s"); continue; }
     if (!result.more) return;
     step += 1;
   }

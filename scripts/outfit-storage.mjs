@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { currentStorage, link, lstat, readFile, readdir, rename, rm, writeFile } from "./storage-fs.mjs";
+import { copyFile, currentStorage, link, lstat, readFile, readdir, rename, rm, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -18,11 +18,20 @@ const storageError = (file, detail) => Object.assign(new Error(`${file}: ${detai
 // the filesystem's per-component length limit.
 const temporarySibling = (file) => path.join(path.dirname(file), `.outfit-write-${randomUUID()}.tmp`);
 
-export async function atomicJson(file, value, { mode } = {}) {
+// A store declaring atomicWrites (the cloud store: one fenced row write) needs
+// no temporary sibling and second round trip. Local files use write + rename;
+// `copyFallback` keeps the importer's copy for filesystems that refuse rename.
+export async function atomicJson(file, value, { mode, copyFallback = false } = {}) {
+  const contents = `${JSON.stringify(value, null, 2)}\n`;
+  if (currentStorage()?.atomicWrites) return writeFile(file, contents);
   const temporary = temporarySibling(file);
   try {
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", ...(mode === undefined ? {} : { mode }) });
-    await rename(temporary, file);
+    await writeFile(temporary, contents, { flag: "wx", ...(mode === undefined ? {} : { mode }) });
+    try { await rename(temporary, file); }
+    catch (error) {
+      if (!copyFallback || !["EBUSY", "EXDEV", "EPERM"].includes(error.code)) throw error;
+      await copyFile(temporary, file);
+    }
   } finally { await rm(temporary, { force: true }); }
 }
 

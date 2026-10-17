@@ -247,7 +247,9 @@ test("disconnect during cutout preparation stops the next read and releases the 
   let entered, release;
   const started = new Promise((resolve) => { entered = resolve; });
   const held = new Promise((resolve) => { release = resolve; });
-  h.setImageReadHook(async (file) => { if (file.endsWith("top-1.png")) { entered(); await held; } });
+  // Six cutout reads run at once; hold them all so none can start a later read.
+  let inFlight = 0;
+  h.setImageReadHook(async (file) => { if (file.includes(`${path.sep}imported${path.sep}`)) { if (++inFlight === 6) entered(); await held; } });
   const origin = await h.serve();
   const controller = new AbortController();
   const response = fetch(`${origin}${API}/analyze`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(h.body()), signal: controller.signal });
@@ -258,7 +260,7 @@ test("disconnect during cutout preparation stops the next read and releases the 
   release();
   await delay(20);
   assert.equal(h.requests.length, 0);
-  assert.deepEqual(h.imageReads.map((entry) => path.basename(entry.file)), ["identity.png", "top-1.png"]);
+  assert.deepEqual(h.imageReads.map((entry) => path.basename(entry.file)).sort(), ["identity.png", ...[1, 2, 3, 4, 5, 6].map((number) => `top-${number}.png`)].sort());
   h.setImageReadHook(undefined);
   await h.analyze();
   assert.equal(h.requests.length, 1, "cancelled preparation does not strand the next check");

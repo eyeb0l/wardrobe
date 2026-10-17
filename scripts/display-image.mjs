@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
-import { readFile, currentStorage } from './storage-fs.mjs';
+import { readFile, stat, currentStorage } from './storage-fs.mjs';
 import { DISPLAY_WIDTHS, DISPLAY_RECIPE, requestedDisplayWidth } from '../shared/image-variants.mjs';
 
 export const displayKey = (identity, width) => createHash('sha256').update(`${DISPLAY_RECIPE}:${width}:${identity}`).digest('hex');
@@ -18,16 +18,46 @@ export async function encodeDisplayImage(bytes, width) {
 const localVariants = new Map();
 let localBytes = 0;
 const MAX_LOCAL_BYTES = 32 * 1024 * 1024;
-async function localVariant(file, width, condition) {
+const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// Local files are mutable, so a content hash is reused only while the file's
+// identity, size and timestamps are unchanged; any replacement is rehashed.
+const localHashes = new Map();
+const MAX_LOCAL_HASHES = 4096;
+const statKey = ({ ino, size, mtimeMs, ctimeMs }) => JSON.stringify([ino, size, mtimeMs, ctimeMs]);
+async function localContentHash(file) {
+  const before = statKey(await stat(file));
+  const cached = localHashes.get(file);
+  if (cached?.stat === before) {
+    localHashes.delete(file); localHashes.set(file, cached);
+    return { hash: cached.hash };
+  }
   const original = await readFile(file);
-  const key = displayKey(createHash('sha256').update(original).digest('hex'), width);
-  const etag = displayETag(key);
+  const hash = sha256(original);
+  // Never cache a hash for bytes that changed while they were being read.
+  if (statKey(await stat(file)) === before) {
+    localHashes.delete(file); localHashes.set(file, { stat: before, hash });
+    if (localHashes.size > MAX_LOCAL_HASHES) localHashes.delete(localHashes.keys().next().value);
+  }
+  return { hash, original };
+}
+async function localVariant(file, width, condition) {
+  let { hash, original } = await localContentHash(file);
+  let key = displayKey(hash, width);
+  let etag = displayETag(key);
   if (matchesETag(condition, etag)) return { etag, notModified: true };
   let bytes = localVariants.get(key);
   if (!bytes) {
-    bytes = await encodeDisplayImage(original, width);
-    localVariants.set(key, bytes);
-    localBytes += bytes.length;
+    if (!original) {
+      original = await readFile(file);
+      // A replacement after the cached lookup: key the variant by the bytes read.
+      if (sha256(original) !== hash) {
+        localHashes.delete(file);
+        hash = sha256(original); key = displayKey(hash, width); etag = displayETag(key);
+        if (matchesETag(condition, etag)) return { etag, notModified: true };
+      }
+    }
+    bytes = localVariants.get(key) ?? await encodeDisplayImage(original, width);
+    if (!localVariants.has(key)) { localVariants.set(key, bytes); localBytes += bytes.length; }
     while (localBytes > MAX_LOCAL_BYTES && localVariants.size) {
       const first = localVariants.keys().next().value;
       localBytes -= localVariants.get(first).length;

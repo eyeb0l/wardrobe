@@ -1,5 +1,6 @@
 import path from "node:path";
 import { containedFiles } from "./storage-fs.mjs";
+import { assertSameOriginMutation } from "./request-guards.mjs";
 import { readManifest, acceptedFilename } from "./outfit-storage.mjs";
 import { readLibrary } from "./wardrobe-library.mjs";
 import { hashEvidence, decisionsConfig } from "./decisions.mjs";
@@ -140,13 +141,7 @@ export function wardrobeDiscoveryApi(options = {}) {
       if (pathname === `${API}/config` && req.method === "GET") return send(res, 200, decisionsConfig(env));
       if (![`${API}/rank`, `${API}/swaps`].includes(pathname)) throw fail("Not found", 404);
       if (req.method !== "POST") throw fail("Method not allowed", 405);
-      if (req.headers?.["sec-fetch-site"] === "cross-site") throw fail("Cross-site requests are not allowed", 403);
-      if (req.headers?.origin) {
-        let origin;
-        try { origin = new URL(req.headers.origin); } catch { throw fail("Invalid request origin", 403); }
-        if (!["http:", "https:"].includes(origin.protocol) || origin.host !== req.headers.host) throw fail("Cross-site requests are not allowed", 403);
-      }
-      if (!req.headers?.["content-type"]?.toLowerCase().startsWith("application/json")) throw fail("Use application/json", 415);
+      assertSameOriginMutation(req, { json: "required" });
       if (!decisionsConfig(env).ready) throw fail("Outfit discovery is not configured. You can still browse your saved outfits.", 503);
       const input = await readBody(req);
       if (pathname.endsWith("/swaps") && (!input.outfitId || !input.garmentId)) throw fail("Choose a saved outfit and piece to replace.");
