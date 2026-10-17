@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DETECTION_RETRY_WAIT_MS, isDetectionRetryRunning } from '../src/detection-retry.mjs';
+import { DETECTION_RETRY_WAIT_MS, isDetectionRetryRunning } from '../shared/detection-retry.mjs';
 
 const now = Date.parse('2026-09-21T12:00:00Z');
 const job = (status, createdAt = new Date(now).toISOString()) => ({ detectionRetryAttempt: { status, createdAt } });

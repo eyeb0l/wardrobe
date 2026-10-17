@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { CLOUD_ROOT, createCloudStore } from "./cloud-store.mjs";
 import { currentStorage, mkdir, readFile, withStorage, writeFile } from "./storage-fs.mjs";
 import { createPlugin } from "../server/plugins.mjs";
 import { executeCloudTask, INTERRUPTED } from "../server/task-runner.mjs";
-import { createTask, readTask, saveTask } from "../server/task-store.mjs";
-import { outsideRequestLease, independentDecisionLeases } from "../server/request-lease.mjs";
+import { createTask, readTask, saveTask, reservePaidCall } from "../server/task-store.mjs";
+import sharp from "sharp";
+import { outsideRequestLease, independentDecisionLeases, leaseFreeRequests } from "../server/request-lease.mjs";
 import { decide } from "./decisions.mjs";
 import { decisionsResponse } from "./test-helpers/decisions-response.mjs";
 
@@ -420,7 +422,9 @@ test('detached generation permits other saves, makes duplicate delivery wait, an
   try {
     const other=h.otherStore();
     await other.withLease(()=>other.writeFile(`${CLOUD_ROOT}/other-item.json`,'saved'));
-    assert.deepEqual(await executeCloudTask(task.id,0,{...options,store:other}),{busy:true});
+    const duplicate=await executeCloudTask(task.id,0,{...options,store:other});
+    assert.equal(duplicate.busy,true);
+    assert.equal(Date.parse(duplicate.retryAt),Date.parse((await h.storedTask(task.id)).activeUntil)+1000,'a duplicate sleeps until the live claim ends instead of polling');
     assert.equal(dispatches,1);assert.equal(reservations,1);
   }finally{release();}
   assert.deepEqual(await running,{more:false});assert.equal((await h.storedTask(task.id)).state,'done');
@@ -432,16 +436,150 @@ test('source changes during detached work fence all stale result and error write
   await h.write(async()=>{await mkdir(`${CLOUD_ROOT}/outfit-jobs/${jobId}`,{recursive:true});await writeFile(file,'original');});
   const task=await h.task({kind:'outfit',jobId,taskId:randomUUID()});
   let failures=0;
-  await assert.rejects(executeCloudTask(task.id,0,{store:h.store,enabled:()=>true,pluginFactory:async(kind,{outsideLease})=>({
+  assert.deepEqual(await executeCloudTask(task.id,0,{store:h.store,enabled:()=>true,pluginFactory:async(kind,{outsideLease})=>({
     async runTask(){await outsideLease(async()=>{const other=h.otherStore();await other.withLease(()=>other.writeFile(file,'new revision'));});await writeFile(file,'stale');},
     async failTask(){failures++;await writeFile(file,'stale failure');}
-  })}),{code:'ESTALE'});
+  })}),{busy:true});
   assert.equal(failures,0);assert.equal(await h.store.readFile(file,'utf8'),'new revision');
+  const settled=await h.storedTask(task.id);
+  assert.equal(settled.state,'running');
+  assert.ok(Date.parse(settled.activeUntil)<=Date.now(),'the lost owner expires its own claim so redelivery settles without polling');
 });
 
-for (const kind of ["crop", "outfit", "cleanup"]) {
+// The worker needs a test-sized claim: a blocking request holds the shared
+// writer through the detached provider call and beyond, as a long backup could.
+function detachedWorker(h, { hold, run = () => "PAID IMAGE" }) {
+  const jobId = randomUUID(), file = `${CLOUD_ROOT}/jobs/${jobId}/job.json`, calls = { reserve: 0, dispatch: 0, fail: [] };
+  let holding;
+  const options = { store: h.store, enabled: () => true, reserve: async () => { calls.reserve++; }, pluginFactory: async (kind, { beforePaidCall, outsideLease }) => ({
+    async runTask() {
+      await beforePaidCall("image");
+      const result = await outsideLease(async () => {
+        calls.dispatch++;
+        const other = h.otherStore();
+        holding = other.withLease(() => delay(hold));
+        await delay(50);
+        return run();
+      });
+      await writeFile(`${CLOUD_ROOT}/jobs/${jobId}/result.json`, JSON.stringify({ result }));
+      return { skipped: false, job: { stages: { garment: { status: "review" } } } };
+    },
+    async failTask(payload, message) { await writeFile(file, JSON.stringify({ failed: message })); calls.fail.push(message); },
+  }) };
+  return { jobId, file, calls, options, held: () => holding,
+    setup: async () => { await h.write(async () => { await mkdir(`${CLOUD_ROOT}/jobs/${jobId}`, { recursive: true }); await writeFile(file, "{}"); }); return h.task({ kind: "import", jobId, stageName: "garment", taskId: randomUUID() }); } };
+}
+
+test("a finished paid result waits out a busy writer for its whole remaining claim", async t => {
+  const h = await harness(t), worker = detachedWorker(h, { hold: 1_500 });
+  const task = await worker.setup();
+  const budgets = [];
+  const store = { ...h.store, withoutLease: (callback, validate, options) => { budgets.push(options.reacquireBy - Date.now()); return h.store.withoutLease(callback, validate, options); } };
+  assert.deepEqual(await executeCloudTask(task.id, 0, { ...worker.options, store }), { more: false });
+  await worker.held();
+  assert.ok(budgets[0] > 200_000, `default reacquire budget follows the 260 s claim, not a fixed 30 s (${budgets[0]} ms)`);
+  assert.deepEqual(JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/jobs/${worker.jobId}/result.json`, "utf8")), { result: "PAID IMAGE" });
+  assert.equal((await h.storedTask(task.id)).state, "done");
+  assert.deepEqual([worker.calls.reserve, worker.calls.dispatch, worker.calls.fail.length], [1, 1, 0]);
+});
+
+test("a worker that cannot reacquire in time expires its claim and redelivery settles without a second paid call", async t => {
+  const h = await harness(t), worker = detachedWorker(h, { hold: 2_000 });
+  const task = await worker.setup();
+  const started = Date.now();
+  assert.deepEqual(await executeCloudTask(task.id, 0, { ...worker.options, detachedMs: 3_000, settleWaitMs: 4_000 }), { busy: true });
+  await worker.held();
+  assert.ok(Date.now() - started < 4_500, "no waiting for the 3 s claim to expire on its own");
+  await assert.rejects(h.store.readFile(`${CLOUD_ROOT}/jobs/${worker.jobId}/result.json`), { code: "ENOENT" }, "the stale result is never published");
+  assert.ok(Date.parse((await h.storedTask(task.id)).activeUntil) <= Date.now());
+  assert.deepEqual(await executeCloudTask(task.id, 0, worker.options), { more: false });
+  assert.deepEqual(worker.calls.fail, [INTERRUPTED]);
+  assert.equal((await h.storedTask(task.id)).state, "failed");
+  assert.deepEqual([worker.calls.reserve, worker.calls.dispatch], [1, 1]);
+});
+
+test("a lost worker that cannot even settle asks the workflow to sleep until its claim ends", async t => {
+  const h = await harness(t), worker = detachedWorker(h, { hold: 2_500 });
+  const task = await worker.setup();
+  const result = await executeCloudTask(task.id, 0, { ...worker.options, detachedMs: 9_000, stepMs: 100, settleWaitMs: 300 });
+  await worker.held();
+  assert.equal(result.busy, true);
+  assert.equal(Date.parse(result.retryAt), Date.parse((await h.storedTask(task.id)).activeUntil) + 1_000);
+  assert.equal(worker.calls.dispatch, 1);
+});
+
+test("shopping requests take only short leases, while job and outfit routes keep a request writer", () => {
+  for (const pathname of ["/api/shopping/analyze", "/api/shopping/gaps", "/api/shopping/import-website", "/api/outfits/discovery/rank"]) assert.equal(leaseFreeRequests(pathname), true, pathname);
+  for (const pathname of ["/api/import/jobs", "/api/outfits/look-1/accessories", "/api/outfits/jobs", "/api/shopping/config"]) assert.equal(leaseFreeRequests(pathname), false, pathname);
+});
+
+for (const pathname of ["/api/import/jobs", "/api/outfits/look-1/accessories"]) {
+  test(`${pathname} releases the request writer during provider work and reacquires before saving`, async t => {
+    const h = await harness(t);
+    let release, started;
+    const gate = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { started = resolve; });
+    const running = h.write(async () => {
+      const result = await outsideRequestLease(h.store, pathname, async () => {
+        started();
+        await gate;
+        await assert.rejects(writeFile(`${CLOUD_ROOT}/unsafe.json`, "unsafe"), { code: "ESTALE" });
+        return "analysed";
+      });
+      await writeFile(`${CLOUD_ROOT}/result.json`, result);
+    });
+    await entered;
+    try {
+      const other = h.otherStore();
+      await other.withLease(() => other.writeFile(`${CLOUD_ROOT}/other-item.json`, "saved"));
+    } finally { release(); await running; }
+    assert.equal(await h.store.readFile(`${CLOUD_ROOT}/result.json`, "utf8"), "analysed");
+    assert.equal(await h.store.readFile(`${CLOUD_ROOT}/other-item.json`, "utf8"), "saved");
+  });
+}
+
+test("hosted clothing detection reserves under the request writer, then lets other saves run during the provider call", async t => {
+  const h = await harness(t);
+  const png = await sharp({ create: { width: 96, height: 128, channels: 3, background: "#777777" } }).png().toBuffer();
+  await h.write(async () => {
+    for (const directory of ["jobs", "imported"]) await mkdir(`${CLOUD_ROOT}/${directory}`);
+    await writeFile(`${CLOUD_ROOT}/library.json`, "[]");
+    await writeFile(`${CLOUD_ROOT}/model-reference.png`, png);
+  });
+  for (const [name, value] of [["OPENAI_API_KEY", "test-key"], ["OPENAI_API_BASE_URL", "https://wardrobe-test.invalid"]]) {
+    const previous = process.env[name];
+    process.env[name] = value;
+    t.after(() => { if (previous === undefined) delete process.env[name]; else process.env[name] = previous; });
+  }
+  let usageAtDispatch;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    assert.equal(url, "https://wardrobe-test.invalid/responses");
+    usageAtDispatch = JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/.api-usage.json`, "utf8"));
+    const other = h.otherStore();
+    await other.withLease(() => other.writeFile(`${CLOUD_ROOT}/other-item.json`, "saved during detection"));
+    const items = [{ name: "Grey top", part: "upperbody", color: "#777777", secondaryColor: null, tags: ["plain"], boundingBox: { x: 100, y: 100, width: 800, height: 800 } }];
+    return Response.json({ output_text: JSON.stringify({ items, isCleanProductShot: false }) });
+  });
+  const pathname = "/api/import/jobs";
+  let result;
+  const res = { statusCode: 200, setHeader() {}, end(value) { result = JSON.parse(value); } };
+  await h.write(async () => {
+    const plugin = await createPlugin("import", { beforePaidCall: reservePaidCall, outsideLease: (callback, validate) => outsideRequestLease(h.store, pathname, callback, validate) });
+    let route;
+    plugin.configureServer({ middlewares: { use(value) { route = value; } } });
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({ imageBase64: png.toString("base64") }))]), { method: "POST", url: pathname, headers: { "content-type": "application/json" } });
+    await route(req, res, () => assert.fail("Unexpected middleware fallthrough"));
+  });
+  assert.equal(res.statusCode, 202, JSON.stringify(result));
+  assert.equal(usageAtDispatch.textCalls, 1, "quota is reserved before dispatch");
+  assert.equal(await h.store.readFile(`${CLOUD_ROOT}/other-item.json`, "utf8"), "saved during detection");
+  const saved = JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/jobs/${result.jobs[0].id}/job.json`, "utf8"));
+  assert.equal(saved.stages.crop.status, "review");
+});
+
+for (const kind of ["crop", "outfit", "cleanup", "retry"]) {
   const route = id => kind === "outfit" ? `/api/outfits/jobs/${id}/outfits/look-1/check`
-    : `/api/import/jobs/${id}/${kind === "crop" ? "preflight" : "stages/garment/cleanup-preview"}`;
+    : `/api/import/jobs/${id}/${kind === "crop" ? "preflight" : kind === "retry" ? "detection/retry" : "stages/garment/cleanup-preview"}`;
   const jobFile = id => `${CLOUD_ROOT}/${kind === "outfit" ? "outfit-jobs" : "jobs"}/${id}/job.json`;
 
   test(`${kind} checks release the hosted lease for unrelated saves and reacquire before writing`, async t => {

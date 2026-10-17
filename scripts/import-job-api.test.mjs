@@ -54,7 +54,8 @@ async function harness(t, env = {}, beforePaidCall, options = {}) {
       await jobSavedHook(JSON.parse(await fileSystem.readFile(destination, 'utf8')));
     }
   }, async writeFile(filename, data, ...args) {
-    if (failCandidateSave && String(filename).includes("job.json") && String(data).includes('"detectionRetry":')) {
+    // Job saves write a temporary sibling first; fail that write.
+    if (failCandidateSave && /job\.json|\.tmp$/.test(String(filename)) && String(data).includes('"detectionRetry":')) {
       failCandidateSave = false;
       throw Object.assign(new Error("Simulated candidate persistence failure"), { code: "EIO" });
     }
@@ -190,6 +191,24 @@ test("website detection retries reject multiple products without changing the cr
   const review = await h.request("POST", `${base}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000031" });
   assert.equal(review.detectionRetry.candidates.length, 1, "a fresh single-product retry still succeeds");
   assert.deepEqual(review.websiteSource, job.websiteSource);
+});
+
+test("progress polling reads several jobs in one read-only request", async t => {
+  const h = await harness(t);
+  h.setAnalysis([dress, { ...dress, name: "Other garment", part: "accessories_up" }]);
+  const { jobs } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const missing = "00000000-0000-4000-8000-0000000000ff";
+  const requests = h.requests.length;
+  const result = await h.request("GET", `/api/import/jobs?ids=${jobs[1].id},${missing},${jobs[0].id},${jobs[1].id}`);
+  assert.deepEqual(result.jobs.map(job => job.id), [jobs[1].id, jobs[0].id]);
+  assert.deepEqual(result.missing, [missing]);
+  assert.equal(result.jobs[0].internal, undefined, "internal state stays private");
+  assert.deepEqual(result.jobs[1], (await h.request("GET", `/api/import/jobs/${jobs[0].id}`)));
+  assert.equal(h.requests.length, requests, "polling never contacts the provider");
+  await h.request("GET", "/api/import/jobs?ids=", undefined, 400);
+  await h.request("GET", "/api/import/jobs?ids=../jobs", undefined, 400);
+  await h.request("GET", `/api/import/jobs?ids=${Array.from({ length: 33 }, (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`).join(",")}`, undefined, 400);
+  assert.equal((await h.request("GET", "/api/import/jobs")).length, 2, "the full list read is unchanged");
 });
 
 test("photo detection retries still allow multiple candidates", async t => {
@@ -1040,3 +1059,123 @@ for (const part of ['upperbody', 'dresses']) {
     assert.equal(saved.image, existing.image);
   });
 }
+
+test("provider failures give advice without reflecting provider messages", async (t) => {
+  const h = await harness(t);
+  const workingFetch = globalThis.fetch;
+  const secret = "secret sk-private at https://private.invalid/";
+  t.mock.method(globalThis, "fetch", async () => Response.json({ error: { message: secret } }, { status: 401 }));
+  const detection = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") }, 502);
+  assert.match(detection.error, /HTTP 401\. Check the configured API key/);
+  assert.doesNotMatch(detection.error, /secret|private/);
+  t.mock.method(globalThis, "fetch", workingFetch);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  t.mock.method(globalThis, "fetch", async () => Response.json({ error: { code: "moderation_blocked", message: secret } }, { status: 400 }));
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  let failed;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    failed = await h.request("GET", `/api/import/jobs/${job.id}`);
+    if (failed.stages.garment.status === "failed") break;
+    await delay(10);
+  }
+  assert.equal(failed.stages.garment.status, "failed");
+  assert.match(failed.stages.garment.error, /Image generation returned HTTP 400\. The request was refused by the provider's safety checks/);
+  assert.doesNotMatch(JSON.stringify(failed), /secret|private\.invalid/);
+});
+
+test("local restart fails an uncertain processing stage instead of sending it again", async (t) => {
+  const h = await harness(t);
+  const jobs = [];
+  for (let index = 0; index < 3; index += 1) jobs.push((await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") })).jobs[0]);
+  const edit = async (id, change) => {
+    const file = path.join(h.root, "data", "jobs", id, "job.json");
+    const job = JSON.parse(await readFile(file, "utf8"));
+    change(job.stages);
+    await writeFile(file, JSON.stringify(job));
+  };
+  await edit(jobs[0].id, (stages) => { stages.crop.status = "approved"; Object.assign(stages.garment, { status: "processing", attempts: 1 }); });
+  await edit(jobs[1].id, (stages) => {
+    stages.crop.status = "approved";
+    Object.assign(stages.garment, { status: "approved", attempts: 1, assetUrl: stages.crop.assetUrl });
+    Object.assign(stages.modeled, { status: "processing", attempts: 1 });
+  });
+  await edit(jobs[2].id, (stages) => { stages.crop.status = "approved"; stages.garment.status = "queued"; });
+  const before = h.requests.length;
+  await h.restart();
+  await h.waitForStage(jobs[2].id, "garment");
+  await delay(100);
+  assert.deepEqual(h.requests.slice(before).map((entry) => entry.type), ["edit"], "only the queued stage, which never reached the API, starts");
+  for (const [job, stage] of [[jobs[0], "garment"], [jobs[1], "modeled"]]) {
+    const saved = (await h.request("GET", `/api/import/jobs/${job.id}`)).stages[stage];
+    assert.equal(saved.status, "failed");
+    assert.equal(saved.attempts, 1);
+    assert.match(saved.error, /interrupted by a server restart.*check API usage/);
+  }
+  await h.restart();
+  assert.equal(h.requests.length, before + 1, "a second restart sends nothing");
+});
+
+test("a Vite restart in the same process leaves the running generation to finish once", async (t) => {
+  const h = await harness(t);
+  let edits = 0, entered, release;
+  const arrived = new Promise((resolve) => { entered = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  const mocked = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (url.endsWith("/images/edits")) { edits += 1; entered(); await gate; }
+    return mocked(url, options);
+  });
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  await arrived;
+  const replacement = wardrobeImportApi({ env: { OPENAI_API_KEY: "test-key", OPENAI_API_BASE_URL: "https://wardrobe-test.invalid",
+    WARDROBE_DATA_DIR: path.join(h.root, "data"), WARDROBE_MODEL_REFERENCE: "identity.png" } });
+  await replacement.configResolved({ root: h.root });
+  const during = JSON.parse(await readFile(path.join(h.root, "data", "jobs", job.id, "job.json"), "utf8"));
+  assert.equal(during.stages.garment.status, "processing", "the new instance neither fails nor restarts in-flight work");
+  release();
+  const finished = await h.waitForStage(job.id, "garment");
+  assert.equal(finished.stages.garment.attempts, 1);
+  await replacement.configResolved({ root: h.root });
+  assert.equal(edits, 1, "the paid request is sent exactly once and its result is kept");
+});
+
+test("hosted detection reserves quota first, then releases the writer for retailer and provider calls", async t => {
+  const image = await productImage();
+  const events = [];
+  let h;
+  h = await harness(t, {}, async kind => { events.push(`reserve:${kind}`); }, {
+    outsideLease: async callback => {
+      events.push(`detach:${h.requests.length}`);
+      const result = await callback();
+      events.push(`attach:${h.requests.length}`);
+      return result;
+    },
+    fetchWebsiteResource: async (url, { kind }) => {
+      events.push(`website:${kind}`);
+      return { url, bytes: kind === "image" ? image : Buffer.from('<meta property="og:title" content="Blue dress"><meta property="og:image" content="/dress.png">') };
+    },
+  });
+  h.setAnalysis([dress]);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { websiteUrl: "https://shop.example/dress" });
+  assert.deepEqual(events, ["detach:0", "website:page", "website:image", "attach:0", "reserve:text", "detach:0", "attach:1"]);
+  events.length = 0;
+  await h.request("POST", `/api/import/jobs/${job.id}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000040" });
+  assert.deepEqual(events, ["reserve:text", "detach:1", "attach:2"], "Sol retries run detached after their durable start marker");
+});
+
+test("a detection retry cannot start while another detached Sol check is still running", async t => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const file = path.join(h.root, "data", "jobs", job.id, "job.json");
+  const saved = JSON.parse(await readFile(file, "utf8"));
+  saved.detectionRetryAttempt = { id: "00000000-0000-4000-8000-000000000041", status: "started", createdAt: new Date().toISOString() };
+  await writeFile(file, JSON.stringify(saved));
+  const result = await h.request("POST", `/api/import/jobs/${job.id}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000042" }, 409);
+  assert.match(result.error, /still checking/);
+  assert.equal(h.requests.length, 1, "no second paid request while the first may still finish");
+  saved.detectionRetryAttempt.createdAt = new Date(Date.now() - 10 * 60_000).toISOString();
+  await writeFile(file, JSON.stringify(saved));
+  await h.request("POST", `/api/import/jobs/${job.id}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000043" });
+  assert.equal(h.requests.length, 2, "an interrupted older marker does not block a fresh retry");
+});

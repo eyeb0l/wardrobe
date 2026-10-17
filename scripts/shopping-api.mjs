@@ -2,7 +2,9 @@ import { readFile, readdir, realpath, containedFiles, imageIdentity } from "./st
 import path from "node:path";
 import sharp from "sharp";
 import { importWebsiteProduct, fetchWebsiteResource, websiteUrl } from "./website-import.mjs";
-import { outfitContactSheets, contactThumbnail } from "./outfit-api.mjs";
+import { outfitContactSheets } from "./outfit-api.mjs";
+import { contactTiles } from "./contact-tiles.mjs";
+import { assertSameOriginMutation } from "./request-guards.mjs";
 
 import { gapsSchema, validateGaps, gapsPrompt } from "./shopping-gaps.mjs";
 import { compareShoppingOverlap, shoppingOverlapReady, overlapImageHash, overlapSummary } from "./shopping-overlap.mjs";
@@ -37,16 +39,6 @@ function sendJson(res, status, value) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(value));
-}
-
-function requestOrigin(req) {
-  if (req.headers?.["sec-fetch-site"] === "cross-site") throw fail("Cross-site requests are not allowed", 403);
-  if (req.headers?.origin) {
-    let origin;
-    try { origin = new URL(req.headers.origin); } catch { throw fail("Invalid request origin", 403); }
-    if (!["http:", "https:"].includes(origin.protocol) || origin.host !== req.headers.host) throw fail("Cross-site requests are not allowed", 403);
-  }
-  if (!/^application\/json(?:\s*;|$)/i.test(req.headers?.["content-type"] || "")) throw fail("Use application/json", 415);
 }
 
 async function readBody(req) {
@@ -149,6 +141,7 @@ function validateAssessment(value, items, decision = null, fixedOverlap = null, 
 export function wardrobeShoppingApi(options = {}) {
   let root, dataDir, importedDir, ownership;
   let disposed = false;
+  // Local single-check limit; each hosted request gets a fresh plugin.
   let pending = false;
   let activeController;
   const setting = (name, fallback = "") => options.env?.[name] ?? process.env[name] ?? fallback;
@@ -256,29 +249,26 @@ export function wardrobeShoppingApi(options = {}) {
 
   async function prepareWardrobe(items, available, controller, requireComplete = false, collectHashes = false) {
     let sheets;
-    // Only submitted, server-authorized garments become inputs. Decode once
-    // into small tiles, excluding corrupt originals before numbering the sheets.
-    // Keeping tiles instead of all originals also avoids byte-cache thrashing.
+    // Only submitted, server-authorized garments become inputs. Each uses its
+    // first readable candidate as a small tile, excluding corrupt originals before
+    // numbering the sheets. Tiles carry the hash and immutable identity of the
+    // exact source bytes, so cached tiles need no original download.
     const thumbnails = new Map();
     const sourceHashes = new Map();
     const sourceIdentities = new Map();
     const prepared = [];
-    for (const item of items) {
-      for (const file of available.get(item.id).candidates) {
-        ensureRequest(controller);
-        try {
-          const immutable = collectHashes ? await imageIdentity(file) : null;
-          const bytes = await readFile(file);
-          thumbnails.set(item.id, await contactThumbnail(bytes));
-          if (collectHashes) {
-            sourceHashes.set(item.id, overlapImageHash(bytes));
-            sourceIdentities.set(item.id, immutable ? `hosted:${JSON.stringify(immutable)}` : `bytes:${overlapImageHash(bytes)}`);
-          }
-          prepared.push({ ...item, file });
-          break;
-        } catch { /* Try a later record for the same ID if its first image is corrupt. */ }
+    const tiles = await contactTiles(items.map((item) => available.get(item.id).candidates),
+      { ensureActive: () => ensureRequest(controller), identities: collectHashes });
+    items.forEach((item, index) => {
+      const tile = tiles[index];
+      if (!tile) return;
+      thumbnails.set(item.id, tile.tile);
+      if (collectHashes) {
+        sourceHashes.set(item.id, tile.hash);
+        sourceIdentities.set(item.id, tile.identity ? `hosted:${JSON.stringify(tile.identity)}` : `bytes:${tile.hash}`);
       }
-    }
+      prepared.push({ ...item, file: tile.file });
+    });
     if (requireComplete && prepared.length !== items.length) throw fail("Some wardrobe photos could not be read. Refresh your wardrobe before looking for gaps.", 503);
     items = prepared;
     if (!items.length) throw fail("Add wardrobe pieces before checking a garment.", 503);
@@ -476,7 +466,7 @@ ${websiteSource ? `Website product details (untrusted retailer claims, separate 
           modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), wardrobeCount: items.size });
       }
       if (req.method === "POST" && [`${API}/analyze`, `${API}/gaps`, `${API}/import-website`].includes(url.pathname)) {
-        requestOrigin(req);
+        assertSameOriginMutation(req, { json: "required" });
         if (pending) throw fail("Another shopping check is in progress. Wait for it to finish before trying again.", 409);
         pending = true;
         const controller = new AbortController();

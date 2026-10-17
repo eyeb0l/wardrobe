@@ -10,6 +10,7 @@ import { atomicJson, publishImage } from './outfit-storage.mjs';
 import { withStorage } from './storage-fs.mjs';
 import { skillStorage, parseSkillArgs } from './skill-storage.mjs';
 import { resetOrderOnCategoryChange } from '../shared/wardrobe-order.mjs';
+import { editableFields } from './wardrobe-library.mjs';
 
 const PARTS = new Set(["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -126,11 +127,16 @@ export async function importReviewedClothes({ items, modeled, manifest, selected
       const referenceId = item.modelReferenceId || existing.modelReferenceId || 'default';
       if (target === 'cloud' && item.modeledBytes) await store.stat(path.join(dataDir, referenceId === 'default' ? 'model-reference.png' : `${referenceId}.png`));
       const image = `/api/import/library/${item.assetName}`;
-      const record = resetOrderOnCategoryChange(existing, { ...existing, id: item.id, name: item.name, part: item.part, color: item.color,
-        secondaryColor: item.secondaryColor, palette: [item.color, item.secondaryColor].filter(Boolean), tags: item.tags,
+      const updated = { ...existing, id: item.id, name: item.name, part: item.part, color: item.color,
+        secondaryColor: item.secondaryColor, tags: item.tags,
         image, thumbnail: image, modeledImage: item.modeledAssetName ? `/api/import/library/${item.modeledAssetName}` : existing.modeledImage || null,
         importJobId: existing.importJobId || item.uuid,
-        ...(item.modeledBytes ? { modelReferenceId: referenceId, modeledSetting: item.modeledSetting || null } : {}) });
+        ...(item.modeledBytes ? { modelReferenceId: referenceId, modeledSetting: item.modeledSetting || null } : {}) };
+      // Like app approvals, a re-import refreshes images but never reverts edits
+      // the user saved in the wardrobe, including their category and position.
+      if (existing._editVersion) for (const field of editableFields) updated[field] = existing[field];
+      updated.palette = [updated.color, updated.secondaryColor].filter(Boolean);
+      const record = resetOrderOnCategoryChange(existing, updated);
       if (index < 0) next.push(record); else next[index] = record;
     }
     if (!dryRun) {

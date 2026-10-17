@@ -8,6 +8,10 @@ export const GC_SCHEMA_SQL = [
     state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'deleting', 'deleted')),
     deleted_at timestamptz
   )`,
+  // Reference checks run per listed Blob and inside every publication trigger.
+  `CREATE INDEX IF NOT EXISTS wardrobe_files_blob_url ON wardrobe_files (blob_url) WHERE blob_url IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS wardrobe_image_variants_source ON wardrobe_image_variants (source_blob_url)`,
+  `CREATE INDEX IF NOT EXISTS wardrobe_image_variants_blob_url ON wardrobe_image_variants (blob_url)`,
   // Publish and collect use the same row lock even for derivative writes, which
   // normally do not acquire the logical writer lease. Durable deletion markers
   // fence delayed writers after the collector has lost or released its lease.

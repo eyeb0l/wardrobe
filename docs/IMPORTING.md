@@ -18,6 +18,12 @@ For difficult detections, choose **Retry with Sol** in crop review or after a no
 
 New generated cutouts request a transparent PNG from Sunburst, then correct near-opaque garment interiors locally before normal review. Light/dark backgrounds and zoom help inspect edges and details. Older chroma-key jobs retain their automatic and manual edge cleanup controls. Both paths resume from saved bytes without another generation charge; saved wardrobe images are not changed retroactively. See [automatic garment cleanup](automatic-garment-cleanup.md) for checks and recovery behaviour.
 
+### Restarts and interrupted generation
+
+Restarting the local server never sends a paid request again. A cutout or modelled photo that was already requesting an image when the server stopped is marked failed with an interruption message: check provider usage before **Retry**, which starts a new paid request. Stages that had not reached the provider start normally, and cutout cleanup resumes from saved bytes. When Vite restarts inside the same process (for example after editing `.env` or `vite.config.mjs`), a generation that is still running finishes once and its result is kept.
+
+Approving a modelled photo publishes the wardrobe item before the import is marked complete. If that final step is interrupted, the import stays in review and can be approved again; an older import left complete is finished the next time its modelled photo is updated.
+
 ### Use original image
 
 For a likely single-item product shot, **Use original image** skips generative extraction. Existing transparency is preserved; opaque backgrounds are removed on the device with a browser worker, then shown against a checkerboard for review. Only a transparency mask is returned to the app: garment colours and dimensions come from the stored original. **Extract garment** remains the default for ordinary photos. If detection gets it wrong, you can manually select **Use original image** after checking that the full original contains one isolated item without a person or other products.

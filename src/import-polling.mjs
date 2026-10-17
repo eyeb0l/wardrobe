@@ -9,3 +9,20 @@ export function activeImportJobIds(jobs) {
       || (garment?.status === "approved" && modeled?.status === "pending");
   }).map((job) => job.id);
 }
+
+// One request per tick covers every polled job; the server caps each read.
+export const POLL_BATCH_SIZE = 32;
+export function importPollUrls(api, ids) {
+  const urls = [];
+  for (let start = 0; start < ids.length; start += POLL_BATCH_SIZE) {
+    urls.push(`${api}?ids=${ids.slice(start, start + POLL_BATCH_SIZE).map(encodeURIComponent).join(",")}`);
+  }
+  return urls;
+}
+
+// Poll promptly after progress, then back off gently while nothing changes.
+export const POLL_MIN_MS = 1500;
+export const POLL_MAX_MS = 3000;
+export function nextPollDelay(previous, changed) {
+  return changed ? POLL_MIN_MS : Math.min(POLL_MAX_MS, Math.round(previous * 1.5));
+}

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import * as fileSystem from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import sharp from "sharp";
 import { wardrobeImportApi } from "./import-job-api.mjs";
+import { withStorage } from "./storage-fs.mjs";
 
 async function harness(t, overrides = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-serverless-import-"));
@@ -328,4 +330,49 @@ test("hosted original override saves a browser mask without scheduling generatio
   await h.restart();
   const restored = await h.request('GET', `/api/import/jobs/${job.id}`);
   assert.equal(restored.body.stages.garment.backgroundRemoved, true);
+});
+
+test("modeled approval publishes before completing, and a stale complete job is finished rather than returned", async (t) => {
+  const h = await harness(t);
+  const toModeledReview = async () => {
+    const job = await h.createJob();
+    const before = h.tasks.length;
+    await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+    await h.plugin.runTask(h.tasks[before]);
+    assert.equal((await h.plugin.runTask(h.tasks[before])).job.stages.garment.status, "review");
+    assert.equal((await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`)).status, 200);
+    assert.equal((await h.plugin.runTask(h.tasks[before + 1])).job.stages.modeled.status, "review");
+    return job;
+  };
+  const library = async () => (await h.request("GET", "/api/import/wardrobe")).body;
+  const first = await toModeledReview();
+  // The job write after publication fails, as with a lost lease or a timeout.
+  const failing = { ...fileSystem, async writeFile(file, data, ...args) {
+    if (/job\.json|\.tmp$/.test(String(file)) && String(data).includes('"status": "complete"')) throw Object.assign(new Error("Simulated lost write"), { code: "EIO" });
+    return fileSystem.writeFile(file, data, ...args);
+  } };
+  assert.equal((await withStorage(failing, () => h.request("POST", `/api/import/jobs/${first.id}/stages/modeled/approve`))).status, 500);
+  assert.ok((await library()).find((item) => item.id === `import-${first.id}`).modeledImage, "the item was published first");
+  const pending = await h.loadJob(first.id);
+  assert.equal(pending.status, "active");
+  assert.equal(pending.stages.modeled.status, "review", "the job stays reviewable rather than hidden");
+  assert.equal((await h.request("POST", `/api/import/jobs/${first.id}/stages/modeled/approve`)).status, 200, "re-approval is idempotent");
+  await assert.rejects(access(h.jobPath(first.id)));
+
+  // A complete job saved by an older release before its library write.
+  const second = await toModeledReview();
+  const stale = await h.loadJob(second.id);
+  Object.assign(stale.stages.modeled, { status: "approved", decision: "approved" });
+  stale.status = "complete";
+  await writeFile(h.jobPath(second.id), JSON.stringify(stale));
+  assert.equal((await library()).find((item) => item.id === `import-${second.id}`).modeledImage, null);
+  const requests = h.requests.length;
+  const replacement = await h.request("POST", `/api/import/wardrobe/import-${second.id}/modeled`);
+  assert.equal(replacement.status, 200, JSON.stringify(replacement.body));
+  assert.equal(replacement.body.modeledReplacement, true, "a new replacement job, not the stale complete one");
+  assert.equal(replacement.body.status, "active");
+  const item = (await library()).find((entry) => entry.id === `import-${second.id}`);
+  assert.ok(item.modeledImage, "the interrupted publication was finished");
+  assert.equal(replacement.body.stages.modeled.assetUrl, item.modeledImage);
+  assert.equal(h.requests.length, requests, "finishing publication makes no paid request");
 });

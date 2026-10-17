@@ -6,6 +6,7 @@ import { DISPLAY_WIDTHS, DISPLAY_RECIPE } from "../shared/image-variants.mjs";
 import { displayKey, displayETag, encodeDisplayImage, matchesETag } from "./display-image.mjs";
 import { GC_SCHEMA_SQL, collectBlobs } from "./blob-gc.mjs";
 import { immutableByteCache } from "./immutable-byte-cache.mjs";
+import { mapLimit } from "./map-limit.mjs";
 
 export const CLOUD_ROOT = "/wardrobe-data";
 const LEASE_SECONDS = 270;
@@ -28,11 +29,23 @@ export const DISPLAY_CACHE_SCHEMA = `CREATE TABLE IF NOT EXISTS wardrobe_image_v
   size bigint NOT NULL CHECK (size > 0)
 )`;
 
+// Small contact-sheet tiles live in the database itself, so they need no Blob
+// objects or publication guards. Rows are keyed by an immutable source URL and
+// carry its content hash; the daily collector prunes rows for unreferenced sources.
+export const CONTACT_TILE_SCHEMA = `CREATE TABLE IF NOT EXISTS wardrobe_contact_tiles (
+  cache_key text PRIMARY KEY,
+  source_blob_url text NOT NULL,
+  recipe text NOT NULL,
+  source_sha256 text NOT NULL CHECK (source_sha256 ~ '^[a-f0-9]{64}$'),
+  tile_base64 text NOT NULL CHECK (length(tile_base64) BETWEEN 4 AND 2000000)
+)`;
+
 // This schema is applied by the explicit migration command, never by a request.
 // Every mutation locks and checks the lease row inside the same database
 // transaction as the metadata change. An expired worker cannot publish writes.
 export const CLOUD_SCHEMA_SQL = [
   DISPLAY_CACHE_SCHEMA,
+  CONTACT_TILE_SCHEMA,
   `CREATE TABLE IF NOT EXISTS wardrobe_files (
     path text PRIMARY KEY,
     kind text NOT NULL CHECK (kind IN ('file', 'dir')),
@@ -44,6 +57,10 @@ export const CLOUD_SCHEMA_SQL = [
     CHECK ((kind = 'dir' AND text_content IS NULL AND blob_url IS NULL) OR
            (kind = 'file' AND ((text_content IS NULL) <> (blob_url IS NULL))))
   )`,
+  // Byte-ordered prefix lookups for readdir/rm/rename. A default-collation
+  // primary key cannot serve descendant ranges, and LIKE with a parameter
+  // cannot use an index in a generic plpgsql plan.
+  `CREATE INDEX IF NOT EXISTS wardrobe_files_path_c ON wardrobe_files ((path COLLATE "C"))`,
   `CREATE TABLE IF NOT EXISTS wardrobe_storage_lease (
     id integer PRIMARY KEY CHECK (id = 1),
     token uuid,
@@ -109,7 +126,8 @@ export const CLOUD_SCHEMA_SQL = [
     END IF;
     IF operation = 'rm' THEN
       IF source.kind = 'dir' AND NOT (args->>'recursive')::boolean THEN RAISE EXCEPTION 'EISDIR' USING ERRCODE = 'P0001'; END IF;
-      DELETE FROM wardrobe_files WHERE path = target OR left(path, length(target) + 1) = target || '/';
+      DELETE FROM wardrobe_files WHERE path = target OR (path COLLATE "C" >= target || '/' AND path COLLATE "C" < target || '0'
+        AND left(path, length(target) + 1) = target || '/');
       RETURN;
     END IF;
     IF operation NOT IN ('rename', 'copy', 'link') THEN RAISE EXCEPTION 'EINVAL' USING ERRCODE = 'P0001'; END IF;
@@ -135,10 +153,11 @@ export const CLOUD_SCHEMA_SQL = [
     IF source.kind = 'dir' AND left(dest, length(target) + 1) = target || '/' THEN RAISE EXCEPTION 'EINVAL' USING ERRCODE = 'P0001'; END IF;
     IF source.kind = 'dir' AND destination.kind = 'file' THEN RAISE EXCEPTION 'ENOTDIR' USING ERRCODE = 'P0001'; END IF;
     IF source.kind = 'file' AND destination.kind = 'dir' THEN RAISE EXCEPTION 'EISDIR' USING ERRCODE = 'P0001'; END IF;
-    IF destination.kind = 'dir' AND EXISTS (SELECT 1 FROM wardrobe_files WHERE left(path, length(dest) + 1) = dest || '/') THEN RAISE EXCEPTION 'ENOTEMPTY' USING ERRCODE = 'P0001'; END IF;
+    IF destination.kind = 'dir' AND EXISTS (SELECT 1 FROM wardrobe_files WHERE path COLLATE "C" >= dest || '/' AND path COLLATE "C" < dest || '0' AND left(path, length(dest) + 1) = dest || '/') THEN RAISE EXCEPTION 'ENOTEMPTY' USING ERRCODE = 'P0001'; END IF;
     DELETE FROM wardrobe_files WHERE path = dest;
     UPDATE wardrobe_files SET path = dest || substring(path FROM length(target) + 1), updated_at = clock_timestamp()
-      WHERE path = target OR left(path, length(target) + 1) = target || '/';
+      WHERE path = target OR (path COLLATE "C" >= target || '/' AND path COLLATE "C" < target || '0'
+        AND left(path, length(target) + 1) = target || '/');
   END $$`,
   ...GC_SCHEMA_SQL,
 ];
@@ -189,7 +208,8 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
   let store;
   const acquireLease = async (waitMs, signal) => {
     const token = randomUUID(), deadline = performance.now() + waitMs;
-    for (;;) {
+    // Long waits back off so a detached worker does not poll Neon five times a second.
+    for (let pause = 200; ; pause = Math.min(pause * 1.5, 1_000)) {
       signal?.throwIfAborted();
       const acquired = await db.query(`UPDATE wardrobe_storage_lease SET token = $1::uuid,
         expires_at = clock_timestamp() + interval '${LEASE_SECONDS} seconds'
@@ -197,7 +217,7 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       if (acquired.length) return token;
       const remaining = deadline - performance.now();
       if (remaining <= 0) throw error("EBUSY", CLOUD_ROOT, "Another wardrobe operation is still running");
-      await delay(Math.min(200, remaining), undefined, { signal });
+      await delay(Math.min(pause, remaining), undefined, { signal });
     }
   };
   const owned = () => {
@@ -280,18 +300,68 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
   };
   store = {
     root: CLOUD_ROOT,
+    // Each writeFile replaces its row in one fenced statement.
+    atomicWrites: true,
     async imageIdentity(file) {
       const row = await imageRow(file);
       return `blob-sha256:${blobDigest(row.blob_url)}`;
     },
     async initializeGarbageCollection() { await db.transaction(GC_SCHEMA_SQL.map(text => ({ text }))); },
     async collectGarbage(options = {}) {
-      return store.withLease(async () => collectBlobs({ ...options, store, db, blob: await getBlob(),
-        ownerToken: () => owned().token }));
+      return store.withLease(async () => {
+        const result = await collectBlobs({ ...options, store, db, blob: await getBlob(), ownerToken: () => owned().token });
+        if (!options.dryRun) {
+          try {
+            result.contactTilesPruned = (await db.query(`DELETE FROM wardrobe_contact_tiles t WHERE NOT EXISTS
+              (SELECT 1 FROM wardrobe_files f WHERE f.blob_url = t.source_blob_url) RETURNING cache_key`)).length;
+          } catch (failure) { if (failure.code !== "42P01") throw failure; }
+        }
+        return result;
+      });
     },
     // Derivatives are immutable, independently reproducible cache entries. Their
     // insert-only writes do not take the wardrobe writer lease or change originals.
     async initializeDisplayImages() { await db.query(DISPLAY_CACHE_SCHEMA); },
+    async initializeContactTiles() { await db.query(CONTACT_TILE_SCHEMA); },
+    // Resolve every path in one fresh query and every cached tile in a few, then
+    // download and encode only misses. A tile is stored under the exact immutable
+    // URL whose bytes produced it. Like display variants, these insert-only cache
+    // writes need no writer lease; a missing table only disables persistence.
+    async contactTiles(files, { recipe, make, ensureActive = () => {}, concurrency = 6 }) {
+      const targets = files.map((file) => { try { return canonical(file); } catch { return null; } });
+      const unique = [...new Set(targets.filter(Boolean))];
+      const rows = unique.length ? await db.query("SELECT path, kind, blob_url FROM wardrobe_files WHERE path = ANY($1::text[])", [unique]) : [];
+      const sources = new Map(rows.filter((row) => row.kind === "file" && row.blob_url).map((row) => [row.path, row.blob_url]));
+      const keyFor = (url) => createHash("sha256").update(`${recipe}:${url}`).digest("hex");
+      const keys = [...new Set([...sources.values()].map(keyFor))];
+      const cached = new Map();
+      let persist = true;
+      try {
+        // Bounded responses: a tile is typically tens of kilobytes.
+        for (let offset = 0; offset < keys.length; offset += 40) {
+          for (const row of await db.query("SELECT cache_key, source_blob_url, source_sha256, tile_base64 FROM wardrobe_contact_tiles WHERE cache_key = ANY($1::text[]) AND recipe = $2",
+            [keys.slice(offset, offset + 40), recipe])) cached.set(row.cache_key, row);
+        }
+      } catch (failure) { if (failure.code !== "42P01") throw failure; persist = false; }
+      return mapLimit(targets, concurrency, async (target) => {
+        ensureActive();
+        const url = target && sources.get(target);
+        if (!url) return null;
+        const identity = `blob-sha256:${blobDigest(url)}`, key = keyFor(url), hit = cached.get(key);
+        if (hit?.source_blob_url === url) return { identity, hash: hit.source_sha256, tile: Buffer.from(hit.tile_base64, "base64") };
+        let tile, hash;
+        try {
+          const bytes = await readBlob(url, target);
+          hash = createHash("sha256").update(bytes).digest("hex");
+          tile = await make(bytes);
+        } catch { return null; }
+        if (persist) {
+          await db.query(`INSERT INTO wardrobe_contact_tiles (cache_key, source_blob_url, recipe, source_sha256, tile_base64)
+            VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cache_key) DO NOTHING`, [key, url, recipe, hash, tile.toString("base64")]).catch(() => {});
+        }
+        return { identity, hash, tile };
+      });
+    },
     async originalImage(file, condition) {
       const source = await imageRow(file);
       const hash = blobDigest(source.blob_url);
@@ -392,7 +462,9 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     },
     async initialize() { await db.transaction(CLOUD_SCHEMA_SQL.map((text) => ({ text }))); },
     async assertLease() { await mutate("assert", {}); },
-    async withoutLease(callback, validate) {
+    // Callers may wait longer than the default to republish a paid result, up to
+    // `reacquireBy` (epoch ms). Ownership is still fenced by a fresh token.
+    async withoutLease(callback, validate, { reacquireBy } = {}) {
       const owner = owned();
       if (typeof validate !== "function") throw new Error("Detached work requires a revision validator");
       await store.assertLease();
@@ -404,7 +476,7 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       try { result = await callback(); } catch (error) { failure = error; }
       try {
         // A new token fences any asynchronous operation from the old lease.
-        owner.token = await acquireLease(30_000);
+        owner.token = await acquireLease(reacquireBy === undefined ? 30_000 : Math.max(1_000, reacquireBy - Date.now()));
         owner.suspended = false;
         owner.startHeartbeat();
         await validate();
@@ -485,8 +557,8 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
       const target = canonical(file);
       if ((await rowFor(target, "kind")).kind !== "dir") throw error("ENOTDIR", target);
       const columns = options.withFileTypes ? "path, kind, size, updated_at" : "path";
-      const rows = await db.query(`SELECT ${columns} FROM wardrobe_files WHERE left(path, length($1) + 1) = $1 || '/'
-        AND strpos(substring(path FROM length($1) + 2), '/') = 0 ORDER BY path`, [target]);
+      const rows = await db.query(`SELECT ${columns} FROM wardrobe_files WHERE path COLLATE "C" >= $1 || '/' AND path COLLATE "C" < $1 || '0'
+        AND left(path, length($1) + 1) = $1 || '/' AND strpos(substring(path FROM length($1) + 2), '/') = 0 ORDER BY path`, [target]);
       return rows.map((row) => options.withFileTypes ? { name: path.posix.basename(row.path), ...fileStat(row) } : path.posix.basename(row.path));
     },
     async containedFiles(directory, filenames) {

@@ -141,6 +141,30 @@ test('warmup reads each original once and HTTP delivery revalidates privately', 
   const second=await request(first.headers.ETag);assert.equal(second.status,304);assert.equal(second.bytes,undefined);
 });
 
+test('local variants reuse the content hash until the file is replaced in place or by rename', async t=>{
+  const fs=await import('node:fs/promises'), path=await import('node:path'), os=await import('node:os');
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'wardrobe-display-local-')); t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const file=path.join(root,'photo.png'), image=color=>sharp({create:{width:400,height:300,channels:4,background:color}}).png().toBuffer();
+  await fs.writeFile(file,await image('#336699'));
+  let reads=0; const storage={...fs,async readFile(...args){reads++;return fs.readFile(...args);}};
+  const request=async(condition)=>{
+    const headers={};let bytes;
+    const res={statusCode:200,setHeader(k,v){headers[k]=v},end(value){bytes=value}};
+    await withStorage(storage,()=>sendDisplayImage({headers:{'if-none-match':condition}},res,file,new URL('http://local/api/file?format=webp&w=320')));
+    return {etag:headers.ETag,bytes,status:res.statusCode};
+  };
+  const first=await request(); assert.equal(first.status,200); assert.equal(reads,1);
+  assert.equal((await request(first.etag)).status,304,'revalidation');
+  assert.ok((await request()).bytes.equals(first.bytes)); assert.equal(reads,1,'unchanged files are neither reread nor rehashed');
+  const { mtime }=await fs.stat(file);
+  await fs.writeFile(file,await image('#993366')); await fs.utimes(file,mtime,new Date(mtime.getTime()+5000));
+  const edited=await request(first.etag); assert.equal(edited.status,200); assert.notEqual(edited.etag,first.etag);
+  const replacement=path.join(root,'next.png'); await fs.writeFile(replacement,await image('#669933'));
+  const current=await fs.stat(file); await fs.utimes(replacement,current.atime,current.mtime); await fs.rename(replacement,file);
+  const renamed=await request(edited.etag); assert.equal(renamed.status,200); assert.notEqual(renamed.etag,edited.etag);
+  assert.equal((await sharp(renamed.bytes).stats()).dominant.g>(await sharp(renamed.bytes).stats()).dominant.r,true,'served bytes come from the replacement');
+});
+
 test('responsive URLs preserve version queries and never optimize uploads, SVGs, or external URLs',()=>{
   const src='/api/import/library/photo.png?v=attempt-2';
   assert.equal(displayImageSource(src,320),src+'&format=webp&w=320');

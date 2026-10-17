@@ -38,18 +38,18 @@ npm ci
 npx playwright install chromium
 ```
 
-On squiggle, Chromium revision 1248 is already installed in
-`/tmp/wardrobe-audit-browsers`. Reuse it without downloading another browser:
+On squiggle, `/tmp` is a tmpfs that is cleared on reboot, so keep toolchains
+out of it. Chromium revision 1248 (matching Playwright 1.64.0) is installed in
+Playwright's default cache, `~/.cache/ms-playwright`, so no
+`PLAYWRIGHT_BROWSERS_PATH` is needed and no download is required.
+
+The shell default on squiggle is Node 24. Select the checksum-verified Node 22
+installation before running npm:
 
 ```bash
-export PLAYWRIGHT_BROWSERS_PATH=/tmp/wardrobe-audit-browsers
-```
-
-If Node 22 is not your shell default, this existing squiggle installation can
-be selected before running npm:
-
-```bash
-export PATH=/tmp/shopping-node22/node-v22.23.3-linux-x64/bin:$PATH
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+node -v   # v22.23.3
+npm ci    # rerun whenever node_modules is missing a package from package.json
 ```
 
 Choose an unused local port and an artifact directory unique to your task:
@@ -121,17 +121,13 @@ count unused pairs and check persistence through retries, restarts and approval.
 
 ```bash
 node --test scripts/outfit-required-piece.test.mjs
-PLAYWRIGHT_BROWSERS_PATH=/tmp/wardrobe-piece-browsers npx playwright install chromium
-PLAYWRIGHT_BROWSERS_PATH=/tmp/wardrobe-piece-browsers \
-  WARDROBE_BROWSER_PORT=5236 \
+WARDROBE_BROWSER_PORT=5236 \
   WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-piece-browser \
   npm run test:browser -- tests/browser/outfit-required-piece.spec.mjs
 rg --files /tmp/wardrobe-piece-browser
 ```
 
-Use Node 22 and `npm ci` as above. The matching Chromium revision 1248 is now
-also installed at `/tmp/wardrobe-piece-browsers`; omit the install command when
-reusing it. Playwright starts, waits for and stops its isolated Vite server.
+Use Node 22, `npm ci` and the default Chromium cache as above. Playwright starts, waits for and stops its isolated Vite server.
 Choose another unused port and unique artifact directory for concurrent tasks.
 The first test saves `style-this-piece.png` and `outfits-with-piece.png` under
 each viewport's artifact directory. Inspect those images and `browser-health.json`.

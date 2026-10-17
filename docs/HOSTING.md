@@ -51,7 +51,7 @@ After the import succeeds and deployment protection is verified, set `WARDROBE_H
 
 In a signed-out/private browser, open both the production domain and its generated deployment URL. The page and a direct API URL such as `/api/import/jobs` must require Vercel sign-in. Then sign in with your account and inspect the wardrobe, references, and existing photos before generating anything.
 
-Only one operation can hold the cloud writer lease. Background image generation and garment cleanup release it during provider waits and image processing, then validate task ownership and the job revision before saving. Other items can be updated during that work. Short storage contention during cleanup previews retries automatically; the same active job stays protected from conflicting edits. Some synchronous endpoints still hold the writer throughout their request. Reads remain available. Job state survives deployments, and polling the jobs list can recover work saved before dispatch.
+Only one operation can hold the cloud writer lease. Background image generation and garment cleanup release it during provider waits and image processing, then validate task ownership and the job revision before saving. Other items can be updated during that work. Short storage contention during cleanup previews retries automatically; the same active job stays protected from conflicting edits. No request holds the writer during a provider or retailer call: clothing detection, Sol detection retries (fenced by the job revision, one at a time per item) and accessory suggestions release it after reserving allowance, and Shopping takes only short leases for its allowance. A finished background result waits for a busy writer, such as a backup or the storage cleanup, for as long as its task claim and function time allow (up to about four minutes after a short provider call) instead of 30 seconds. If it still cannot save, it expires its own claim, so the next delivery marks the attempt for review at once, and its workflow sleeps until a live claim ends rather than polling. Reads remain available. Job state survives deployments, and polling the jobs list can recover work saved before dispatch.
 
 An interrupted, uncertain paid request is marked for review rather than repeated automatically. Check provider usage before choosing **Retry**, which starts a new paid request.
 
@@ -80,7 +80,7 @@ Shopping additionally requires `WARDROBE_DECISIONS_SHOPPING_OVERLAP_ENABLED=1`. 
 
 Run `npm test` and `npm run build:vercel` before release. Push reviewed code to the connected production branch, or make a Vercel CLI source deployment from the project checkout. `build:vercel` builds the frontend, hosted API, and workflows together.
 
-Source deployments preserve Neon and Blob data when storage connections and production environment variables remain unchanged. A deployment rollback changes code, not data. Local `npm run dev` uses its own filesystem; hosted edits and new photos do not appear in local `data/` automatically.
+Source deployments preserve Neon and Blob data when storage connections and production environment variables remain unchanged. A deployment rollback changes code, not data. If an older release served this store (for example after a rollback), delete `outfit-jobs/.open-jobs.json` when rolling forward so outfit reservations are rebuilt (see [outfits](OUTFITS.md)). After deploying a release that adds schema, run the [schema upgrade](#schema-upgrades) once. Local `npm run dev` uses its own filesystem; hosted edits and new photos do not appear in local `data/` automatically.
 
 Project skills default to the live cloud wardrobe. Use [skill storage](SKILL_STORAGE.md) for private task snapshots and additive publication of reviewed imports/outfits; do not rerun the initial migration to publish new work. The same helpers support an explicitly selected local store.
 
@@ -100,27 +100,28 @@ Modelled garment generation plans a fresh setting using the configured vision mo
 
 Original PNGs are retained for generation, downloads, and precise colour sampling. Gallery images, outfit photos, references, and import previews use responsive WebP copies at widths of 320, 640, or 1280 pixels, without enlarging smaller originals. Encoding uses quality 85 and alpha quality 100. Originals are never recompressed or made public.
 
-Private Blob stores the copies; `wardrobe_image_variants` indexes them separately. A missing size is generated on first display through the same authenticated API route. Compression makes no paid model calls. To initialise this additive cache table and prepare existing images:
+Private Blob stores the copies; `wardrobe_image_variants` indexes them separately. A missing size is generated on first display through the same authenticated API route. Compression makes no paid model calls. The table is part of the [schema upgrade](#schema-upgrades). To prepare existing images ahead of first display:
 
 ```sh
 # Read-only inventory.
 node --env-file=.env.cloud scripts/warm-display-images.mjs
 
-# Create the cache table and prepare all display sizes; resumable.
+# Prepare all display sizes; resumable. Also creates the cache tables if missing.
 node --env-file=.env.cloud scripts/warm-display-images.mjs --apply
 ```
 
-Fresh migrations create the table automatically. Warmup leaves originals unchanged; unused originals and derivatives are eligible for the cleanup below.
+Warmup is optional and leaves originals unchanged; unused originals and derivatives are eligible for the cleanup below. Until the schema upgrade creates `wardrobe_contact_tiles`, contact sheets still work but every run downloads and decodes the originals again.
 
 ### Caching and read behaviour
 
 - **Private image responses:** originals and WebP use `private, no-cache` and an ETag derived from immutable object identity. A matching revalidation returns 304 without downloading image bytes. Routes still check current file references and any required manifest membership first. No private response enters the public CDN cache.
 - **Blob reads:** immutable upload URLs permit private Blob CDN caching. Each warm storage client also retains at most 64 MiB / 256 image entries, with an 8 MiB maximum per entry, and coalesces concurrent reads of the same object. Database path lookups remain fresh, so replacement/deletion takes effect immediately. Backup downloads and restored-upload integrity checks bypass both caches.
 - **Workers:** a warm worker reuses its bounded storage client, but each step acquires a fresh fenced lease and reads current task/file metadata. Separate instances and explicitly supplied stores do not share caches. Allow for repeated downloads on cold starts; there is no durable worker cache.
-- **Metadata reads:** outfit/Shopping settings check file existence instead of downloading originals for dimensions. Cloud garment paths resolve in one fresh metadata query; local paths retain symlink checks. Accepted outfit reads omit generation history, and a single-job read loads only that job. Settings, history, and recovery still load state needed for reservations and pending work.
-- **Image processing:** modelled import generation reads the cutout and identity reference without the unused source upload. Shopping resolves the submitted inventory, validates the selected reference, and decodes each usable cutout once per contact-sheet tile. Published display variants serve the just-encoded bytes; if another request won publication, its stored copy is used. These optimisations preserve originals, contact-sheet recipes, and provider inputs.
+- **Metadata reads:** outfit/Shopping settings check file existence instead of downloading originals for dimensions. Cloud garment paths resolve in one fresh metadata query; local paths retain symlink checks. Accepted outfit reads omit generation history, and a single-job read loads only that job. Hosted settings, mutations, worker steps and recovery read only open outfit jobs (planning, generating, or holding an unresolved look) through `outfit-jobs/.open-jobs.json`; only the history list reads every job.
+- **Image processing:** modelled import generation reads the cutout and identity reference without the unused source upload. Shopping resolves the submitted inventory, validates the selected reference, and prepares one contact-sheet tile per usable cutout.
+- **Contact-sheet tiles:** outfit planning and Shopping prepare up to six tiles concurrently, in a fixed order. Hosted tiles (236 × 252 PNG) are stored in `wardrobe_contact_tiles`, keyed by recipe and the original's immutable Blob URL, together with the SHA-256 of those original bytes. Later runs resolve all paths and cached tiles in a few database queries and download only uncached or replaced originals; a corrupt original is skipped and never cached. Planning still re-reads and hash-checks the selected garments before committing, and Shopping checks still compare current identities. The daily cleanup prunes tiles whose original is no longer referenced. Local servers keep a bounded in-memory tile cache keyed by content hash; they still read each original to hash it but skip re-decoding. Published display variants serve the just-encoded bytes; if another request won publication, its stored copy is used. These optimisations preserve originals, contact-sheet recipes, and provider inputs.
 - **Outfit generation:** planning validates originals while preparing contact sheets, then rechecks selected garments and current combination reservations before committing. Rendering, retries, and approval validate only selected images. Hosted approval publishes a validated candidate with a fenced, exclusive metadata link, retaining its immutable original and existing WebP copies. Removing a candidate reference cannot delete a Blob still referenced by an accepted outfit. Local approval publishes independent image bytes.
-- **Browser reads:** the Outfits view treats successful collection, settings, and history results as fresh for 30 seconds during in-app navigation; each loads independently. Returning to the tab/window refreshes them, and edits/generation invalidate affected resources. Hidden views cancel reads and pause polling. Import polling requests only jobs that can advance on the server, without overlapping polls. Small outfit thumbnails use smaller derivatives than detail views. This is browser-view state, not a shared server cache.
+- **Browser reads:** the Outfits view treats successful collection, settings, and history results as fresh for 30 seconds during in-app navigation; each loads independently. Returning to the tab/window refreshes them, and edits/generation invalidate affected resources. Hidden views cancel reads and pause polling. Import polling requests only jobs that can advance on the server, in one batched read per tick (`GET /api/import/jobs?ids=…`, at most 32 IDs), without overlapping polls. It polls every 1.5 s after progress and backs off to 3 s while nothing changes. Batched progress reads do not trigger outbox recovery; opening the importer (the full jobs list) does. Small outfit thumbnails use smaller derivatives than detail views. This is browser-view state, not a shared server cache.
 
 ### Accessory-suggestion cache upgrade
 
@@ -144,12 +145,9 @@ Blob cache misses consume Simple Operations and Fast Origin Transfer; downloads 
 
 The cron in `vercel.json` calls `/api/maintenance/storage` daily at `0 20 * * *` (20:00 UTC; 03:00 Bangkok the following day). Hobby invokes it within that hour. Configure a separate random **Production-only** `CRON_SECRET`; Vercel sends it as `Authorization: Bearer …`. Keep deployment protection enabled. See [cron authentication](https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs) and [Hobby schedule precision](https://vercel.com/docs/cron-jobs/usage-and-pricing).
 
-For an existing store, initialise the display cache table above if needed, then apply the additive cleanup schema before deploying this feature:
+For an existing store, run the [schema upgrade](#schema-upgrades) before deploying this feature; it creates the collection tables and publication guards. `collect-cloud-garbage.mjs --initialize` applies only that part and remains equivalent for it.
 
 ```sh
-# Initialize collection tables/publication guards, then inspect; no deletions.
-node --env-file=.env.cloud scripts/collect-cloud-garbage.mjs --initialize
-
 # Inspect only, apart from acquiring/releasing the normal writer lease.
 node --env-file=.env.cloud scripts/collect-cloud-garbage.mjs
 
@@ -164,3 +162,17 @@ An object must stay unreferenced for **seven days after first observation**, not
 The collector saves its listing cursor, deletes at most 100 objects per run, and observes a bounded time budget. Failed deletions retry later; a busy writer causes the scheduled run to skip. Counts are logged and saved in `.blob-gc-state.json` in the cloud store.
 
 Cleanup permanently deletes eligible Blobs. It neither backs up data nor removes referenced originals, retained historical-job files, or hidden items still in storage. Historical-job retention and removal of deletion records are separate concerns. Never manually delete an object still referenced by the database.
+
+### Schema upgrades
+
+Fresh migrations create the full schema. An existing store picks up every later additive change with this one command: the display-variant and contact-tile caches, the cleanup tables and publication guards, the byte-ordered path index used by directory listings, moves and recursive deletes, and the Blob reference indexes used by cleanup and publication guards. It reapplies the idempotent schema:
+
+```sh
+# Report only.
+node --env-file=.env.cloud scripts/upgrade-cloud-schema.mjs
+
+# Create missing tables/indexes and replace functions/triggers in one transaction.
+node --env-file=.env.cloud scripts/upgrade-cloud-schema.mjs --apply
+```
+
+It copies, rewrites and deletes no wardrobe files, takes no writer lease and is safe to rerun. It is not the one-time `migrate-to-cloud.mjs` import. Queries remain correct before and after it runs, so it can be applied before or after a deployment; until it runs, those lookups scan the table and contact tiles are not persisted. Run it before relying on automatic cleanup, which needs the collection tables.

@@ -12,9 +12,39 @@ export const INTERRUPTED = "Generation was interrupted. Check API usage before r
 let workerStore;
 const defaultStore = () => workerStore ??= createCloudStore();
 
+// A detached owner stays live this long; a step must also finish, including its
+// final save, inside Vercel's 300 s function limit.
+const DETACHED_MS = 260_000, STEP_MS = 280_000;
+// Sleep once until a live claim ends instead of polling the writer lease.
+const retryAt = activeUntil => {
+  const until = Date.parse(activeUntil) + 1_000;
+  return until > Date.now() + 5_000 ? { busy: true, retryAt: new Date(until).toISOString() } : { busy: true };
+};
+
 export async function executeCloudTask(id, step, { store = defaultStore(), pluginFactory = createPlugin, reserve = reservePaidCall,
-  enabled = hostedEnabled,
+  enabled = hostedEnabled, detachedMs = DETACHED_MS, stepMs = STEP_MS, settleWaitMs = 5_000,
 } = {}) {
+  const claim = { started: Date.now() };
+  try { return await runStep(id, step, { store, pluginFactory, reserve, enabled, detachedMs, stepMs }, claim); }
+  catch (error) {
+    if (error.code !== "ESTALE" || !claim.owner) throw error;
+    // This invocation lost its writer after claiming the task. Expire its own
+    // live claim so the next delivery settles it through the normal interrupted
+    // or free-cleanup path, rather than polling until the claim times out.
+    try {
+      await store.withLease(() => withStorage(store, async () => {
+        const fresh = await readTask(id);
+        if (fresh.owner === claim.owner && fresh.state === "running") await saveTask({ ...fresh, activeUntil: new Date().toISOString() });
+      }), { waitMs: settleWaitMs });
+      return { busy: true };
+    } catch (failure) {
+      if (failure.code !== "EBUSY") throw failure;
+      return claim.activeUntil ? retryAt(claim.activeUntil) : { busy: true };
+    }
+  }
+}
+
+function runStep(id, step, { store, pluginFactory, reserve, enabled, detachedMs, stepMs }, claim) {
   return store.withLease(() => withStorage(store, async () => {
     const task = await readTask(id);
     if (["done", "failed"].includes(task.state)) return { more: false };
@@ -22,21 +52,24 @@ export async function executeCloudTask(id, step, { store = defaultStore(), plugi
     if (task.step < step) throw new Error("Task steps arrived out of order");
     // Duplicate workflow deliveries must wait while another invocation is
     // outside the storage lease. Expired paid work is never dispatched again.
-    if (task.state === "running" && Date.parse(task.activeUntil) > Date.now()) return { busy: true };
-    const owner = randomUUID();
+    if (task.state === "running" && Date.parse(task.activeUntil) > Date.now()) return retryAt(task.activeUntil);
+    const owner = claim.owner = randomUUID();
     const outsideLease = async callback => {
       if (!store.withoutLease) return callback();
       const jobPath = `/wardrobe-data/${task.payload.kind === "import" ? "jobs" : "outfit-jobs"}/${task.payload.jobId}/job.json`;
       const revision = await readFile(jobPath, "utf8");
-      const activeUntil = new Date(Date.now() + 260_000).toISOString();
+      const until = Date.now() + detachedMs;
+      const activeUntil = claim.activeUntil = new Date(until).toISOString();
       await saveTask({ ...await readTask(id), owner, activeUntil });
+      // A finished paid result waits out a briefly busy writer (backup, GC)
+      // while its live claim and this invocation can still save it.
       return store.withoutLease(callback, async () => {
         const fresh = await readTask(id);
         if (fresh.owner !== owner || fresh.state !== "running" || Date.parse(fresh.activeUntil) <= Date.now()
           || revision !== await readFile(jobPath, "utf8")) {
           throw Object.assign(new Error("Task or source changed during processing"), { code: "ESTALE" });
         }
-      });
+      }, { reacquireBy: Math.min(until - 2_000, claim.started + stepMs) });
     };
     const plugin = await pluginFactory(task.payload.kind, { beforePaidCall: reserve, outsideLease });
     try {

@@ -81,6 +81,20 @@ test('cloud import dry run is read-only, real saves preserve records and reruns 
   assert.equal(JSON.parse(await h.store.readFile(CLOUD_ROOT+'/library.json','utf8')).length,2);
 });
 
+test('skill re-imports refresh images but keep wardrobe edits, category and position',async t=>{
+  const h=await setup(t);const first=await importReviewedClothes(h.options);const id=first.items[0].id;
+  const edited={name:'My red top',part:'wholebody_up',color:'#aa0000',secondaryColor:'#000000',tags:['mine'],_editVersion:'edit-1',sortOrder:3};
+  await h.store.withLease(async()=>{const records=JSON.parse(await h.store.readFile(CLOUD_ROOT+'/library.json','utf8'));
+    await h.store.writeFile(CLOUD_ROOT+'/library.json',JSON.stringify(records.map(r=>r.id===id?{...r,...edited}:r)));});
+  await fs.writeFile(h.root+'/modeled/piece.png',await sharp({create:{width:60,height:60,channels:4,background:'blue'}}).png().toBuffer());
+  const second=await importReviewedClothes(h.options);
+  const record=JSON.parse(await h.store.readFile(CLOUD_ROOT+'/library.json','utf8')).find(r=>r.id===id);
+  for(const [key,value] of Object.entries(edited))assert.deepEqual(record[key],value,key);
+  assert.deepEqual(record.palette,['#aa0000','#000000']);
+  assert.notEqual(second.items[0].modeledAssetName,first.items[0].modeledAssetName);
+  assert.equal(record.modeledImage,'/api/import/library/'+second.items[0].modeledAssetName,'the new modelled photo is still published');
+});
+
 test('cloud outfit save is additive, dry-run has no writes, conflicts and stale garments fail',async t=>{
   const h=await setup(t), staged=h.root+'/outfits.json';
   const outfit={id:'reviewed',name:'Reviewed',occasion:['casual'],garmentIds:['owned'],reason:'Original garment',status:'accepted',image:'outfit-images/reviewed.png',modelReferenceId:'default'};

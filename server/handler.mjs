@@ -9,8 +9,7 @@ import { generateWardrobe } from "./generation-workflow.mjs";
 import { recoverOutbox } from "./outbox.mjs";
 import { maintenance } from "./maintenance.mjs";
 import { hostedEnabled } from "./hosted-enabled.mjs";
-import { outsideRequestLease, independentDecisionLeases } from "./request-lease.mjs";
-import { shoppingOverlapReady } from "../scripts/shopping-overlap.mjs";
+import { outsideRequestLease, leaseFreeRequests } from "./request-lease.mjs";
 
 let lastRecovery = 0;
 let imageStore;
@@ -50,9 +49,10 @@ export default async function handler(req, res) {
   if (!kind) return json(res, 404, { error: "Not found" });
   if (!["GET", "POST", "DELETE", "PATCH", "PUT"].includes(req.method)) return json(res, 405, { error: "Method not allowed" });
   const readOnly = req.method === "GET";
-  const independentDecisions = independentDecisionLeases(pathname)
-    && (kind !== "shopping" || shoppingOverlapReady(process.env));
-  if (readOnly && pathname.endsWith("/jobs") && Date.now() - lastRecovery > 30_000) {
+  const independentDecisions = leaseFreeRequests(pathname);
+  // Recovery takes the writer lease and scans every job. Run it from the full
+  // list read (opening the importer or outfits), not from frequent progress polls.
+  if (readOnly && pathname.endsWith("/jobs") && !requestUrl.searchParams.has("ids") && Date.now() - lastRecovery > 30_000) {
     lastRecovery = Date.now();
     waitUntil(recoverOutbox());
   }
