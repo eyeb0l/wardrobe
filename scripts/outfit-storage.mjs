@@ -135,6 +135,7 @@ export function validateJob(value, expectedId) {
   requireValue(Number.isInteger(value.count) && value.count >= 1 && value.count <= 12, file, "count");
   requireValue(JOB_STATUSES.includes(value.status), file, "status");
   requireValue(text(value.direction), file, "direction");
+  optional(value, "requiredGarmentId", (id) => text(id) && /^[a-z0-9][a-z0-9-]{0,119}$/.test(id), file, "job");
   requireValue(text(value.modelReferenceId) && Boolean(value.modelReferenceId.trim()), file, "modelReferenceId");
   for (const key of ["createdAt", "updatedAt"]) requireValue(timestamp(value[key]), file, key);
   optional(value, "error", nullableText, file, "job");

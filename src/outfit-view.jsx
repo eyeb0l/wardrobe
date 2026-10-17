@@ -181,20 +181,28 @@ function setupMessage(config) {
   return "";
 }
 
-function GenerateForm({ config, configError, refreshing, onRefresh, busy, error, onSubmit }) {
-  const maxCount = Math.max(1, Math.min(12, config?.maxCount || 12, config?.availableCombinations ?? 12));
+function GenerateForm({ config, configError, refreshing, onRefresh, busy, error, onSubmit, requiredGarmentId, itemsById, onRemoveGarment }) {
+  const garment = itemsById.get(requiredGarmentId);
+  const available = requiredGarmentId ? config?.garmentCombinations?.[requiredGarmentId] : config?.availableCombinations;
+  const maxCount = Math.max(1, Math.min(12, config?.maxCount || 12, available ?? 12));
   const [count, setCount] = useState(Math.min(6, maxCount));
   const [direction, setDirection] = useState("");
   const [modelReferenceId, setModelReferenceId] = useState(config?.modelReferences?.[0]?.id || "");
   const references = config?.modelReferences || [];
   const chosenReference = references.find((reference) => reference.id === modelReferenceId);
   const effectiveReference = chosenReference?.id || "";
-  const problem = configError || setupMessage(config);
+  const problem = configError || setupMessage(config) || (requiredGarmentId && (!garment || available === undefined) ? "This piece is no longer available for outfits. Remove it or refresh your wardrobe." : requiredGarmentId && !available ? "There are no new top-and-bottom combinations with this piece. Add more pieces or remove it to try other looks." : "");
   const validCount = Number.isInteger(Number(count)) && Number(count) >= 1 && Number(count) <= maxCount;
+  useEffect(() => { setCount((current) => Math.min(Number(current) || 1, maxCount)); }, [maxCount]);
 
-  return <form className="outfit-generate-form" onSubmit={(event) => { event.preventDefault(); if (!busy && !refreshing && !problem && validCount && effectiveReference) onSubmit({ count: Number(count), direction: direction.trim(), modelReferenceId: effectiveReference }); }}>
+  return <form className="outfit-generate-form" onSubmit={(event) => { event.preventDefault(); if (!busy && !refreshing && !problem && validCount && effectiveReference) onSubmit({ count: Number(count), direction: direction.trim(), modelReferenceId: effectiveReference, ...(requiredGarmentId ? { requiredGarmentId } : {}) }); }}>
     <div className="outfit-form-content">
     <p className="outfit-form-intro">Your own pieces, modelled using your reference photo. Review each look before adding it to your collection.</p>
+    {requiredGarmentId ? <section className="outfit-required-piece" aria-label="Piece included in every outfit">
+      {garment ? <Photo src={garment.thumbnail || garment.image} alt="" sizes="64px" /> : null}
+      <div><strong>{garment?.name || "Unavailable piece"}</strong><p>Included in every outfit</p></div>
+      <button type="button" className="outfit-text-button" disabled={busy} onClick={onRemoveGarment} aria-label="Remove required piece">Remove</button>
+    </section> : null}
     {problem ? <div className="outfit-notice" role="status"><p>{problem}</p><button type="button" className="outfit-text-button" onClick={onRefresh} disabled={refreshing || busy}>{refreshing ? "Refreshing…" : "Refresh settings"}</button></div> : null}
     <div className="outfit-form-row">
       <label className="outfit-field" htmlFor="outfit-count"><span>Number of outfits</span><input id="outfit-count" name="count" type="number" min="1" max={maxCount} step="1" value={count} onChange={(event) => setCount(event.target.value)} disabled={busy} required aria-describedby="outfit-count-hint" /><small id="outfit-count-hint">Choose 1–{maxCount} outfits.</small></label>
@@ -269,7 +277,7 @@ function JobRow({ job, onOpen }) {
   </button>;
 }
 
-export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
+export function OutfitView({ items = EMPTY_ITEMS, active = true, generationRequest, onGenerationHandled }) {
   const [discoveryConfig, setDiscoveryConfig] = useState(null);
   const [discoveryResult, setDiscoveryResult] = useState(null);
   const [outfits, setOutfits] = useState([]);
@@ -285,6 +293,13 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
   const [refreshingConfig, setRefreshingConfig] = useState(true);
   const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
   const [modal, setModal] = useState(null);
+  useEffect(() => {
+    if (active && generationRequest) {
+      setActionError("");
+      setModal({ type: "generate", requiredGarmentId: generationRequest.garmentId });
+      onGenerationHandled();
+    }
+  }, [active, generationRequest, onGenerationHandled]);
   const mounted = useRef(false);
   const isActive = useRef(active);
   isActive.current = active;
@@ -436,7 +451,7 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true }) {
     {!loading && !loadError && !outfits.length ? <div className="outfit-empty"><h2>Your next look starts here.</h2><p>Generate a collection from your wardrobe, then keep the looks you love.</p></div> : null}
     {displayedOutfits.length ? <section className="outfit-grid" aria-label={currentDiscovery ? "Matching saved outfits" : "Your outfit collection"}>{displayedOutfits.map((outfit, index) => <button key={outfit.id} className="outfit-card" type="button" onClick={() => setModal({ type: "outfit", id: outfit.id })} aria-label={`View ${outfit.name}`}><div className="outfit-card-photo"><Photo src={outfit.image} alt={`${outfit.name}, modelled outfit`} priority={index < 3} /></div><div className="outfit-card-caption"><h2>{outfit.name}</h2><ArrowRight size={19} aria-hidden="true" /><p>{occasionText(outfit)}</p></div></button>)}</section> : null}
     {previousJobs.length ? <details className="outfit-history"><summary>Previous generations <span>({previousJobs.length})</span></summary>{previousJobs.map((job) => <JobRow key={job.id} job={job} onOpen={openJob} />)}</details> : null}
-    {active && modal?.type === "generate" ? <OutfitModal title="Generate outfits" className="outfit-generate-modal" onClose={closeModal}><GenerateForm config={config} configError={configError} refreshing={refreshingConfig} onRefresh={refreshConfig} busy={!!busyKey} error={actionError} onSubmit={startGeneration} /></OutfitModal> : null}
+    {active && modal?.type === "generate" ? <OutfitModal title="Generate outfits" className="outfit-generate-modal" onClose={closeModal}>{!config && refreshingConfig ? <p className="outfit-form-intro" role="status">Loading generation settings…</p> : <GenerateForm config={config} configError={configError} refreshing={refreshingConfig} onRefresh={refreshConfig} busy={!!busyKey} error={actionError} onSubmit={startGeneration} requiredGarmentId={modal.requiredGarmentId} itemsById={itemsById} onRemoveGarment={() => setModal({ type: "generate" })} />}</OutfitModal> : null}
     {active && selectedOutfit ? <OutfitModal title={selectedOutfit.name} onClose={closeModal}><OutfitDetails outfit={selectedOutfit} itemsById={itemsById} visible={visible}>{discoveryConfig?.ready ? <OwnedItemSwaps key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} fingerprint={fingerprint} active={visible} /> : null}</OutfitDetails></OutfitModal> : null}
     {active && selectedJob ? <OutfitModal title={`${selectedJob.count} outfit ${selectedJob.count === 1 ? "idea" : "ideas"}`} className="outfit-review-modal" onClose={closeModal}><ReviewJob key={selectedJob.id} job={selectedJob} itemsById={itemsById} busy={!!busyKey} error={actionError} onAction={outfitAction} onRetryJob={retryJob} visible={visible} imageChecksReady={config?.imageChecks?.ready} /></OutfitModal> : null}
   </main>;

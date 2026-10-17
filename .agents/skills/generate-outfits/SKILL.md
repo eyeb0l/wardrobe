@@ -1,6 +1,6 @@
 ---
 name: generate-outfits
-description: Curate outfits and create modeled photos from clothes already imported into this Wardrobe. Use for wardrobe-based outfit ideas, styling, or lookbooks.
+description: Curate outfits and create modeled photos from clothes already imported into this Wardrobe. Use for wardrobe-based outfit ideas, styling, lookbooks, or outfits built around a specific owned piece.
 ---
 
 # Generate Outfits
@@ -36,6 +36,10 @@ Read `$WORK/snapshot/library.json` and `$WORK/snapshot/outfits.json`. Use the sh
 - `shoes` — optional shoes
 
 Create checkerboard contact sheets of at most 12 garment cutouts and inspect them. Use both metadata and visual evidence; do not style from filenames or colors alone.
+
+When the user asks to include a particular piece (for example, “make three outfits with my navy button-front blouse”), resolve the name, description, image, or supplied garment ID against this fresh inventory and inspected cutouts. If several pieces match, ask which one; if it is hidden, deleted, unsupported (such as a dress in the current top-and-bottom workflow), or missing, explain and ask for another piece. Never silently substitute a similar garment. Record its exact garment ID as required for the batch.
+
+Include the required garment in every outfit's `garmentIds`, reference list, generation prompt, and visual review. The repeat is intentional: diversify the other pieces instead. For a required top or bottom, count only unused pairs containing that piece when deciding the maximum useful count; for an outer layer, shoes, or accessory, the usual unused base-pair limit still applies. Preserve the requirement through retries and saving. If the user asks for different pieces in different looks, follow that explicit scope instead of including every named piece in every look.
 
 If the wardrobe cannot support the requested number of genuinely distinct outfits, tell the user the maximum useful count and ask whether to continue with that number.
 
