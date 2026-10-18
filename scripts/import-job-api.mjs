@@ -161,7 +161,7 @@ export function chooseChromaKey(primary = "#808080", secondary = null) {
   return `#${selected.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function buildGarmentPrompt(metadata = {}) {
+export function buildGarmentPrompt(metadata = {}, { tidyGarment = false } = {}) {
   const name = metadata.name || "clothing item";
   const category = metadata.part || "wardrobe item";
   const primary = metadata.color || "the exact visible color";
@@ -179,7 +179,9 @@ Primary request: Extract the ${name} (${category}) as a clean ecommerce catalog 
 
 Garment fidelity: Identification hints: primary color ${primary}${secondary}; details: ${details}. Preserve the reference's actual colors, material appearance and texture, silhouette, neckline, sleeves, fastenings, pattern, and distinctive details. Preserve clearly legible existing graphics, text, and logos exactly; do not invent or reinterpret uncertain marks, pockets, seams, hardware, colors, or decoration.
 
-Composition: Center the item using the reference's visible viewing angle. Keep the entire item inside the frame with generous, even padding on every side. No cropping or truncation.
+Composition: Center the item ${tidyGarment ? "with only gentle correction of accidental tilt or awkward perspective, retaining the same visible side and natural proportions" : "using the reference's visible viewing angle"}. Keep the entire item inside the frame with generous, even padding on every side. No cropping or truncation.${tidyGarment ? `
+
+Gentle garment tidying: Change only accidental awkward angles and distracting wrinkles or creases. Relax those creases subtly, as if the real item had been carefully arranged. Preserve natural drape, soft folds, fabric grain, texture, volume, intentional pleats, gathers, ruching, structured creases, distressing, and genuine asymmetry. Leave all other garment details alone, including colors, pattern, text, logos, seams, fastenings, silhouette, and proportions. Do not redesign, symmetrize, stretch, iron perfectly flat, smooth away texture, or create a stiff, plastic, airbrushed or unnaturally flat appearance. Keep the exact number and placement of visible buttons, pockets and fastenings; do not add or remove any. When a fold may be a design feature, keep it. Garment fidelity takes priority over tidiness.` : ""}
 
 Background: Fully transparent PNG alpha outside the garment and inside genuine openings. No painted checkerboard, solid color, shadows, gradient, texture, vignette, floor, horizon, reflection, or lighting variation. Keep opaque fabric fully opaque, including white and pale fabric; retain real semi-transparent fabric and softly antialiased boundaries.
 
@@ -548,7 +550,7 @@ export function wardrobeImportApi(options = {}) {
           const sourceFile = current.internal.cropFile || current.internal.originalFile;
           const original = { data: await readFile(path.join(dir, sourceFile)), mime: "image/png", name: sourceFile };
           stage.cleanupMode = NATIVE_TRANSPARENCY_RECIPE;
-          const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata);
+          const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, { tidyGarment: current.tidyGarment === true });
           stage.generationPrompt = current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt;
           await saveJob(current);
           bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", background: "transparent", images: [original], prompt: stage.generationPrompt });
@@ -1136,6 +1138,13 @@ export function wardrobeImportApi(options = {}) {
           return json(res, 202, publicJob(job));
         }
         if (!DECISIONS.has(decision) || job.stages[stageName].status !== "review") throw Object.assign(new Error("Stage is not ready for review"), { status: 409 });
+        if (stageName === "crop" && decision === "approve") {
+          const input = await requestBody(req);
+          if (input.tidyGarment !== undefined && typeof input.tidyGarment !== "boolean") {
+            throw Object.assign(new Error("tidyGarment must be a boolean"), { status: 400 });
+          }
+          job.tidyGarment = input.tidyGarment === true;
+        }
         if (stageName === "garment" && decision === "approve" && job.stages.modeled.status === "pending") {
           const input = await requestBody(req);
           if (input.previewUrl && input.previewUrl !== job.stages.garment.assetUrl) {

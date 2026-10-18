@@ -89,7 +89,7 @@ async function harness(t, overrides = {}) {
 test("cloud approvals enqueue durable tasks and startup never starts paid image work", async (t) => {
   const h = await harness(t);
   const job = await h.createJob();
-  const approved = await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  const approved = await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`, { tidyGarment: true });
   assert.equal(approved.status, 200);
   assert.equal(approved.body.stages.garment.status, "queued");
   assert.equal(h.tasks.length, 1);
@@ -98,11 +98,13 @@ test("cloud approvals enqueue durable tasks and startup never starts paid image 
   await h.restart();
   assert.equal(h.requests.length, 1, "fresh invocations do not restart queued tasks");
   assert.equal((await h.loadJob(job.id)).stages.garment.status, "queued");
+  assert.equal((await h.loadJob(job.id)).tidyGarment, true);
   assert.deepEqual(await h.plugin.runTask({ ...h.tasks[0], taskId: "old-task" }), { skipped: true });
   assert.deepEqual(await h.plugin.runTask({ ...h.tasks[0], attempt: 2 }), { skipped: true });
   assert.deepEqual(await h.plugin.runTask({ ...h.tasks[0], generationId: "old-generation" }), { skipped: true });
   const first = await h.plugin.runTask(h.tasks[0]);
   assert.equal(first.job.stages.garment.status, "cleaning");
+  assert.match(first.job.stages.garment.generationPrompt, /Gentle garment tidying/);
   assert.match(first.job.stages.garment.cleanupMode, /^native-transparent-/);
   await h.restart();
   const corrected = (await h.plugin.runTask(h.tasks[0])).job.stages.garment;

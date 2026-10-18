@@ -169,11 +169,13 @@ function ReviewEditor({ cleanupEditor, job, stage, draft, setDraft, regenPrompt,
             <legend>{job.canUseOriginal ? "This looks like a clean product photo" : "How would you like to prepare this item?"}</legend>
             <label><input type="radio" name={`image-choice-${job.id}`} value="original" checked={imageChoice === "original"} onChange={() => setImageChoice("original")} /><span><strong>Use original image</strong><small>Keep the photographed item and remove its background if needed.</small></span></label>
             <label><input type="radio" name={`image-choice-${job.id}`} value="extract" checked={imageChoice === "extract"} onChange={() => setImageChoice("extract")} /><span><strong>Extract garment</strong><small>Generate a clean garment cutout with a transparent background.</small></span></label>
+            <label><input type="radio" name={`image-choice-${job.id}`} value="tidy" checked={imageChoice === "tidy"} onChange={() => setImageChoice("tidy")} /><span><strong>Gently tidy garment</strong><small>Extract the garment, gently straighten awkward angles and soften distracting creases. Keep its details, texture and natural drape.</small></span></label>
             {!job.canUseOriginal && imageChoice === "original" && <p className="import-card__detail">Use this only when the full original shows one isolated item, without a person or other products. Check the cutout before approving.</p>}
           </fieldset>
         ) : isGarment ? (
           <>
             {originalGarment && <p className="import-card__detail">Your original item is ready on a transparent background. Check the edges and details below. Approving it adds the item and creates a modelled preview.</p>}
+            {job.tidyGarment && <p className="import-card__detail">Check the tidied image against your original. Details, fabric texture and natural folds should stay true to the garment. <a href={job.originalAssetUrl} target="_blank" rel="noopener noreferrer">View original</a></p>}
             <div className="import-field"><label htmlFor={`name-${job.id}`}>Name</label><input id={`name-${job.id}`} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></div>
             <div className="import-field"><label htmlFor={`part-${job.id}`}>Category</label><select id={`part-${job.id}`} value={draft.part} onChange={(event) => setDraft({ ...draft, part: event.target.value })}>{PARTS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></div>
             <div className="import-colours">
@@ -194,7 +196,7 @@ function ReviewEditor({ cleanupEditor, job, stage, draft, setDraft, regenPrompt,
           {!isFailed && !isReady && <button className="import-button" disabled={decisionBusy || cropping} onClick={() => onAction("reject")}><Trash size={14} /> Reject</button>}
           {!isCrop && <button className="import-button" disabled={decisionBusy || cropping || (stage === "modeled" && !referenceAvailable)} onClick={() => onAction("regenerate", regenPrompt)}><ArrowCounterClockwise size={14} /> {isFailed ? "Try again" : originalGarment ? "Extract garment" : isGarment ? "Create new cutout" : "Create new photo"}</button>}
           {isFailed && <CopyPrompt prompt={job.stages[stage]?.generationPrompt} className="import-button" disabled={decisionBusy || cropping} />}
-          {!isFailed && !isReady && <button className="import-button import-button--primary" disabled={decisionBusy || cropping || (isGarment && loadedGarment !== asset) || referenceChanged || (isGarment && !referenceAvailable) || (isGarment && (!draft.name.trim() || !primaryValid || !secondaryValid))} onClick={() => onAction(useOriginal ? "use-original" : "approve")}><Check size={14} weight="bold" /> {isCrop ? useOriginal ? "Use original image" : "Extract garment" : "Approve"}</button>}
+          {!isFailed && !isReady && <button className="import-button import-button--primary" disabled={decisionBusy || cropping || (isGarment && loadedGarment !== asset) || referenceChanged || (isGarment && !referenceAvailable) || (isGarment && (!draft.name.trim() || !primaryValid || !secondaryValid))} onClick={() => onAction(useOriginal ? "use-original" : "approve")}><Check size={14} weight="bold" /> {isCrop ? useOriginal ? "Use original image" : imageChoice === "tidy" ? "Tidy & extract garment" : "Extract garment" : "Approve"}</button>}
         </div>
         {stage === "modeled" && <ModeledPhotoUpload key={job.id} className="import-button" disabled={busy} onUpload={onUpload} onEditingChange={setCropping} />}
       </div>
@@ -524,7 +526,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
           cutoutController.current = null;
           setCutoutProgress("");
         }
-        const updated = await api(`${API}/${job.id}/stages/${stage}/${action}`, { method: "POST", body: originalInput ? JSON.stringify(originalInput) : action === "regenerate" ? JSON.stringify({ prompt, ...(stage === "modeled" ? { modelReferenceId } : {}) }) : undefined });
+        const updated = await api(`${API}/${job.id}/stages/${stage}/${action}`, { method: "POST", body: originalInput ? JSON.stringify(originalInput) : stage === "crop" && action === "approve" ? JSON.stringify({ tidyGarment: imageChoices[job.id] === "tidy" }) : action === "regenerate" ? JSON.stringify({ prompt, ...(stage === "modeled" ? { modelReferenceId } : {}) }) : undefined });
         const removeFromQueue = action === "reject" || (stage === "modeled" && action === "approve");
         const remainingJobs = removeFromQueue ? jobs.filter((item) => item.id !== job.id) : null;
         setJobs((current) => removeFromQueue ? current.filter((item) => item.id !== job.id) : current.map((item) => item.id === job.id ? updated : item));
