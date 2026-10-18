@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import sharp from "sharp";
-import { chooseChromaKey, hasCleanProductBackground, wardrobeImportApi } from "./import-job-api.mjs";
+import { buildGarmentPrompt, chooseChromaKey, hasCleanProductBackground, wardrobeImportApi } from "./import-job-api.mjs";
 import { buildModeledPhotoPrompt, buildModeledSettingPrompt } from "./modeled-photo-prompts.mjs";
 import { withStorage } from "./storage-fs.mjs";
 import { decisionsResponse } from "./test-helpers/decisions-response.mjs";
@@ -294,6 +294,40 @@ test("clean product shots can still choose extraction", async (t) => {
   const extracted = await h.waitForStage(job.id, "garment");
   assert.equal(extracted.stages.garment.source, "generated");
   assert.equal(h.requests.filter((entry) => entry.type === "edit").length, 1);
+  assert.equal(extracted.tidyGarment, false);
+  assert.equal(h.requests.find(entry => entry.type === "edit").form.get("prompt"), buildGarmentPrompt(job.metadata));
+});
+
+test("gentle tidying survives restart and regeneration without bypassing garment review", async (t) => {
+  const h = await harness(t);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+  const base = `/api/import/jobs/${job.id}`;
+  await h.request("POST", `${base}/stages/crop/approve`, { tidyGarment: "true" }, 400);
+  assert.equal((await h.request("GET", base)).stages.crop.status, "review");
+  assert.equal(h.requests.filter(entry => entry.type === "edit").length, 0);
+  await h.request("POST", `${base}/stages/crop/approve`, { tidyGarment: true });
+  const tidied = await h.waitForStage(job.id, "garment");
+  assert.equal(tidied.tidyGarment, true);
+  assert.equal(tidied.stages.garment.status, "review");
+  assert.equal(tidied.stages.modeled.status, "pending");
+  assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), []);
+  const first = h.requests.find(entry => entry.type === "edit");
+  assert.equal(first.form.get("prompt"), buildGarmentPrompt(job.metadata, { tidyGarment: true }));
+  assert.equal(first.images.length, 1);
+  assert.match(first.form.get("prompt"), /Preserve natural drape, soft folds/);
+  assert.match(first.form.get("prompt"), /intentional pleats, gathers, ruching, structured creases/);
+  assert.match(first.form.get("prompt"), /unnaturally flat appearance/);
+  assert.match(first.form.get("prompt"), /Garment fidelity takes priority/);
+  await h.restart();
+  assert.equal((await h.request("GET", base)).tidyGarment, true);
+  await h.request("POST", `${base}/stages/garment/regenerate`, { prompt: "Keep the sleeve seam" });
+  await h.waitForStage(job.id, "garment");
+  const edits = h.requests.filter(entry => entry.type === "edit");
+  assert.equal(edits.length, 2);
+  assert.deepEqual(edits[1].images, first.images, "retry uses the source crop, not the previous generated result");
+  assert.match(edits[1].form.get("prompt"), /Gentle garment tidying/);
+  assert.match(edits[1].form.get("prompt"), /User regeneration direction: Keep the sleeve seam/);
+  assert.equal((await h.request("GET", base)).stages.garment.status, "review");
 });
 
 test("modeled generation reads only its garment and reference inputs, without downloading the unused source", async (t) => {

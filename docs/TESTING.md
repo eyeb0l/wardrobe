@@ -131,3 +131,25 @@ Use Node 22, `npm ci` and the default Chromium cache as above. Playwright starts
 Choose another unused port and unique artifact directory for concurrent tasks.
 The first test saves `style-this-piece.png` and `outfits-with-piece.png` under
 each viewport's artifact directory. Inspect those images and `browser-health.json`.
+
+## Gentle garment tidying
+
+Use the same Node 22 installation, pinned Playwright and cached Chromium above:
+
+```bash
+node --test scripts/import-job-api.test.mjs scripts/import-serverless.test.mjs
+WARDROBE_BROWSER_PORT=5258 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-tidying-browser \
+  npm run test:browser -- tests/browser/garment-tidying.spec.mjs
+rg --files /tmp/wardrobe-tidying-browser
+```
+
+Choose an unused port and unique artifact directory. Playwright starts and stops
+its own isolated Vite server. The desktop/mobile suite uploads a synthetic shirt,
+checks the default and optional preparation choices, submits tidying only on
+confirmation, reloads the review and checks that another upload defaults to ordinary
+extraction. Inspect `garment-tidying-option.png`, `garment-tidying-review.png` and
+`browser-health.json` in each viewport's directory. Node tests cover request
+validation, saved prompts, restart/regeneration and durable hosted tasks. These
+mocked tests do not establish real AI image quality; follow the authorised visual
+comparison recipe in [model-migration.md](model-migration.md) for that.
