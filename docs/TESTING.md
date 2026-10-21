@@ -23,6 +23,39 @@ In a restricted Codex sandbox this requires permission for the temporary fixture
 and local test servers. The hosted build can also require localhost execution
 permission when Nitro starts its build worker.
 
+## CI checks and artifacts
+
+Pull requests and pushes to `main` run three GitHub Actions jobs:
+
+- `build`: Node 22, `npm ci`, the full Node suite, and the Vite frontend build.
+- `hosted`: Node 22, `npm ci`, and `npm run build:vercel`, including Nitro,
+  native workflow packaging verification and SPA fallback checks. This builds
+  the deployment package without deploying or requiring cloud credentials.
+- `browser`: Node 22, `npm ci`, `npx playwright install --with-deps chromium`,
+  and `npm run test:browser -- --forbid-only --reporter=list,html --global-timeout=600000`.
+  Both desktop and mobile projects run with one worker and no retries. Playwright
+  starts and stops its isolated Vite server; fixtures do not require AI credentials.
+
+GitHub branch protection for `main` requires `build`, `browser`, and `hosted`,
+requires an up-to-date pull request, and applies to administrators. No approving
+review is required. These
+repository settings are separate from the workflow and must be maintained if
+check names change. Vercel deployment statuses are separate and are not used as
+the hosted-build gate; the `hosted` job runs for every PR independently of the
+deployment integration.
+
+The browser job uploads `browser-results` for 14 days after successful or failed
+runs. Download it from the workflow run's **Artifacts** section. It contains the
+HTML report, synthetic desktop/mobile screenshots, browser health logs and any
+failure screenshots/traces. CI writes these to `$RUNNER_TEMP/wardrobe-browser`
+and `$RUNNER_TEMP/wardrobe-browser-report`. Open the extracted HTML report with
+`npx playwright show-report <extracted-report-directory>` or a failure trace with
+`npx playwright show-trace <trace.zip>`.
+
+Superseded runs on the same branch are canceled. The `build` and `hosted` jobs
+have 10-minute limits; the browser job has a 15-minute limit and a 10-minute global
+limit so Playwright can produce its report before the job times out.
+
 ## Headless browser tests
 
 The repository pins `@playwright/test` to 1.64.0. The suite uses Chromium,

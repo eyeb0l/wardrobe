@@ -2,7 +2,7 @@ import { CHROMA_CLEANUP_RECIPE } from "../shared/chroma-cleanup.mjs";
 import { prepareOriginalCutout } from "./background-removal.mjs";
 import { CopyPrompt, ModeledPhotoUpload } from "./modeled-photo-controls.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowCounterClockwise, Check, LinkSimple, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { IMAGE_ACCEPT, isImageUpload, prepareUploadImage } from "./image-upload.mjs";
 import { activeImportJobIds, importPollUrls, nextPollDelay, POLL_MIN_MS } from "./import-polling.mjs";
@@ -325,6 +325,16 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   useEffect(() => { if (open) void refreshReferences(); }, [open, refreshReferences]);
 
   const uploadLifecycle = useRef(0);
+  useLayoutEffect(() => {
+    // Release previews only after React has replaced or removed their images.
+    const visibleUrls = new Set(uploads.map((upload) => upload.previewUrl));
+    for (const url of uploadPreviews.current) {
+      if (!visibleUrls.has(url)) {
+        URL.revokeObjectURL(url);
+        uploadPreviews.current.delete(url);
+      }
+    }
+  }, [uploads]);
   useEffect(() => () => {
     uploadLifecycle.current += 1;
     uploadPreviews.current.forEach((url) => URL.revokeObjectURL(url));
@@ -404,7 +414,6 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
         setUploads((current) => current.map((item) => item.id === id ? { ...item, status: "Preparing image" } : item));
         const prepared = await prepareUploadImage(file);
         if (lifecycle !== uploadLifecycle.current) break;
-        if (previewUrl) { URL.revokeObjectURL(previewUrl); uploadPreviews.current.delete(previewUrl); }
         previewUrl = URL.createObjectURL(prepared.blob);
         uploadPreviews.current.add(previewUrl);
         const imageDataUrl = prepared.dataUrl;
@@ -422,7 +431,6 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
       } catch (requestError) { if (lifecycle === uploadLifecycle.current) { setError(`${file.name}: ${requestError.message}`); setOpen(true); } }
       finally {
         if (lifecycle === uploadLifecycle.current) setUploads((current) => current.filter((item) => item.id !== id));
-        if (previewUrl) { URL.revokeObjectURL(previewUrl); uploadPreviews.current.delete(previewUrl); }
       }
     }
     uploadingRef.current -= 1;
