@@ -9,7 +9,7 @@ npm run check
 git diff --check
 ```
 
-`npm test` runs the Node test suite. `npm run check` builds the Vite frontend; it does not run tests or build the hosted server. CI runs these in the `build` job and the desktop/mobile Chromium suite in the `browser` job. The Vercel check runs the hosted build. All three checks (`build`, `browser`, and `Vercel`) are required before merging into `main`, including for administrators, and the branch must be up to date. This requirement is configured in GitHub branch protection; changing the workflow alone does not update it. See [CI checks and artifacts](docs/TESTING.md#ci-checks-and-artifacts).
+`npm test` runs the Node test suite. `npm run check` builds the Vite frontend; it does not run tests or build the hosted server. CI runs these in the `build` job, the desktop/mobile Chromium suite in the `browser` job, and `npm run build:vercel` in the `hosted` job. All three checks (`build`, `browser`, and `hosted`) are required before merging into `main`, including for administrators, and the branch must be up to date. This requirement is configured in GitHub branch protection; changing the workflow alone does not update it. See [CI checks and artifacts](docs/TESTING.md#ci-checks-and-artifacts).
 
 For hosted runtime, routing, dependency or packaging changes, also run locally:
 
