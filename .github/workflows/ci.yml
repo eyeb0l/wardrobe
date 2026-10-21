@@ -8,9 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,3 +25,29 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run check
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WARDROBE_BROWSER_ARTIFACTS: ${{ runner.temp }}/wardrobe-browser
+      PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ runner.temp }}/wardrobe-browser-report
+      PLAYWRIGHT_HTML_OPEN: never
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser -- --forbid-only --reporter=list,html --global-timeout=600000
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: browser-results
+          path: |
+            ${{ env.WARDROBE_BROWSER_ARTIFACTS }}
+            ${{ env.PLAYWRIGHT_HTML_OUTPUT_DIR }}
+          retention-days: 14
+          if-no-files-found: warn
