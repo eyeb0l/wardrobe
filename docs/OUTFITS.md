@@ -40,6 +40,37 @@ key and makes no AI calls. A failed collection or wardrobe refresh hides the cho
 recovery. A legacy browser-edit migration warning does not hide a successfully
 loaded wardrobe. **How choices are made** explains the rules in the app.
 
+## Garment availability and laundry
+
+Open a garment in **Wardrobe**, choose **Ready** or **In laundry** under
+**Availability**, and save. Existing garments without this field are treated as
+Ready. The wardrobe's availability filter works together with its category
+filter. In the laundry view, select individual pieces or **Select all shown**,
+then **Mark ready**. Only the selected pieces in the current filtered view change;
+changing category or availability clears the selection. Rearranging is available
+when viewing all availability states.
+
+The shortlist leaves out every look containing a piece in laundry and explains
+how many matching looks were excluded. Its garment wear history still includes
+those looks. Saved looks remain in the collection with a **Pieces in laundry**
+label, and their details identify the affected garments. Marking pieces ready
+makes those looks eligible again without changing their images or wear history.
+
+After **Wore this today**, expand **Send pieces to laundry (optional)**. Select
+only the pieces that need washing, then **Send selected to laundry**. Nothing is
+preselected, and only pieces recorded in today's wear are offered. Logging a
+wear does not automatically change availability. Undoing or removing a wear does
+not undo a separate laundry change; use the wardrobe to mark pieces ready.
+
+Availability persists in the existing local or cloud wardrobe library and backups.
+It needs no AI request or schema migration. Bulk updates validate every selected
+piece's revision and write the batch together. A stale or deleted piece rejects
+the entire batch; refresh and retry with the current wardrobe. Failed saves keep
+selection and an error visible, and a failed recovery read blocks another bulk
+update until a successful refresh. Existing photo generation and saved variation
+creation remain available for planning looks; laundry only excludes looks from
+the daily shortlist.
+
 ## Choose a saved outfit
 
 Use the heart on an outfit card or **Favourite** in its details to keep favourite

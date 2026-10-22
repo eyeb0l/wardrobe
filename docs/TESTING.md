@@ -1,5 +1,42 @@
 # Testing on squiggle
 
+## Garment availability
+
+The availability tests use the existing Node 22 and pinned headless Chromium
+setup. Choose unused ports and fresh artifact directories:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/wardrobe-sync.test.mjs scripts/outfit-shortlist.test.mjs scripts/cloud-store.test.mjs
+WARDROBE_BROWSER_PORT=5291 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-availability-browser \
+  npm run test:browser -- tests/browser/garment-availability.spec.mjs
+rg --files /tmp/wardrobe-availability-browser
+```
+
+Playwright starts and stops its own Vite server. Desktop (1365 × 1000) and mobile
+(390 × 844) exercise garment editing, discard, reload, category-scoped selection,
+bulk Mark ready, shortlist exclusion/reappearance, optional selected-piece laundry
+after wear, independent wear undo, incoming device updates, and failed saves/read
+recovery. Inspect `garment-availability.png`, `laundry-bulk.png`,
+`wear-laundry.png`, `laundry-shortlist.png`, and each `browser-health.json`.
+The fixture intentionally returns 409/503 errors on the wardrobe endpoints;
+other console/network errors, Vite overlays and horizontal overflow fail tests.
+
+Browser API responses and images are synthetic. Node tests exercise the actual
+API, atomic local library writes, validation, revision conflicts, hidden items,
+metadata preservation and restart persistence. A PGlite-backed cloud-store test
+verifies availability across independent store clients and writer leases.
+No live wardrobe data or paid AI services are used.
+
+Reviewed synthetic screenshots for this feature:
+[desktop laundry selection](screenshots/garment-availability/laundry-bulk-desktop.png),
+[mobile laundry selection](screenshots/garment-availability/laundry-bulk-mobile.png),
+[desktop optional laundry after wear](screenshots/garment-availability/wear-laundry-desktop.png),
+[mobile optional laundry after wear](screenshots/garment-availability/wear-laundry-mobile.png),
+[desktop shortlist exclusions](screenshots/garment-availability/shortlist-desktop.png), and
+[mobile shortlist exclusions](screenshots/garment-availability/shortlist-mobile.png).
+
 ## Wear-aware outfit shortlist
 
 Use the pinned Node 22 and Chromium setup below. The pure ranking tests cover

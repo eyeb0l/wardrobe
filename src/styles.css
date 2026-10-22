@@ -947,3 +947,16 @@ button { font: inherit; }
 .reorder-controls button { display: grid; place-items: center; flex: 0 0 36px; min-height: 44px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
 .reorder-controls button:disabled { opacity: .25; cursor: default; }
 .reorder-controls button:focus-visible { outline: 2px solid var(--accent); }
+
+.wardrobe-availability { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 16px 24px; margin-top: 20px; }
+.wardrobe-availability > .field { width: 220px; max-width: 100%; margin: 0; }
+.laundry-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.laundry-actions label, .laundry-select { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; line-height: 1.5; }
+.laundry-actions input, .laundry-select input { accent-color: var(--ink); flex-shrink: 0; }
+.availability-item { min-width: 0; }
+.availability-item > .gallery-item { width: 100%; }
+.gallery-item { position: relative; }
+.availability-badge { position: absolute; left: 8px; bottom: 8px; background: var(--paper); border: 1px solid var(--line); padding: 5px 8px; font-size: 11px; color: var(--ink); }
+.laundry-select { padding: 6px 8px; overflow-wrap: anywhere; }
+.laundry-select:focus-within, .laundry-actions label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 520px) { .wardrobe-availability > .field { width: 100%; } }

@@ -447,3 +447,20 @@ test("generation telemetry survives cloud store instances and stays in metadata 
   assert.equal(records[0].outcome, "refused");
   assert.equal(h.blobs.size, 0);
 });
+
+test('garment availability batches persist through the cloud store and conflict across clients', async t => {
+  const h = await harness(t);
+  const { readLibrary, publicLibraryItem, setLibraryAvailability } = await import('./wardrobe-library.mjs');
+  const file = `${CLOUD_ROOT}/library.json`;
+  await h.store.withLease(() => h.store.writeFile(file, JSON.stringify([{ id: 'top', name: 'Top', part: 'upperbody', image: '/top.png', custom: { keep: true } }, { id: 'bottom', name: 'Bottom', part: 'lowerbody', image: '/bottom.png' }])));
+  const original = await withStorage(h.store, async () => (await readLibrary(file)).map(publicLibraryItem));
+  const payload = { availability: 'laundry', items: original.map(({ id, revision }) => ({ id, revision })) };
+  await h.store.withLease(() => withStorage(h.store, () => setLibraryAvailability(file, payload)));
+  const other = h.other();
+  const fresh = await withStorage(other, async () => (await readLibrary(file)).map(publicLibraryItem));
+  assert.ok(fresh.every(item => item.availability === 'laundry'));
+  assert.deepEqual(fresh[0].custom, { keep: true });
+  await assert.rejects(other.withLease(() => withStorage(other, () => setLibraryAvailability(file, payload))), error => error.status === 409);
+  await other.withLease(() => withStorage(other, () => setLibraryAvailability(file, { availability: 'ready', items: fresh.map(({ id, revision }) => ({ id, revision })) })));
+  assert.ok((await withStorage(h.store, () => readLibrary(file))).every(item => item.availability === 'ready'));
+});
