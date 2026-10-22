@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { copyFile, currentStorage, link, lstat, readFile, readdir, rename, rm, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
+import { validWearDate } from "../shared/outfit-activity.mjs";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const ID = /^[a-z0-9][a-z0-9-]{0,159}$/;
@@ -90,6 +91,13 @@ function validateOutfit(record, file, prefix, job = false) {
   for (const key of ["reason", "setting", "modelReferenceId"]) optional(record, key, text, file, prefix);
   for (const key of ["prompt", "error"]) optional(record, key, nullableText, file, prefix);
   for (const key of ["createdAt", "updatedAt"]) optional(record, key, timestamp, file, prefix);
+  optional(record, "favourite", (value) => typeof value === "boolean", file, prefix);
+  optional(record, "wearHistory", (events) => Array.isArray(events) && events.every((event) =>
+    object(event) && text(event.id) && UUID.test(event.id) && validWearDate(event.date) && timestamp(event.createdAt)
+    && strings(event.garmentIds) && event.garmentIds.length > 0
+    && event.garmentIds.every((id) => ID.test(id)) && new Set(event.garmentIds).size === event.garmentIds.length)
+    && new Set(events.map((event) => event.id)).size === events.length
+    && new Set(events.map((event) => event.date)).size === events.length, file, prefix);
   if (record.status === "accepted") requireValue(Boolean(acceptedFilename(record.image)), file, `${prefix}.image`);
   else if (record.image !== undefined && record.image !== null) {
     const candidate = job && text(record.image) && record.image.match(/^\/api\/outfits\/jobs\/([a-f0-9-]+)\/assets\/([^/]+)$/i);

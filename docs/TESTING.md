@@ -1,5 +1,42 @@
 # Testing on squiggle
 
+## Favourites, outfit filters and wearing history
+
+Follow the Node 22, dependency and Chromium setup below. The activity API tests
+exercise actual filesystem persistence, restart recovery, concurrent writes,
+duplicate prevention, input/origin validation and preservation of existing data.
+The browser suite uses synthetic API fixtures, with no credentials or AI calls.
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+node --test scripts/outfit-activity.test.mjs scripts/outfit-storage.test.mjs
+WARDROBE_BROWSER_PORT=5267 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-activity-browser-41fd \
+  npm run test:browser -- tests/browser/outfit-activity.spec.mjs
+rg --files /tmp/wardrobe-activity-browser-41fd
+```
+
+Choose an unused port and unique artifact directory for each task. Playwright
+starts Vite with an isolated data directory, waits for readiness, and stops it
+after testing. The desktop (1365 × 1000) and mobile (390 × 844) tests exercise
+favourites, intersecting filters, the garment-to-outfits link, local-date logging,
+undo, backdating, selecting worn pieces, reloads, removal, failed saves and stale
+background reads. Inspect `outfit-collection.png`, `outfit-filtered.png`,
+`outfit-wear-history.png` and `browser-health.json` in each viewport's output.
+Deliberate HTTP 503 responses test recovery; other HTTP errors, console errors,
+failed requests, framework overlays and horizontal overflow fail the suite.
+
+Reviewed synthetic screenshots are committed for this feature:
+[desktop collection](screenshots/outfit-activity/collection-desktop.png),
+[mobile collection](screenshots/outfit-activity/collection-mobile.png),
+[desktop wearing history](screenshots/outfit-activity/wear-history-desktop.png),
+and [mobile wearing history](screenshots/outfit-activity/wear-history-mobile.png).
+
+The standard full validation is still required: `TMPDIR=/dev/shm npm test`,
+`npm run check`, `npm run build:vercel`, and `npm run test:browser`.
+
+## Standard checks
+
 Use Node.js 22.x and npm. Run the existing validation before submitting changes:
 
 ```bash

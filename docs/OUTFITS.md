@@ -2,6 +2,36 @@
 
 Open **Outfits** or `/outfits` to browse photographs, styling notes and the exact wardrobe pieces used.
 
+## Choose a saved outfit
+
+Use the heart on an outfit card or **Favourite** in its details to keep favourite
+looks close at hand. **Favourites**, **Occasion** and **Garment** filters work
+together; **Clear filters** resets all three. These controls use the saved
+collection and need no API key or model call. When using AI saved-look search,
+the filters narrow its results without another request.
+
+From a wardrobe piece, choose **View saved outfits with this piece** to open
+Outfits with that garment selected. Save or discard any garment edits first.
+This also works for categories that are not supported by new outfit generation.
+
+## Log what you wore
+
+Open an outfit and choose **Wore this today**. The date uses your device's local
+calendar day. **Undo** removes that entry, and the outfit displays its logged
+wear count and last-worn date. **No wears logged** means no history has been
+recorded, not that you have never worn the outfit.
+
+Expand **Log another date or edit history** to backdate a wear and uncheck any
+pieces you did not wear. Each outfit can have one entry per date. To correct a
+date or its pieces, remove the entry and log it again. Entries retain the garment
+IDs that were worn, even if a piece is later removed from the wardrobe.
+
+Favourites and wear history save to the selected local or cloud store alongside
+the outfit, survive reloads and server restarts, and are included in existing
+backups. Devices using the same cloud store see changes when they reopen or
+refocus the app. They do not generate photos, call AI, or change saved-usage
+ranking in AI search, which still counts appearances in saved looks.
+
 ## Generate outfits
 
 Choose **Generate outfits**, request 1–12 looks, add optional styling direction, and select a model reference. Planning uses garment images and metadata; each combination gets a square modelled photograph.
