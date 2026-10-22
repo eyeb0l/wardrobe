@@ -159,3 +159,53 @@ test('legacy category migration clears saved positions while same-category edits
   const { compareWardrobeItems } = await import('../shared/wardrobe-order.mjs');
   assert.deepEqual([...records].sort(compareWardrobeItems).map(item => item.id), ['outside-2', 'outside-1']);
 });
+
+test('availability defaults to ready and persists through edits, ordering and restart without changing assets', async t => {
+  const h = await fixture(t), first = (await h.request()).body[0];
+  assert.equal(first.availability, 'ready');
+  const changed = await h.request('PATCH', `/api/import/wardrobe/${first.id}`, { revision: first.revision, changes: { availability: 'laundry' } });
+  assert.equal(changed.status, 200);
+  const fresh = (await (await h.connect())()).body[0];
+  assert.equal(fresh.availability, 'laundry');
+  assert.notEqual(fresh.revision, first.revision);
+  assert.equal(fresh.image, first.image);
+  assert.deepEqual(fresh.custom, first.custom);
+  const edit = await h.request('PATCH', `/api/import/wardrobe/${first.id}`, { revision: fresh.revision, changes: { name: 'New name' } });
+  assert.equal(edit.body.availability, 'laundry');
+  const ready = await h.request('POST', '/api/import/wardrobe/availability', { availability: 'ready', items: [{ id: first.id, revision: edit.body.revision }] });
+  assert.equal(ready.status, 200);
+  assert.equal((await (await h.connect())()).body[0].availability, 'ready');
+});
+
+test('availability batches are atomic, revision checked, serialized and preserve unrelated records', async t => {
+  const h = await fixture(t), before = (await h.request()).body;
+  const batch = { availability: 'laundry', items: before.map(({ id, revision }) => ({ id, revision })) };
+  const stale = structuredClone(batch); stale.items[1].revision = 'stale';
+  const file = path.join(h.data, 'library.json'), original = await readFile(file, 'utf8');
+  assert.equal((await h.request('POST', '/api/import/wardrobe/availability', stale)).status, 409);
+  assert.equal(await readFile(file, 'utf8'), original, 'no partial batch when one revision is stale');
+  const results = await Promise.all([h.request('POST', '/api/import/wardrobe/availability', batch), h.request('POST', '/api/import/wardrobe/availability', batch)]);
+  assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
+  const fresh = (await (await h.connect())()).body;
+  assert.ok(fresh.every(item => item.availability === 'laundry'));
+  const ready = await h.request('POST', '/api/import/wardrobe/availability', { availability: 'ready', items: [{ id: fresh[0].id, revision: fresh[0].revision }] });
+  assert.equal(ready.body.length, 1);
+  assert.equal((await h.request()).body[1].availability, 'laundry');
+  assert.deepEqual((await h.request()).body[0].custom, before[0].custom);
+});
+
+test('availability rejects malformed batches, hidden items and cross-origin mutations without writes', async t => {
+  const h = await fixture(t), items = (await h.request()).body.map(({ id, revision }) => ({ id, revision }));
+  const file = path.join(h.data, 'library.json');
+  const before = await readFile(file, 'utf8');
+  for (const payload of [null, {}, { availability: 'dirty', items }, { availability: 'ready', items: [] }, { availability: 'ready', items: [items[0], items[0]] }, { availability: 'laundry', items: [{ id: items[0].id }] }]) {
+    assert.equal((await h.request('POST', '/api/import/wardrobe/availability', payload)).status, 400);
+    assert.equal(await readFile(file, 'utf8'), before);
+  }
+  assert.equal((await h.request('POST', '/api/import/wardrobe/availability', { availability: 'laundry', items }, { origin: 'https://foreign.test' })).status, 403);
+  assert.equal((await h.request('PATCH', `/api/import/wardrobe/${items[0].id}`, { revision: items[0].revision, changes: { availability: true } })).status, 400);
+  await h.request('DELETE', `/api/import/wardrobe/${items[1].id}`, { revision: items[1].revision });
+  const hidden = await readFile(file, 'utf8');
+  assert.equal((await h.request('POST', '/api/import/wardrobe/availability', { availability: 'ready', items })).status, 404);
+  assert.equal(await readFile(file, 'utf8'), hidden);
+});

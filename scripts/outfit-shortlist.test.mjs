@@ -116,3 +116,18 @@ test('failed images exclude affected looks while preserving history and permit r
   assert.equal(shortlist(outfits, {}, inventory).choices.length, 3, 'retry can consider all choices again');
   assert.equal(failedImages.size, 2, 'ranking does not mutate availability state');
 });
+
+test('laundry excludes every affected look but preserves wear history and responds to ready changes', () => {
+  const outfits = [look(0, { favourite: true, wearHistory: [wear(today, ['top-1'])] }), look(1, { favourite: true }), look(2, { garmentIds: ['top-0', 'bottom-2'] })];
+  const inventory = new Map(items);
+  inventory.set('top-0', { ...items.get('top-0'), availability: 'laundry' });
+  const result = shortlist(outfits, {}, inventory);
+  assert.deepEqual(ids(result), ['look-1']);
+  assert.equal(result.laundryCount, 2);
+  assert.equal(result.choices[0].lastWorn, today, 'laundry filtering does not remove wear evidence');
+  assert.equal(shortlist(outfits, { mode: 'favourites' }, inventory).laundryCount, 1);
+  assert.equal(shortlist(outfits, { occasion: 'work' }, inventory).laundryCount, 0);
+  inventory.set('top-0', { ...items.get('top-0'), availability: 'ready' });
+  assert.equal(shortlist(outfits, {}, inventory).choices.length, 3);
+  assert.equal(shortlist(outfits, {}, inventory).laundryCount, 0);
+});

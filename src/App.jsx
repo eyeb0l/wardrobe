@@ -8,6 +8,7 @@ import { uiErrorMessage } from "./ui-error.mjs";
 
 import { wardrobeRequest, migrateBrowserEdits } from "./wardrobe-sync.mjs";
 import { compareWardrobeItems, moveWithinCategory } from "../shared/wardrobe-order.mjs";
+import { garmentAvailability, inLaundry } from "../shared/garment-availability.mjs";
 import { ReorderableItem } from "./reorderable-item.jsx";
 
 const OutfitView = lazy(() => import("./outfit-view.jsx").then((module) => ({ default: module.OutfitView })));
@@ -138,6 +139,7 @@ function GalleryItem({ item, selected, onOpen, rearranging }) {
         sizes="(max-width: 520px) calc(50vw - 16px), (max-width: 860px) calc(33vw - 18px), 180px"
         breakpoints={[120, 180, 240, 320, 480]}
       />
+      {inLaundry(item) ? <span className="availability-badge">In laundry</span> : null}
     </Tag>
   );
 }
@@ -266,6 +268,8 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
         </select>
       </label>
 
+      <label className="field"><span>Availability</span><select value={draft.availability} onChange={event => setDraft(current => ({ ...current, availability: event.target.value }))}><option value="ready">Ready</option><option value="laundry">In laundry</option></select></label>
+
       <fieldset className="color-field">
         <legend>Colours</legend>
         <div className="colors-editor">
@@ -313,7 +317,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [palette, setPalette] = useState(item.palette || []);
-  const [draft, setDraft] = useState({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
+  const [draft, setDraft] = useState({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])], availability: garmentAvailability(item) });
   const [shaking, setShaking] = useState(false);
   const [closeBlocked, setCloseBlocked] = useState(false);
   const type = TYPE_MAP[item.part]?.singular || "Wardrobe item";
@@ -331,12 +335,14 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
       color: draft.color?.toLowerCase() || null,
       secondaryColor: draft.secondaryColor?.toLowerCase() || null,
       tags: normalizedTags(draft.tags),
+      availability: draft.availability,
     }) !== JSON.stringify({
       name: (item.name || "").trim(),
       part: item.part,
       color: item.color?.toLowerCase() || null,
       secondaryColor: item.secondaryColor?.toLowerCase() || null,
       tags: normalizedTags(item.tags || []),
+      availability: garmentAvailability(item),
     });
   }, [draft, item]);
 
@@ -374,7 +380,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
   }, [isDirty]);
 
   const cancelEditing = () => {
-    setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
+    setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])], availability: garmentAvailability(item) });
     setSampling(null);
     setSampleStatus("");
     onClose();
@@ -385,7 +391,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
     try {
       const saved = await onSave({ ...item, ...draft, revision, name: draft.name.trim(), tags: draft.tags.map(tag => tag.trim()).filter(Boolean) });
       setRevision(saved.revision);
-      setDraft({ name: saved.name || "", part: saved.part, color: saved.color || "#9a9286", secondaryColor: saved.secondaryColor || null, tags: [...(saved.tags || [])] });
+      setDraft({ name: saved.name || "", part: saved.part, color: saved.color || "#9a9286", secondaryColor: saved.secondaryColor || null, tags: [...(saved.tags || [])], availability: garmentAvailability(saved) });
       setSampling(null);
       setSampleStatus("Changes saved.");
     } catch (error) { setSaveError(error.message); }
@@ -531,6 +537,11 @@ export function App() {
   const [items, setItems] = useState([]);
   const [regenerationRequest, setRegenerationRequest] = useState(null);
   const [activeType, setActiveType] = useState("all");
+  const [availabilityFilter, setAvailabilityFilter] = useState("all");
+  const [laundrySelection, setLaundrySelection] = useState([]);
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
+  const [availabilityNotice, setAvailabilityNotice] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const [outfitRequest, setOutfitRequest] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -602,9 +613,10 @@ export function App() {
   const selectedItem = items.find((item) => item.id === selectedId) || null;
 
   const visibleItems = useMemo(() => {
-    const filtered = activeType === "all" ? items : items.filter((item) => item.part === activeType);
+    const filtered = items.filter(item => (activeType === "all" || item.part === activeType) && (availabilityFilter === "all" || garmentAvailability(item) === availabilityFilter));
     return [...filtered].sort(compareWardrobeItems);
-  }, [activeType, items]);
+  }, [activeType, availabilityFilter, items]);
+  const selectedLaundry = visibleItems.filter(item => inLaundry(item) && laundrySelection.includes(item.id));
 
   const reorderItem = async (id, targetId) => {
     if (mutating.current || orderNeedsRefresh) return;
@@ -637,13 +649,44 @@ export function App() {
 
   const chooseType = (typeId) => {
     setActiveType(typeId);
+    setLaundrySelection([]);
     setSelectedId(null);
   };
 
+  const changeAvailability = async (ids, availability) => {
+    if (mutating.current) throw new Error("A wardrobe change is still saving. Please try again.");
+    if (wardrobeReadError) throw new Error("Refresh your wardrobe before changing availability.");
+    const selected = ids.map(id => items.find(item => item.id === id));
+    if (!ids.length || selected.some(item => !item)) throw new Error("A selected piece is no longer available. Refresh your wardrobe.");
+    mutating.current = true; ++requestVersion.current; setAvailabilityBusy(true);
+    try {
+      const saved = await wardrobeRequest("/api/import/wardrobe/availability", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ availability, items: selected.map(({ id, revision }) => ({ id, revision })) }),
+      });
+      const updates = new Map(saved.map(item => [item.id, item]));
+      setItems(current => current.map(item => updates.get(item.id) || item));
+      return saved;
+    } finally {
+      try { await refreshWardrobe({ force: true }); }
+      finally { mutating.current = false; setAvailabilityBusy(false); }
+    }
+  };
+
+  const markReady = async () => {
+    setAvailabilityError(""); setAvailabilityNotice("");
+    try {
+      const saved = await changeAvailability(selectedLaundry.map(item => item.id), "ready");
+      setLaundrySelection([]);
+      setAvailabilityNotice(`${saved.length} ${saved.length === 1 ? "piece is" : "pieces are"} ready to wear.`);
+    } catch (error) { setAvailabilityError(error.message); }
+  };
+
   const saveItem = async (updatedItem) => {
+    if (mutating.current) throw new Error("A wardrobe change is still saving. Please try again.");
     mutating.current = true; ++requestVersion.current;
     try {
-      const changes = Object.fromEntries(["name", "part", "color", "secondaryColor", "tags"].map(key => [key, updatedItem[key]]));
+      const changes = Object.fromEntries(["name", "part", "color", "secondaryColor", "tags", "availability"].map(key => [key, updatedItem[key]]));
       const saved = await wardrobeRequest(`/api/import/wardrobe/${encodeURIComponent(updatedItem.id)}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: updatedItem.revision, changes }),
       });
@@ -654,6 +697,7 @@ export function App() {
   };
 
   const deleteItem = async (id, revision) => {
+    if (mutating.current) throw new Error("A wardrobe change is still saving. Please try again.");
     mutating.current = true; ++requestVersion.current;
     try {
       await wardrobeRequest(`/api/import/wardrobe/${encodeURIComponent(id)}`, {
@@ -692,7 +736,7 @@ export function App() {
       {(outfitsOpened || route === "/outfits") ? (
         <div hidden={route !== "/outfits"}>
           <Suspense fallback={<p className="status" role="status">Loading Outfits</p>}>
-            <OutfitView items={items} wardrobeLoading={loading} wardrobeError={wardrobeReadError} onRefreshWardrobe={refreshWardrobe} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
+            <OutfitView items={items} wardrobeLoading={loading} wardrobeError={wardrobeReadError} onRefreshWardrobe={refreshWardrobe} onAvailabilityChange={changeAvailability} availabilityBusy={availabilityBusy} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
           </Suspense>
         </div>
       ) : null}
@@ -701,7 +745,7 @@ export function App() {
         <header className="gallery-header">
           <div className="gallery-meta-row">
             <p className="piece-count" role="status">{loading ? "Your wardrobe" : `${visibleItems.length} ${visibleItems.length === 1 ? "piece" : "pieces"}`}</p>
-            {!!items.length && <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>}
+            {!!items.length && <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving || availabilityBusy || availabilityFilter !== "all"} title={availabilityFilter !== "all" ? "Show all availability before rearranging" : undefined} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>}
           </div>
           <nav className="category-nav" aria-label="Filter wardrobe by item type">
             {TYPES.map((type) => (
@@ -716,6 +760,16 @@ export function App() {
               </button>
             ))}
           </nav>
+          <div className="wardrobe-availability">
+            <label className="field"><span>Availability</span><select value={availabilityFilter} disabled={availabilityBusy} onChange={event => { setAvailabilityFilter(event.target.value); setLaundrySelection([]); setRearranging(false); setDrag(null); setAvailabilityNotice(""); }}><option value="all">All availability</option><option value="ready">Ready</option><option value="laundry">In laundry</option></select></label>
+            {availabilityFilter === "laundry" ? <div className="laundry-actions">
+              <label><input type="checkbox" disabled={!visibleItems.length || availabilityBusy} checked={!!visibleItems.length && selectedLaundry.length === visibleItems.length} onChange={event => setLaundrySelection(event.target.checked ? visibleItems.map(item => item.id) : [])} />Select all shown</label>
+              <button className="secondary-button" type="button" disabled={!selectedLaundry.length || availabilityBusy || !!wardrobeReadError} onClick={markReady}>{availabilityBusy ? "Saving…" : `Mark ready (${selectedLaundry.length})`}</button>
+            </div> : null}
+          </div>
+          {availabilityNotice ? <p className="status" role="status">{availabilityNotice}</p> : null}
+          {availabilityError ? <p className="status error" role="alert">{uiErrorMessage(availabilityError)}</p> : null}
+          {wardrobeReadError ? <button className="secondary-button" type="button" disabled={availabilityBusy} onClick={() => { void refreshWardrobe(); }}>Refresh wardrobe availability</button> : null}
           {rearranging && <p className="reorder-help" id="reorder-help">Drag pieces or use the arrows to rearrange within each category. Changes save automatically.</p>}
           <p className="reorder-feedback" role="status">{orderSaving ? (orderNeedsRefresh ? "Refreshing wardrobe…" : "Saving order…") : orderNotice}</p>
           {orderError && <p className="reorder-feedback error" role="alert">{uiErrorMessage(orderError)}</p>}
@@ -730,7 +784,7 @@ export function App() {
         {!error && loading && <p className="status">Loading wardrobe</p>}
         {!error && !loading && !items.length && <p className="status empty">Add a product link or drop, paste, or choose a photo to import your first piece.</p>}
 
-        {!loading && !!items.length && !visibleItems.length && <p className="status empty">No {TYPE_MAP[activeType]?.label.toLowerCase()} yet. Choose another category or add a photo.</p>}
+        {!loading && !!items.length && !visibleItems.length && <p className="status empty">No pieces match these filters. Choose another category or availability.</p>}
 
         {!!items.length && (
           <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>
@@ -741,12 +795,10 @@ export function App() {
                 <GalleryItem item={item} rearranging />
               </ReorderableItem>
             ) : (
-              <GalleryItem
-                key={item.id}
-                item={item}
-                selected={selectedId === item.id}
-                onOpen={setSelectedId}
-              />
+              <div key={item.id} className="availability-item">
+                <GalleryItem item={item} selected={selectedId === item.id} onOpen={setSelectedId} />
+                {availabilityFilter === "laundry" ? <label className="laundry-select"><input type="checkbox" checked={laundrySelection.includes(item.id)} disabled={availabilityBusy} onChange={event => setLaundrySelection(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />{item.name || "Select piece"}</label> : null}
+              </div>
             ))}
           </section>
         )}

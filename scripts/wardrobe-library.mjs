@@ -2,11 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from './storage-fs.mjs';
 import { atomicJson } from './outfit-storage.mjs';
 import { compareWardrobeItems, resetOrderOnCategoryChange } from '../shared/wardrobe-order.mjs';
+import { garmentAvailability } from '../shared/garment-availability.mjs';
 
 const locks = new Map();
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const parts = new Set(['upperbody', 'dresses', 'wholebody_up', 'lowerbody', 'accessories_up', 'shoes']);
-export const editableFields = ['name', 'part', 'color', 'secondaryColor', 'tags'];
+export const editableFields = ['name', 'part', 'color', 'secondaryColor', 'tags', 'availability'];
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 
 export async function readLibrary(file) {
@@ -29,6 +30,7 @@ export async function withLibraryLock(file, callback) {
 
 export function publicLibraryItem(item) {
   const { _editVersion, hidden, ...record } = item;
+  record.availability = garmentAvailability(item);
   const state = editableFields.map(field => item[field] ?? null);
   record.revision = createHash('sha256').update(JSON.stringify([_editVersion ?? null, hidden === true, ...state])).digest('hex');
   return record;
@@ -40,6 +42,10 @@ export function validateEdit(input) {
   for (const [key, value] of Object.entries(input)) {
     if (key === 'name') { if (typeof value !== 'string' || value.length > 200) throw fail('Name must be at most 200 characters.'); edit.name = value.trim(); }
     else if (key === 'part') { if (!parts.has(value)) throw fail('Unknown wardrobe category.'); edit.part = value; }
+    else if (key === 'availability') {
+      if (!['ready', 'laundry'].includes(value)) throw fail('Availability must be Ready or In laundry.');
+      edit.availability = value;
+    }
     else if (key === 'tags') {
       if (!Array.isArray(value) || value.length > 40 || value.some(tag => typeof tag !== 'string' || tag.length > 100)) throw fail('Invalid detail tags.');
       edit.tags = [...new Set(value.map(tag => tag.trim()).filter(Boolean))];
@@ -68,6 +74,23 @@ export function saveLibraryEdit(file, id, payload) {
     const updated = resetOrderOnCategoryChange(item, { ...item, ...edit, _editVersion: randomUUID() });
     await atomicJson(file, records.map(value => value === item ? updated : value));
     return publicLibraryItem(updated);
+  });
+}
+
+export function setLibraryAvailability(file, payload) {
+  if (!object(payload) || !['ready', 'laundry'].includes(payload.availability)
+    || !Array.isArray(payload.items) || !payload.items.length || payload.items.length > 2000
+    || payload.items.some(item => !object(item) || typeof item.id !== 'string' || typeof item.revision !== 'string')
+    || new Set(payload.items.map(item => item.id)).size !== payload.items.length) throw fail('Invalid availability update.');
+  return withLibraryLock(file, async () => {
+    const records = await readLibrary(file);
+    // Validate the whole batch before writing anything. A stale selection must
+    // never partially mark a load ready or overwrite another device's edits.
+    const selected = new Set(payload.items.map(({ id, revision }) => checkedItem(records, id, revision).id));
+    const next = records.map(item => selected.has(item.id)
+      ? { ...item, availability: payload.availability, _editVersion: randomUUID() } : item);
+    await atomicJson(file, next);
+    return next.filter(item => selected.has(item.id)).map(publicLibraryItem);
   });
 }
 

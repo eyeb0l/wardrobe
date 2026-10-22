@@ -216,3 +216,6 @@
 .outfit-collection-heading { margin-bottom: 22px; }
 @media (max-width: 1100px) { .outfit-shortlist-grid { grid-template-columns: 1fr; gap: 16px; } }
 @media (max-width: 580px) { .outfit-shortlist { padding-top: 20px; } .outfit-shortlist-controls > .outfit-field { flex-basis: 100%; } .outfit-shortlist-choice { grid-template-columns: 90px minmax(0, 1fr); } }
+.outfit-laundry-label { display: block; margin-top: 4px; color: var(--muted); }
+.outfit-laundry { margin-block: 16px; }
+.outfit-laundry > .outfit-secondary { margin-top: 12px; }
