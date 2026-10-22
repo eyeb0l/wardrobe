@@ -535,6 +535,7 @@ export function App() {
   const [outfitRequest, setOutfitRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [wardrobeReadError, setWardrobeReadError] = useState("");
   const [syncNotice, setSyncNotice] = useState("");
   const [rearranging, setRearranging] = useState(false);
   const [orderSaving, setOrderSaving] = useState(false);
@@ -580,7 +581,8 @@ export function App() {
         setItems(loaded);
         setOrderNeedsRefresh(false);
         setError(migrationError);
-      } catch (error) { if (version === requestVersion.current) setError(error.message); }
+        setWardrobeReadError("");
+      } catch (error) { if (version === requestVersion.current) { setError(error.message); setWardrobeReadError(error.message); } }
       finally { setLoading(false); }
     })();
     refreshing.current = refresh;
@@ -690,7 +692,7 @@ export function App() {
       {(outfitsOpened || route === "/outfits") ? (
         <div hidden={route !== "/outfits"}>
           <Suspense fallback={<p className="status" role="status">Loading Outfits</p>}>
-            <OutfitView items={items} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
+            <OutfitView items={items} wardrobeLoading={loading} wardrobeError={wardrobeReadError} onRefreshWardrobe={refreshWardrobe} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
           </Suspense>
         </div>
       ) : null}

@@ -186,3 +186,33 @@
 .outfit-replacement-options input { accent-color: var(--ink); flex-shrink: 0; }
 .outfit-form-row:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 580px) { .outfit-cutout-preview { padding: 16px; } .outfit-cutout-grid { gap: 10px; } }
+
+.outfit-shortlist { padding: 24px 0 28px; margin-bottom: 30px; border-block: 1px solid var(--line); }
+.outfit-shortlist-heading h2, .outfit-collection-heading { margin: 0 0 10px; font-size: 23px; font-weight: 500; letter-spacing: -.025em; }
+.outfit-shortlist-heading p { margin: 0 0 22px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.outfit-shortlist-controls { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 18px 24px; }
+.outfit-shortlist-controls > .outfit-field { flex: 0 1 280px; }
+.outfit-shortlist-modes { display: flex; flex-wrap: wrap; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.outfit-shortlist-modes legend { font-size: 13px; font-weight: 550; margin-bottom: 7px; padding: 0; }
+.outfit-shortlist-modes label { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 14px; border: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+.outfit-shortlist-modes label.selected { border-color: var(--ink); background: rgba(25,25,25,.04); }
+.outfit-shortlist-modes input { margin: 0; accent-color: var(--ink); }
+.outfit-shortlist select:focus-visible, .outfit-shortlist-modes label:focus-within, .outfit-shortlist-history summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.outfit-shortlist-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 20px; }
+.outfit-shortlist-entry { min-width: 0; border-block: 1px solid var(--line); padding-top: 14px; }
+.outfit-shortlist-choice { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 14px; padding: 0; width: 100%; border: 0; background: transparent; color: var(--ink); cursor: pointer; text-align: left; }
+.outfit-shortlist-choice > img { width: 100%; aspect-ratio: 1; object-fit: contain; display: block; background: #e9e3d9; }
+.outfit-shortlist-copy { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.outfit-shortlist-name { display: flex; justify-content: space-between; gap: 8px; font-size: 16px; font-weight: 520; line-height: 1.4; overflow-wrap: anywhere; }
+.outfit-shortlist-name > svg { flex-shrink: 0; margin-top: 3px; }
+.outfit-shortlist-choice:hover .outfit-shortlist-name { text-decoration: underline; text-underline-offset: 3px; }
+.outfit-shortlist-meta, .outfit-shortlist-reason { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.outfit-shortlist-meta { color: var(--muted); }
+.outfit-shortlist-history summary { min-height: 44px; padding: 12px 0; font-size: 12px; cursor: pointer; }
+.outfit-shortlist-history ul { margin: 0; padding: 0 0 12px; list-style: none; }
+.outfit-shortlist-history li { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.outfit-shortlist-history strong { font-weight: 500; }
+.outfit-shortlist-history li > span { color: var(--muted); }
+.outfit-collection-heading { margin-bottom: 22px; }
+@media (max-width: 1100px) { .outfit-shortlist-grid { grid-template-columns: 1fr; gap: 16px; } }
+@media (max-width: 580px) { .outfit-shortlist { padding-top: 20px; } .outfit-shortlist-controls > .outfit-field { flex-basis: 100%; } .outfit-shortlist-choice { grid-template-columns: 90px minmax(0, 1fr); } }

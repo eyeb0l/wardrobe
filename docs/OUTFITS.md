@@ -2,6 +2,44 @@
 
 Open **Outfits** or `/outfits` to browse photographs, styling notes and the exact wardrobe pieces used.
 
+## What to wear
+
+The shortlist at the top of Outfits offers up to three saved looks for your day.
+Choose a **Shortlist occasion**, then **Not worn lately** or **Favourites**.
+Favourites only includes starred looks; it does not silently fill empty results
+with other outfits. Both modes put the oldest recorded garment wear first.
+These controls are independent of the collection filters below.
+
+Each choice explains the most recent logged wear of any piece in that look.
+Expand **Piece history** to see each garment's last-worn date and number of logged
+days, including wears in other outfits and variations. Only the pieces selected
+in each wear entry count; logging the same garment in two looks on one date
+counts as one day. Editing a saved combination does not rewrite past wear entries.
+
+Looks with no garment history follow those with dated evidence and say **No wears
+logged**. Partially logged looks show how many pieces have no history. Neither
+state means the pieces have never been worn. If all your looks were worn recently,
+the shortlist still offers the oldest available choices with their actual dates.
+Ties prefer fuller history, fewer average logged days, then favourites, with
+stable name/ID ordering. The shortlist makes no claim about style suitability
+beyond your saved occasion labels.
+
+Variations with the same main top/bottom or dress share one choice so shoe or
+accessory changes do not fill the shortlist. When fewer than three distinct
+matching looks are available, it shows fewer. Missing, hidden or deleted garments,
+missing image references and unaccepted candidates are excluded. Saved cutout
+variations and existing saved dress looks are eligible. The current choices check
+their preview and garment images before enabling selection. A missing or corrupt
+image removes affected looks and fills the slot with the next choice. Use
+**Retry images** after restoring an image or recovering connectivity.
+
+Choose a look to open its existing details, where you can change one piece,
+favourite it or log a wear. The shortlist updates after logging, undoing or
+changing a favourite. It uses your current collection locally, requires no API
+key and makes no AI calls. A failed collection or wardrobe refresh hides the choices until
+recovery. A legacy browser-edit migration warning does not hide a successfully
+loaded wardrobe. **How choices are made** explains the rules in the app.
+
 ## Choose a saved outfit
 
 Use the heart on an outfit card or **Favourite** in its details to keep favourite
