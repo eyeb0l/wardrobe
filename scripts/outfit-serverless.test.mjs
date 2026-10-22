@@ -36,6 +36,24 @@ async function hostedHarness(t, options = {}) {
   return { ...local, requests, scheduled, makePlugin, request, create };
 }
 
+test("hosted activity persists across fresh writers and read-only instances without scheduling work", async (t) => {
+  const h = await hostedHarness(t);
+  const writer = await h.makePlugin();
+  await h.request(writer, "POST", `${API}/original-1/favourite`, { favourite: true });
+  await writer.closeBundle();
+  const nextWriter = await h.makePlugin();
+  const saved = await h.request(nextWriter, "POST", `${API}/original-1/wears`, { date: "2026-01-04" });
+  assert.equal(saved.favourite, true);
+  await nextWriter.closeBundle();
+  const reader = await h.makePlugin({ readOnly: true });
+  const result = (await h.request(reader, "GET", API)).outfits.find(outfit => outfit.id === "original-1");
+  assert.equal(result.favourite, true);
+  assert.deepEqual(result.wearHistory, saved.wearHistory);
+  await h.request(reader, "POST", `${API}/original-1/favourite`, { favourite: false }, 409);
+  assert.deepEqual(h.scheduled, []);
+  assert.deepEqual(h.requests, []);
+});
+
 test("hosted scheduling finishes before acceptance and never starts background generation", async (t) => {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });

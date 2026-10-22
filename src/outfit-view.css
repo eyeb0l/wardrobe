@@ -25,6 +25,30 @@
 .outfit-field select { width: 100%; min-width: 0; min-height: 44px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 0; background: var(--paper); color: var(--ink); font: inherit; }
 .outfit-finder input:focus-visible, .outfit-modal select:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .outfit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 38px 24px; }
+.outfit-filters { padding-bottom: 18px; margin-bottom: 22px; border-bottom: 1px solid var(--line); }
+.outfit-filter-fields { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 14px; }
+.outfit-filter-fields > .outfit-field { flex: 1 1 200px; max-width: 360px; }
+.outfit-filter-fields > button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.outfit-filters > p { margin: 12px 0 0; }
+.outfit-filters select:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.outfit-card-entry { position: relative; min-width: 0; }
+.outfit-favourite { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 44px; height: 44px; background: var(--paper); border: 1px solid var(--line); color: var(--ink); cursor: pointer; }
+.outfit-favourite:hover { border-color: var(--ink); }
+.outfit-activity { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.outfit-activity > .outfit-small { margin: 12px 0 2px; }
+.outfit-activity-notice { display: flex; gap: 14px; align-items: center; font-size: 12px; line-height: 1.6; }
+.outfit-wear-history summary { cursor: pointer; padding: 12px 0; font-size: 12px; line-height: 1.5; }
+.outfit-wear-history summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.outfit-wear-history form { display: grid; gap: 14px; padding: 8px 0 14px; }
+.outfit-worn-pieces { padding: 0; margin: 0; border: 0; min-width: 0; }
+.outfit-worn-pieces legend { font-size: 13px; font-weight: 550; margin-bottom: 8px; }
+.outfit-worn-pieces label { display: flex; align-items: center; gap: 9px; min-height: 36px; font-size: 12px; line-height: 1.5; }
+.outfit-worn-pieces input { accent-color: var(--ink); flex-shrink: 0; }
+.outfit-wear-history ul { list-style: none; margin: 0; padding: 0; }
+.outfit-wear-history li { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.outfit-wear-history li p { margin: 6px 0 0; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.outfit-wear-history li > button { flex-shrink: 0; }
+@media (max-width: 580px) { .outfit-filter-fields > .outfit-field { flex-basis: 100%; max-width: none; } }
 .outfit-card { min-width: 0; width: 100%; background: transparent; padding: 0; border: 0; color: var(--ink); text-align: left; cursor: pointer; }
 .outfit-card-photo { aspect-ratio: 1; width: 100%; background: #e9e3d9; overflow: hidden; }
 .outfit-card-photo img { width: 100%; height: 100%; display: block; object-fit: contain; transition: opacity 180ms ease; }

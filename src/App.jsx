@@ -302,7 +302,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   );
 }
 
-function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle }) {
+function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, onViewOutfits }) {
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
   const samplingCanvasRef = useRef(null);
@@ -484,6 +484,9 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle }) 
       )}
 
       <fieldset className="viewer-details editing" disabled={saving} style={{ border: 0, minWidth: 0, margin: 0 }}>
+        <div className="viewer-style-action">
+          <button className="secondary-button" type="button" disabled={isDirty} title={isDirty ? "Save or discard your changes first" : undefined} onClick={() => onViewOutfits(item)}>View saved outfits with this piece</button>
+        </div>
         {["upperbody", "lowerbody", "wholebody_up", "shoes", "accessories_up"].includes(item.part) ? <div className="viewer-style-action">
           <button className="secondary-button" type="button" disabled={isDirty} title={isDirty ? "Save or discard your changes first" : undefined} onClick={() => onStyle(item)}>Style this piece</button>
           <p>{isDirty ? "Save or discard your changes to style this piece." : "Create outfits with this piece in every look."}</p>
@@ -749,6 +752,12 @@ export function App() {
 
       {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} onStyle={(item) => {
         setOutfitRequest({ garmentId: item.id });
+        setSelectedId(null);
+        window.history.pushState({}, "", "/outfits");
+        setRoute("/outfits");
+        window.scrollTo(0, 0);
+      }} onViewOutfits={(item) => {
+        setOutfitRequest({ type: "filter", garmentId: item.id });
         setSelectedId(null);
         window.history.pushState({}, "", "/outfits");
         setRoute("/outfits");

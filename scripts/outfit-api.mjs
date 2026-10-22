@@ -12,6 +12,7 @@ import { decisionsConfig, hashEvidence } from "./decisions.mjs";
 import { checkDecisionImages, imageCheckConfig } from "./decision-checks.mjs";
 import { decisionUsageLog } from "./decision-usage.mjs";
 import { outfitCombinations } from "../shared/outfit-combinations.mjs";
+import { validWearDate } from "../shared/outfit-activity.mjs";
 import { assertSameOriginMutation } from "./request-guards.mjs";
 import { mapLimit } from "./map-limit.mjs";
 import { contactThumbnail, contactTiles } from "./contact-tiles.mjs";
@@ -939,6 +940,39 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if (url.pathname === API && req.method === "GET") return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits() });
       if (url.pathname === `${API}/config` && req.method === "GET") return sendJson(res, 200, await configuration({ verifyImages: false }));
       if (url.pathname === `${API}/jobs` && req.method === "GET") return sendJson(res, 200, { jobs: [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob), warnings: jobWarnings });
+      const activity = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/(favourite|wears|wears\/([a-f0-9-]{36})\/remove)$/);
+      if (activity && req.method === "POST") {
+        const input = await readBody(req, 4096);
+        const saved = await exclusive(async () => {
+          const current = await manifest();
+          const outfit = current.outfits.find((item) => item.id === activity[1] && item.status === "accepted");
+          if (!outfit) throw fail("Saved outfit not found", 404);
+          if (activity[2] === "favourite") {
+            if (typeof input.favourite !== "boolean") throw fail("Choose whether to favourite this outfit.");
+            outfit.favourite = input.favourite;
+          } else if (activity[2] === "wears") {
+            // UTC+14 is the latest calendar day anywhere; allow that day for
+            // users ahead of the server, while rejecting future wear records.
+            const latestDay = new Date(Date.now() + 14 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            if (!validWearDate(input.date) || input.date > latestDay) throw fail("Choose a valid date on or before today.");
+            const ids = input.garmentIds === undefined ? outfit.garmentIds : input.garmentIds;
+            if (!Array.isArray(ids) || !ids.length || ids.length > outfit.garmentIds.length || new Set(ids).size !== ids.length || ids.some((id) => !outfit.garmentIds.includes(id))) throw fail("Choose the pieces from this outfit that you wore.");
+            outfit.wearHistory ||= [];
+            const previous = outfit.wearHistory.find((event) => event.date === input.date);
+            if (previous) {
+              if (JSON.stringify([...previous.garmentIds].sort()) !== JSON.stringify([...ids].sort())) throw fail("This date is already logged with different pieces. Remove that entry before correcting it.", 409);
+            } else outfit.wearHistory.push({ id: randomUUID(), date: input.date, garmentIds: [...ids], createdAt: now() });
+          } else {
+            if (!UUID.test(activity[3])) throw fail("Invalid wear entry.");
+            outfit.wearHistory = (outfit.wearHistory || []).filter((event) => event.id !== activity[3]);
+          }
+          // Merge into the latest manifest under the existing local queue or
+          // hosted writer lease. Preserve images, job state and unknown fields.
+          await atomicJson(path.join(dataDir, "outfits.json"), current);
+          return { ...outfit, image: `${API}/images/${acceptedFilename(outfit.image)}` };
+        });
+        return sendJson(res, 200, saved);
+      }
       const accessories = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/accessories$/);
       if (accessories && req.method === "GET") return sendJson(res, 200, await accessoryStatus(accessories[1]));
       if (accessories && req.method === "POST") {
