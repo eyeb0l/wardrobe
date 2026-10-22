@@ -303,8 +303,9 @@ export function wardrobeOutfitApi(options = {}) {
     return readManifest(dataDir);
   }
 
-  async function acceptedOutfits() {
-    return (await manifest()).outfits.filter((item) => item.status === "accepted" && acceptedFilename(item.image)).map((item) => ({ ...item, image: `${API}/images/${acceptedFilename(item.image)}` }));
+  async function acceptedOutfits(current) {
+    current ||= await manifest();
+    return current.outfits.filter((item) => item.status === "accepted" && acceptedFilename(item.image)).map((item) => ({ ...item, image: `${API}/images/${acceptedFilename(item.image)}` }));
   }
 
   // Bump this when changing the styling prompt or its output requirements.
@@ -1032,7 +1033,38 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if (options.readOnly && url.pathname === `${API}/config`) await loadJobs();
       // History is the only route that lists completed hosted jobs.
       if ((options.readOnly || options.serverless) && url.pathname === `${API}/jobs` && req.method === "GET") await loadJobs(undefined, { all: true });
-      if (url.pathname === API && req.method === "GET") return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits() });
+      if (url.pathname === API && req.method === "GET") {
+        const current = await manifest();
+        return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits(current), plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial" });
+      }
+      if (url.pathname === `${API}/plans` && req.method === "POST") {
+        const input = await readBody(req, 4096);
+        const saved = await exclusive(async () => {
+          const current = await manifest();
+          if (input.revision !== (current.outfitPlansRevision || "initial")) throw fail("Your plans changed on another device. Refresh and try again.", 409);
+          if (!validWearDate(input.date)) throw fail("Choose a valid plan date.");
+          const plans = current.outfitPlans || [];
+          if (input.outfitId !== null) {
+            if (!Number.isInteger(input.timezoneOffset) || input.timezoneOffset < -840 || input.timezoneOffset > 720) throw fail("Refresh to use your current local date.");
+            const localNow = Date.now() - input.timezoneOffset * 60_000;
+            const days = [0, 1].map(offset => new Date(localNow + offset * 86400_000).toISOString().slice(0, 10));
+            if (!days.includes(input.date)) throw fail("Plan a look for today or tomorrow. Refresh if the day has changed.", 409);
+            const outfit = current.outfits.find(item => item.id === input.outfitId && item.status === "accepted");
+            if (!outfit) throw fail("Saved outfit not found", 404);
+            const library = await readJson(path.join(dataDir, "library.json"), []);
+            if (!Array.isArray(library)) throw fail("Your wardrobe could not be read. Refresh and try again.", 503);
+            if (outfit.garmentIds.some(id => !library.some(item => item?.id === id && !item.hidden && !item.deleted && item.image))) throw fail("This look has unavailable pieces. Choose another look or change a piece.", 409);
+            if (input.fromDate !== undefined && (!validWearDate(input.fromDate) || !plans.some(plan => plan.date === input.fromDate && plan.outfitId === input.outfitId))) throw fail("The plan you are moving has changed. Refresh and try again.", 409);
+          } else if (input.fromDate !== undefined) throw fail("Clear one plan at a time.");
+          current.outfitPlans = plans.filter(plan => plan.date !== input.date && plan.date !== input.fromDate);
+          if (input.outfitId !== null) current.outfitPlans.push({ ...plans.find(plan => plan.date === (input.fromDate || input.date)), date: input.date, outfitId: input.outfitId });
+          current.outfitPlans.sort((a, b) => a.date.localeCompare(b.date));
+          current.outfitPlansRevision = randomUUID();
+          await atomicJson(path.join(dataDir, "outfits.json"), current);
+          return { plans: current.outfitPlans, plansRevision: current.outfitPlansRevision };
+        });
+        return sendJson(res, 200, saved);
+      }
       if (url.pathname === `${API}/config` && req.method === "GET") return sendJson(res, 200, await configuration({ verifyImages: false }));
       if (url.pathname === `${API}/jobs` && req.method === "GET") return sendJson(res, 200, { jobs: [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob), warnings: jobWarnings });
       const variation = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/(variations|photo)$/);
@@ -1053,6 +1085,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             if (typeof input.favourite !== "boolean") throw fail("Choose whether to favourite this outfit.");
             outfit.favourite = input.favourite;
           } else if (activity[2] === "wears") {
+            if (input.planDate !== undefined && (input.planDate !== input.date || input.plansRevision !== (current.outfitPlansRevision || "initial") || !(current.outfitPlans || []).some(plan => plan.date === input.date && plan.outfitId === outfit.id))) throw fail("Your plan changed. Refresh before confirming what you wore.", 409);
             // UTC+14 is the latest calendar day anywhere; allow that day for
             // users ahead of the server, while rejecting future wear records.
             const latestDay = new Date(Date.now() + 14 * 60 * 60 * 1000).toISOString().slice(0, 10);

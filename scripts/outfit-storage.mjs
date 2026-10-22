@@ -142,6 +142,10 @@ export function validateManifest(value, file = "outfits.json") {
   requireValue(Array.isArray(value.outfits), file, "outfits array");
   value.outfits.forEach((record, index) => validateOutfit(record, file, `outfits[${index}]`));
   uniqueOutfits(value.outfits, file);
+  optional(value, "outfitPlansRevision", (revision) => text(revision) && UUID.test(revision), file, "collection");
+  optional(value, "outfitPlans", (plans) => Array.isArray(plans) && plans.every((plan) =>
+    object(plan) && validWearDate(plan.date) && text(plan.outfitId) && ID.test(plan.outfitId))
+    && new Set(plans.map((plan) => plan.date)).size === plans.length, file, "collection");
   return value;
 }
 

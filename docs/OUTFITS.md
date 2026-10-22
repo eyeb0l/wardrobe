@@ -2,6 +2,34 @@
 
 Open **Outfits** or `/outfits` to browse photographs, styling notes and the exact wardrobe pieces used.
 
+## Plan today or tomorrow
+
+**Your plans** sits above the shortlist. Choose one saved look for today and one
+for tomorrow, or use **Plan for today/tomorrow** from a saved look's details.
+Each plan shows the existing garment cutouts, occasion and current availability.
+Laundry pieces are named in a warning; they can be planned ahead while awaiting
+washing. Missing, hidden or deleted pieces prevent saving that look as a new plan.
+Plans do not reserve garments, generate photos or record wears.
+
+Use **Change look** to replace a day's choice. **Change one piece** opens the
+existing variation flow, then asks you to save the new variation into the plan.
+The original plan remains until that explicit save. Moving a plan to today or
+tomorrow shows any destination look it will replace. **Clear plan** removes only
+the plan; all actual wear history remains.
+
+After wearing a planned look, choose **Wore this**. This logs the plan's date and
+opens the existing outfit details with Undo and optional selected-piece laundry.
+It is available for today and past plans, never for tomorrow. Laundry warnings do
+not prevent recording an actual wear. Undo removes the wear, leaving the plan
+unconfirmed again. Logging the same look/date elsewhere also confirms that plan.
+
+Dates use your device's local calendar, updating when the day changes or you
+return to the app. Unconfirmed past plans remain in an expandable section until
+you confirm, move or clear them. Plans persist in the existing local/cloud outfit
+collection and backups. Other devices refresh on focus; conflicting plan edits
+are rejected and refreshed before you choose again. Failed collection or wardrobe
+reads block plan actions until recovery. No new schema or AI service is required.
+
 ## What to wear
 
 The shortlist at the top of Outfits offers up to three saved looks for your day.

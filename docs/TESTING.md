@@ -1,5 +1,39 @@
 # Testing on squiggle
 
+## Plan today or tomorrow
+
+Use Node 22 and the repository's pinned headless Chromium installation. Pick
+unused ports and fresh artifact directories:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/outfit-plans.test.mjs scripts/outfit-activity.test.mjs scripts/cloud-store.test.mjs
+WARDROBE_BROWSER_PORT=5301 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-plans-browser \
+  npm run test:browser -- tests/browser/outfit-plans.spec.mjs
+rg --files /tmp/wardrobe-plans-browser
+```
+
+Playwright starts Vite, waits for readiness, and stops the server afterwards.
+Desktop (1365 × 1000) and mobile (390 × 844) cover saved-look selection, reload,
+replacement/moves, wear confirmation and Undo, separate variation saves, incoming
+laundry/missing pieces, failed writes/reads, device conflicts, and local-day
+rollover into unconfirmed past plans. Inspect `daily-plans.png`,
+`plans-first-viewport.png`, `plan-laundry.png`, `plan-variation.png` and every
+`browser-health.json`. Unexpected console/network errors, overlays and horizontal
+overflow fail the suite. Explicit 409/503 responses cover recovery.
+
+Browser data and images are synthetic. Node tests exercise real API writes,
+manifest validation, concurrent revisions, origin checks, restart persistence,
+date boundaries and separate wear history. The cloud-store test runs the planning
+API through independent hosted instances under leases against isolated PGlite.
+No private wardrobe data or paid model services are used.
+
+Reviewed synthetic screenshots: [desktop plans](screenshots/plan-tomorrow/daily-plans-desktop.png),
+[mobile plans](screenshots/plan-tomorrow/daily-plans-mobile.png),
+[desktop variation selection](screenshots/plan-tomorrow/plan-variation-desktop.png),
+and [mobile variation selection](screenshots/plan-tomorrow/plan-variation-mobile.png).
+
 ## Garment availability
 
 The availability tests use the existing Node 22 and pinned headless Chromium

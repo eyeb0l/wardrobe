@@ -399,7 +399,7 @@ test("real cloud import and outfit plugins can initialize and serve reads withou
     } finally { await imports.closeBundle?.(); }
     const outfits = await createPlugin("outfit", { readOnly: true });
     try {
-      assert.deepEqual(await get(outfits, "/api/outfits"), { version: 1, outfits: [] });
+      assert.deepEqual(await get(outfits, "/api/outfits"), { version: 1, outfits: [], plans: [], plansRevision: "initial" });
       assert.deepEqual(await get(outfits, "/api/outfits/jobs"), { jobs: [], warnings: [] });
     } finally { await outfits.closeBundle?.(); }
   });
