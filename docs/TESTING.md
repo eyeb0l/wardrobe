@@ -1,5 +1,42 @@
 # Testing on squiggle
 
+## Wear-aware outfit shortlist
+
+Use the pinned Node 22 and Chromium setup below. The pure ranking tests cover
+history across outfits and variations, per-day garment deduplication, selected
+piece subsets, missing/future history, favourites, occasions, availability,
+distinct main combinations and stable ordering.
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+node --test scripts/outfit-shortlist.test.mjs
+WARDROBE_BROWSER_PORT=5281 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-shortlist-browser \
+  npm run test:browser -- tests/browser/outfit-shortlist.spec.mjs
+rg --files /tmp/wardrobe-shortlist-browser
+```
+
+Use an unused port and unique artifact directory. Playwright starts and stops
+Vite with isolated fixture data. Desktop (1365 × 1000) and mobile (390 × 844)
+Chromium exercise occasion/mode selection, dated explanations, shared garment
+history, cutout looks, empty favourites, logging, undo, favourite changes,
+variation navigation, reloads and failed collection/wardrobe read recovery. The fixture uses a fixed
+local day and an explicit `en-GB` locale for date assertions. Inspect
+`shortlist-recent.png`, `shortlist-favourites.png`, `shortlist-empty.png` and each
+`browser-health.json`. Unexpected console/network errors, framework overlays and
+horizontal overflow fail the tests; an intentional 503 checks recovery. The
+shortlist makes no AI calls; images and API persistence are synthetic fixtures.
+
+Reviewed synthetic screenshots for this feature:
+[desktop shortlist](screenshots/outfit-shortlist/recent-desktop.png),
+[mobile shortlist](screenshots/outfit-shortlist/recent-mobile.png),
+[desktop favourites and piece history](screenshots/outfit-shortlist/favourites-desktop.png), and
+[mobile favourites and piece history](screenshots/outfit-shortlist/favourites-mobile.png).
+
+For the full browser suite on a runner that terminates long shell commands,
+run `npm run test:browser -- --project=desktop` and then
+`npm run test:browser -- --project=mobile`, each with a fresh port/artifact path.
+
 ## Saved outfit variations
 
 Use the existing Node 22 and pinned Chromium setup below. These focused tests

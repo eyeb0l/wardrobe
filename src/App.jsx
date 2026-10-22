@@ -690,7 +690,7 @@ export function App() {
       {(outfitsOpened || route === "/outfits") ? (
         <div hidden={route !== "/outfits"}>
           <Suspense fallback={<p className="status" role="status">Loading Outfits</p>}>
-            <OutfitView items={items} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
+            <OutfitView items={items} wardrobeLoading={loading} wardrobeError={error} onRefreshWardrobe={refreshWardrobe} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
           </Suspense>
         </div>
       ) : null}

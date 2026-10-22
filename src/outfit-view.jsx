@@ -9,6 +9,7 @@ import { uiErrorMessage } from "./ui-error.mjs";
 import { ImageCheck } from "./image-check.jsx";
 import { FavouriteButton, OutfitActivity, WearSummary } from "./outfit-activity.jsx";
 import { formatWearDate } from "../shared/outfit-activity.mjs";
+import { OutfitShortlist } from "./outfit-shortlist.jsx";
 import { OutfitVariation } from "./outfit-variation.jsx";
 import "./outfit-view.css";
 
@@ -285,7 +286,7 @@ function JobRow({ job, onOpen }) {
   </button>;
 }
 
-export function OutfitView({ items = EMPTY_ITEMS, active = true, generationRequest, onGenerationHandled }) {
+export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardrobeError = "", onRefreshWardrobe, active = true, generationRequest, onGenerationHandled }) {
   const filterId = useId();
   const [favouritesOnly, setFavouritesOnly] = useState(false);
   const [garmentFilter, setGarmentFilter] = useState("");
@@ -505,6 +506,8 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true, generationReque
       <div><p className="outfit-count">{loading ? "Your collection" : `${outfits.length} ${outfits.length === 1 ? "outfit" : "outfits"}`}</p><h1>Outfits</h1><p>New ways to wear the pieces you already own.</p></div>
       <button className="outfit-primary" type="button" onClick={() => { setActionError(""); setModal({ type: "generate" }); }} disabled={!config && refreshingConfig}><Plus size={18} aria-hidden="true" />Generate outfits</button>
     </header>
+    {outfits.length ? <OutfitShortlist outfits={outfits} itemsById={itemsById} unavailable={wardrobeLoading ? "Loading your wardrobe…" : wardrobeError ? "Your wardrobe could not be refreshed. Refresh it before choosing a look." : loadError ? "The shortlist is unavailable until your collection can be refreshed." : ""} onRefresh={wardrobeError ? onRefreshWardrobe : undefined} onOpen={id => { setActionError(""); setModal({ type: "outfit", id }); }} /> : null}
+    {outfits.length ? <h2 className="outfit-collection-heading">Browse your collection</h2> : null}
     {outfits.length || hasFilters ? <section className="outfit-filters" aria-label="Filter saved outfits">
       <div className="outfit-filter-fields">
         <button type="button" className="outfit-secondary" aria-pressed={favouritesOnly} onClick={() => setFavouritesOnly((value) => !value)}>Favourites</button>
