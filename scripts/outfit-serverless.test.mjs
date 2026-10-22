@@ -220,7 +220,7 @@ test("read-only instances never establish files and reject all mutation hooks", 
   await rm(path.join(h.dataDir, "outfit-images"), { recursive: true });
   await rm(path.join(h.dataDir, "outfit-jobs"), { recursive: true });
   const plugin = await h.makePlugin({ readOnly: true });
-  assert.deepEqual(await h.request(plugin, "GET", API), { version: 1, outfits: [] });
+  assert.deepEqual(await h.request(plugin, "GET", API), { version: 1, outfits: [], plans: [], plansRevision: "initial" });
   assert.deepEqual(await h.request(plugin, "GET", `${API}/jobs`), { jobs: [], warnings: [] });
   assert.equal((await h.request(plugin, "GET", `${API}/config`)).ready, true);
   await h.request(plugin, "POST", `${API}/jobs`, { count: 1, modelReferenceId: "default" }, 409);

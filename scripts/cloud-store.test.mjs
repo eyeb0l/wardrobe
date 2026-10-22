@@ -464,3 +464,44 @@ test('garment availability batches persist through the cloud store and conflict 
   await other.withLease(() => withStorage(other, () => setLibraryAvailability(file, { availability: 'ready', items: fresh.map(({ id, revision }) => ({ id, revision })) })));
   assert.ok((await withStorage(h.store, () => readLibrary(file))).every(item => item.availability === 'ready'));
 });
+
+test('daily plans and wear confirmation persist across independent hosted clients under writer leases', async t => {
+  const h = await harness(t);
+  const { wardrobeOutfitApi } = await import('./outfit-api.mjs');
+  const { Readable } = await import('node:stream');
+  const { planningDays } = await import('../shared/outfit-plans.mjs');
+  const [today, tomorrow] = planningDays();
+  await h.store.withLease(async () => {
+    await h.store.writeFile(`${CLOUD_ROOT}/library.json`, JSON.stringify([{ id: 'top', name: 'Top', image: '/api/import/library/top.png' }]));
+    await h.store.writeFile(`${CLOUD_ROOT}/outfits.json`, JSON.stringify({ version: 1, custom: 'keep', outfits: [{ id: 'look', name: 'Look', occasion: ['casual'], garmentIds: ['top'], status: 'accepted', image: 'outfit-images/look.png' }] }));
+  });
+  const call = async (store, method, url, body, status = 200) => {
+    const serve = () => withStorage(store, async () => {
+      const plugin = wardrobeOutfitApi({ serverless: true, readOnly: method === 'GET', env: { WARDROBE_DATA_DIR: CLOUD_ROOT }, fetch: () => { throw new Error('No provider calls expected'); } });
+      try {
+        await plugin.configResolved({ root: '/tmp' });
+        let handler;
+        plugin.configureServer({ middlewares: { use(value) { handler = value; } } });
+        const req = Readable.from(body ? [Buffer.from(JSON.stringify(body))] : []);
+        Object.assign(req, { method, url, headers: { host: 'localhost:5173' } });
+        let result;
+        const res = { statusCode: 200, setHeader() {}, end(value) { result = JSON.parse(value); } };
+        await handler(req, res, () => assert.fail('Unexpected route'));
+        assert.equal(res.statusCode, status, JSON.stringify(result));
+        return result;
+      } finally { await plugin.closeBundle(); }
+    });
+    return method === 'GET' ? serve() : store.withLease(serve);
+  };
+  const payload = { date: tomorrow, outfitId: 'look', revision: 'initial', timezoneOffset: new Date().getTimezoneOffset() };
+  const saved = await call(h.store, 'POST', '/api/outfits/plans', payload);
+  const other = h.other();
+  assert.deepEqual((await call(other, 'GET', '/api/outfits')).plans, saved.plans);
+  await call(other, 'POST', '/api/outfits/plans', payload, 409);
+  const moved = await call(other, 'POST', '/api/outfits/plans', { ...payload, date: today, fromDate: tomorrow, revision: saved.plansRevision });
+  await call(h.store, 'POST', '/api/outfits/look/wears', { date: today, planDate: today, plansRevision: moved.plansRevision });
+  const result = await call(other, 'GET', '/api/outfits');
+  assert.deepEqual(result.plans, [{ date: today, outfitId: 'look' }]);
+  assert.equal(result.outfits[0].wearHistory.length, 1);
+  assert.equal(JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/outfits.json`, 'utf8')).custom, 'keep');
+});
