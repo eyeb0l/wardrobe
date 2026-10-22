@@ -52,7 +52,7 @@ async function snapshot(dataDir) {
   for (const { record, filename } of candidates) if (files.has(filename) && !items.has(record.id)) {
     items.set(record.id, record); itemFiles.set(record.id, files.get(filename));
   }
-  const outfits = saved.filter((outfit) => photos.has(acceptedFilename(outfit.image)) && outfit.garmentIds.every((id) => items.has(id)));
+  const outfits = saved.filter((outfit) => outfit.imageKind !== "cutouts" && photos.has(acceptedFilename(outfit.image)) && outfit.garmentIds.every((id) => items.has(id)));
   const usage = new Map();
   for (const outfit of saved) for (const id of outfit.garmentIds) usage.set(id, (usage.get(id) || 0) + 1);
   const outfitFiles = new Map(outfits.map(outfit => [outfit.id, photos.get(acceptedFilename(outfit.image))]));

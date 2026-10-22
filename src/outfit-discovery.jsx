@@ -50,7 +50,7 @@ export function OutfitFinder({ config, fingerprint, active, result, onChange }) 
   </section>;
 }
 
-export function OwnedItemSwaps({ outfit, itemsById, fingerprint, active }) {
+export function OwnedItemSwaps({ outfit, itemsById, fingerprint, active, onSelect }) {
   const [garmentId, setGarmentId] = useState(outfit.garmentIds[0] || "");
   const [brief, setBrief] = useState("");
   const [result, setResult] = useState(null);
@@ -59,18 +59,18 @@ export function OwnedItemSwaps({ outfit, itemsById, fingerprint, active }) {
   const current = result?.fingerprint === fingerprint ? result : null;
   const rows = current ? orderDiscovery(current.rankings).filter((row) => itemsById.has(row.id)).slice(0, 6) : [];
   const clear = () => { cancel(); setResult(null); };
-  return <section className="outfit-swaps" aria-label="Change one piece">
-    <h3>Change one piece</h3>
+  return <section className="outfit-swaps" aria-label="Suggested replacements">
+    <h3>Get replacement suggestions</h3>
     <p className="outfit-small">Try a replacement you already own, keeping the other pieces in this look.</p>
     <form onSubmit={(event) => { event.preventDefault(); if (brief.trim() && !busy && itemsById.has(garmentId)) { setResult(null); void run("swaps", { outfitId: outfit.id, garmentId, brief }, (value) => setResult({ ...value, fingerprint })); } }}>
       <label className="outfit-field" htmlFor={`${id}-piece`}><span>Piece to replace</span><select id={`${id}-piece`} value={garmentId} onChange={(event) => { clear(); setGarmentId(event.target.value); }}>{outfit.garmentIds.map((piece) => <option key={piece} value={piece} disabled={!itemsById.has(piece)}>{itemsById.get(piece)?.name || "Piece no longer available"}</option>)}</select></label>
       <label className="outfit-field" htmlFor={`${id}-brief`}><span>What would you change?</span><input id={`${id}-brief`} value={brief} maxLength={500} placeholder="Make this look less formal" onChange={(event) => { clear(); setBrief(event.target.value); }} /></label>
-      <button className="outfit-secondary" type="submit" disabled={busy || !brief.trim() || !itemsById.has(garmentId)}>{busy ? "Finding alternatives…" : "Choose from my wardrobe"}</button>
+      <button className="outfit-secondary" type="submit" disabled={busy || !brief.trim() || !itemsById.has(garmentId)}>{busy ? "Finding alternatives…" : "Suggest replacements"}</button>
     </form>
     {error ? <p className="outfit-error" role="alert">{error}</p> : null}
     {current ? <>
       <p className="outfit-small" role="status">{rows.length ? "Compare these pieces with your outfit photo before choosing. These suggestions won't change your saved look." : current.candidateCount ? "No clear replacement. Try another description." : "No other available pieces in this category."}{current.unknownCount ? ` ${current.unknownCount} ${current.unknownCount === 1 ? "piece needs" : "pieces need"} more detail to assess.` : ""}</p>
-      <div className="outfit-pieces-grid">{rows.map(({ id }) => { const item = itemsById.get(id); return <div className="outfit-piece" key={id}><OptimizedImage src={item.thumbnail || item.image} alt={item.name} sizes="140px" /><p>{item.name}</p></div>; })}</div>
+      <div className="outfit-pieces-grid">{rows.map(({ id }) => { const item = itemsById.get(id); return <div className="outfit-piece" key={id}><OptimizedImage src={item.thumbnail || item.image} alt={item.name} sizes="140px" /><p>{item.name}</p>{onSelect ? <button className="outfit-text-button" type="button" aria-label={`Preview with ${item.name}`} onClick={() => onSelect({ garmentId, replacementId: id })}>Preview variation</button> : null}</div>; })}</div>
     </> : null}
   </section>;
 }

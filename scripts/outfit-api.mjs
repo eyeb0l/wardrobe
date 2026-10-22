@@ -6,7 +6,8 @@ import sharp from "sharp";
 import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
 import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
-import { atomicJson, readManifest, acceptedFilename, validateJob, publishCandidateImage } from "./outfit-storage.mjs";
+import { atomicJson, readManifest, acceptedFilename, validateJob, publishCandidateImage, publishImage } from "./outfit-storage.mjs";
+import { outfitCutoutPreview } from "./outfit-cutouts.mjs";
 import { acquireOutfitStoreLock } from "./outfit-store-lock.mjs";
 import { decisionsConfig, hashEvidence } from "./decisions.mjs";
 import { checkDecisionImages, imageCheckConfig } from "./decision-checks.mjs";
@@ -212,7 +213,7 @@ export function wardrobeOutfitApi(options = {}) {
   function reconcileAccepted(job, saved) {
     let changed = false;
     for (const outfit of job.outfits) {
-      const accepted = saved.outfits.find((item) => item.id === outfit.id && item.status === "accepted");
+      const accepted = saved.outfits.find((item) => item.id === (job.targetOutfitId || outfit.id) && item.status === "accepted" && (!job.targetOutfitId || item.variationPhotoId === outfit.id));
       if (!accepted) {
         if (outfit.status === "accepted") throw fail(`Accepted outfit ${outfit.id} is missing from outfits.json. Restore matching collection and job files from the same backup.`, 503);
         continue;
@@ -271,7 +272,7 @@ export function wardrobeOutfitApi(options = {}) {
     // Fetch fresh file metadata once for the eligible names. Keep records in
     // order: a missing/corrupt first duplicate must not mask a later valid one.
     const candidates = records.map((record) => {
-      if (!record || record.hidden || !validId(record.id) || !PARTS.includes(record.part)) return null;
+      if (!record || record.hidden || record.deleted || !validId(record.id) || !PARTS.includes(record.part)) return null;
       const match = typeof record.image === "string" && record.image.match(/^\/api\/import\/library\/([a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp))$/i);
       return match ? { record, filename: match[1] } : null;
     }).filter(Boolean);
@@ -326,6 +327,7 @@ export function wardrobeOutfitApi(options = {}) {
 
   async function accessoryImage(id) {
     const outfit = (await manifest()).outfits.find((item) => item.id === id && item.status === "accepted");
+    if (outfit?.imageKind === "cutouts") throw fail("Add a modelled photo before requesting accessory suggestions.", 409);
     const filename = acceptedFilename(outfit?.image);
     if (!filename) throw fail("Saved outfit not found", 404);
     return { outfit, file: await containedFile(imageDir, filename) };
@@ -587,6 +589,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
   }
 
   async function generate(job, outfit) {
+    if (job.targetOutfitId) await variationPhotoTarget(job, outfit);
     const items = validateSelection(outfit.garmentIds, await inventory({ verifyImageIds: new Set(outfit.garmentIds) }));
     const reference = await resolveReference(job.modelReferenceId);
     const inputs = [{ file: reference.file, name: "identity.png" }, ...items.map((item) => ({ file: item.file, name: `${item.part}-${item.id}.png` }))];
@@ -813,6 +816,23 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     if (outfit.status === "accepted") return;
     if (outfit.status !== "review") throw fail("This outfit is not ready for review.", 409);
     const current = await manifest();
+    if (job.targetOutfitId) {
+      const target = await variationPhotoTarget(job, outfit, current);
+      const items = await inventory({ verifyImageIds: new Set(outfit.garmentIds) });
+      validateSelection(outfit.garmentIds, items);
+      const candidate = await containedFile(path.join(jobsDir, job.id), outfit.internal.candidateFile);
+      const bytes = await readFile(candidate);
+      const decoded = sharp(bytes, { limitInputPixels: 64e6 });
+      const meta = await decoded.metadata();
+      if (meta.format !== "png" || !meta.width || meta.width !== meta.height) throw fail("The candidate image is invalid. Retry it before saving.", 409);
+      await decoded.stats();
+      const filename = `${outfit.id}-${createHash("sha256").update(bytes).digest("hex")}.png`;
+      await publishCandidateImage(candidate, path.join(imageDir, filename), bytes);
+      Object.assign(target, { image: `${API}/images/${filename}`, imageKind: "modelled", variationPhotoId: outfit.id, modelReferenceId: job.modelReferenceId, updatedAt: now() });
+      await atomicJson(path.join(dataDir, "outfits.json"), current);
+      outfit.status = "accepted"; outfit.image = target.image;
+      return;
+    }
     const existing = current.outfits.find((item) => item.id === outfit.id);
     if (existing) {
       if (existing.status !== "accepted" || JSON.stringify(existing.garmentIds) !== JSON.stringify(outfit.garmentIds)) throw fail("This outfit ID already exists in the saved collection.", 409);
@@ -835,6 +855,81 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     await atomicJson(path.join(dataDir, "outfits.json"), { ...current, outfits: [...current.outfits, record] });
     outfit.status = "accepted";
     outfit.image = record.image;
+  }
+
+  async function variationPhotoTarget(job, outfit, saved) {
+    if ([...jobs.values()].some(other => other.id !== job.id && other.targetOutfitId === job.targetOutfitId && isOpen(other))) throw fail("Another photo for this variation is already in progress. Open its latest generation.", 409);
+    const target = (saved || await manifest()).outfits.find((item) => item.id === job.targetOutfitId && item.status === "accepted");
+    if (!target?.variationOf || target.imageKind !== "cutouts" || acceptedFilename(target.image) !== acceptedFilename(job.targetImage) || JSON.stringify(target.garmentIds) !== JSON.stringify(outfit.garmentIds)) throw fail("This variation has changed or already has a modelled photo. Open its latest saved version.", 409);
+    return target;
+  }
+
+  async function saveVariation(sourceId, input) {
+    if (typeof input.requestId !== "string" || !UUID.test(input.requestId)) throw fail("A valid save request is required.");
+    const name = shortText(input.name, "outfit name", 120);
+    if (!validId(input.replacedGarmentId) || !validId(input.replacementGarmentId) || input.replacedGarmentId === input.replacementGarmentId) throw fail("Choose a different wardrobe piece.");
+    if (!Array.isArray(input.expectedGarmentIds) || !input.expectedGarmentIds.length || input.expectedGarmentIds.length > 5 || input.expectedGarmentIds.some(id => !validId(id))) throw fail("Refresh the original outfit before saving.", 409);
+    const id = `variation-${input.requestId.toLowerCase()}`;
+    return exclusive(async () => {
+      const saved = await manifest();
+      const ids = input.expectedGarmentIds.map(id => id === input.replacedGarmentId ? input.replacementGarmentId : id);
+      const existing = saved.outfits.find(outfit => outfit.id === id);
+      if (existing) {
+        if (existing.variationOf !== sourceId || existing.name !== name || JSON.stringify(existing.garmentIds) !== JSON.stringify(ids)) throw fail("This save request was already used for another variation. Reopen the original outfit.", 409);
+        return { ...existing, image: `${API}/images/${acceptedFilename(existing.image)}` };
+      }
+      const source = saved.outfits.find(outfit => outfit.id === sourceId && outfit.status === "accepted");
+      if (!source) throw fail("Saved outfit not found", 404);
+      if (JSON.stringify(source.garmentIds) !== JSON.stringify(input.expectedGarmentIds) || !acceptedFilename(input.expectedImage) || acceptedFilename(source.image) !== acceptedFilename(input.expectedImage)) throw fail("The original outfit changed. Reopen it before saving a variation.", 409);
+      if (!source.garmentIds.includes(input.replacedGarmentId) || source.garmentIds.includes(input.replacementGarmentId)) throw fail("Replace one piece with another from your wardrobe.");
+      const items = await inventory({ verifyImageIds: new Set([...source.garmentIds, input.replacementGarmentId]) });
+      const original = items.get(input.replacedGarmentId), replacement = items.get(input.replacementGarmentId);
+      if (!original || !replacement) throw fail("A selected piece is no longer available. Refresh your wardrobe.", 409);
+      if (original.part !== replacement.part) throw fail("Choose a replacement from the same category.");
+      const selected = validateSelection(ids, items);
+      const bytes = await outfitCutoutPreview(selected);
+      const filename = `${id}-${createHash("sha256").update(bytes).digest("hex")}.png`;
+      await publishImage(path.join(imageDir, filename), bytes);
+      const record = { id, name, occasion: [...source.occasion], garmentIds: ids,
+        reason: `A variation of ${source.name}, replacing ${original.name} with ${replacement.name}.`,
+        setting: source.setting || "a warm natural outdoor setting", variationOf: source.id,
+        imageKind: "cutouts", image: `${API}/images/${filename}`, status: "accepted", createdAt: now() };
+      await atomicJson(path.join(dataDir, "outfits.json"), { ...saved, outfits: [...saved.outfits, record] });
+      return record;
+    });
+  }
+
+  async function createVariationPhoto(outfitId, input) {
+    if (typeof input.requestId !== "string" || !UUID.test(input.requestId)) throw fail("A valid photo request is required.");
+    const requestId = input.requestId.toLowerCase();
+    const direction = input.direction === undefined ? "" : shortText(input.direction, "styling direction", 2000, false);
+    const job = await exclusive(async () => {
+      const previous = jobs.get(requestId) || await readJson(path.join(jobsDir, requestId, "job.json"), null);
+      if (previous) {
+        validateJob(previous, requestId);
+        if (previous.targetOutfitId !== outfitId || previous.modelReferenceId !== input.modelReferenceId || previous.direction !== direction) throw fail("This photo request was already used. Open the existing generation.", 409);
+        jobs.set(previous.id, previous);
+        return previous;
+      }
+      const target = (await manifest()).outfits.find(item => item.id === outfitId && item.status === "accepted");
+      if (!target?.variationOf || target.imageKind !== "cutouts") throw fail("Choose a saved cutout variation to create its modelled photo.", 409);
+      if ([...jobs.values()].some(job => job.targetOutfitId === target.id && isOpen(job))) throw fail("This variation already has a photo to generate or review. Open its progress below.", 409);
+      if ([...jobs.values()].filter(job => ["planning", "generating"].includes(job.status)).length >= 8) throw fail("Several collections are already queued. Wait for one to finish.", 429);
+      const items = validateSelection(target.garmentIds, await inventory({ verifyImageIds: new Set(target.garmentIds) }));
+      const reference = await readyReference(input.modelReferenceId);
+      const id = requestId;
+      const candidate = { id: `photo-${id}`, name: target.name, occasion: [...target.occasion], garmentIds: [...target.garmentIds], reason: target.reason || "", setting: target.setting || "a warm natural outdoor setting", status: "planned", image: null, attempts: 0, error: null, prompt: direction,
+        internal: { outerLayerConstruction: items.some(item => item.part === "wholebody_up") ? "closed-uncertain" : "none", outerLayerNote: "", history: [] } };
+      const job = { version: 1, id, count: 1, direction, modelReferenceId: reference.id, targetOutfitId: target.id, targetImage: target.image,
+        status: "generating", createdAt: now(), updatedAt: now(), error: null, outfits: [candidate], internal: options.serverless ? { cloudTaskId: randomUUID() } : {} };
+      await indexJob(id, true, true);
+      await mkdir(path.join(jobsDir, id));
+      await save(job);
+      jobs.set(id, job);
+      return job;
+    });
+    if (["planning", "generating"].includes(job.status)) await enqueue(job.id);
+    return job;
   }
 
   const loadingJobs = new Map();
@@ -940,6 +1035,13 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if (url.pathname === API && req.method === "GET") return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits() });
       if (url.pathname === `${API}/config` && req.method === "GET") return sendJson(res, 200, await configuration({ verifyImages: false }));
       if (url.pathname === `${API}/jobs` && req.method === "GET") return sendJson(res, 200, { jobs: [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicJob), warnings: jobWarnings });
+      const variation = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/(variations|photo)$/);
+      if (variation && req.method === "POST") {
+        const input = await readBody(req, 4096);
+        return variation[2] === "variations"
+          ? sendJson(res, 200, await saveVariation(variation[1], input))
+          : sendJson(res, 202, publicJob(await createVariationPhoto(variation[1], input)));
+      }
       const activity = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/(favourite|wears|wears\/([a-f0-9-]{36})\/remove)$/);
       if (activity && req.method === "POST") {
         const input = await readBody(req, 4096);
@@ -1080,6 +1182,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           else {
             const failed = next.outfits.filter((item) => item.status === "failed");
             if (!failed.length) throw fail("There are no failed outfits to retry.", 409);
+            if (next.targetOutfitId) await variationPhotoTarget(next, failed[0]);
             for (const item of failed) { item.internal.previousImage = await previousCandidate(next, item); item.status = "planned"; item.error = null; }
             recompute(next);
           }
@@ -1123,7 +1226,8 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             await readyReference(next.modelReferenceId);
             const items = await inventory({ verifyImageIds: new Set(outfit.garmentIds) });
             validateSelection(outfit.garmentIds, items);
-            if ((await usedPairs(items, null, outfit.id)).has(pairKey(outfit.garmentIds, items))) throw fail("This top-and-bottom combination is already saved or being generated.", 409);
+            if (next.targetOutfitId) await variationPhotoTarget(next, outfit);
+            else if ((await usedPairs(items, null, outfit.id)).has(pairKey(outfit.garmentIds, items))) throw fail("This top-and-bottom combination is already saved or being generated.", 409);
             outfit.prompt = input.prompt === undefined ? outfit.prompt : shortText(input.prompt, "correction (maximum 2000 characters)", 2000, false);
             outfit.internal.previousImage = await previousCandidate(next, outfit);
             if (outfit.status !== "failed" && (outfit.status !== "rejected" || outfit.internal.telemetrySucceeded || outfit.source === "uploaded")) { outfit.internal.telemetryEpisodeId = randomUUID(); outfit.internal.telemetryAttempts = 0; }

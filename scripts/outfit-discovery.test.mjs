@@ -219,3 +219,17 @@ test("a disconnected browser never dispatches the remaining candidates", async (
   assert.equal(h.calls.length, 2);
   assert.deepEqual(h.charges, ["text", "text"]);
 });
+
+
+test("cutout variations stay out of photograph comparisons until a modelled photo is approved", async t => {
+  const h = await setup(t);
+  const file = path.join(h.dataDir, "outfits.json");
+  const saved = JSON.parse(await fs.readFile(file, "utf8"));
+  saved.outfits[0].imageKind = "cutouts";
+  await fs.writeFile(file, JSON.stringify(saved));
+  const result = await h.request();
+  assert.equal(result.candidateCount, 5);
+  assert.ok(!result.rankedIds.includes("original-1"));
+  await h.request("swaps", { brief: "Less formal", outfitId: "original-1", garmentId: "top-1" }, 409);
+  assert.equal(h.calls.length, 5);
+});

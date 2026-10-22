@@ -3,6 +3,7 @@ import * as localFs from "node:fs/promises";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import { wardrobeOutfitApi } from "./outfit-api.mjs";
 import { withStorage } from "./storage-fs.mjs";
 import { API, harness, plan } from "./test-helpers/outfit-harness.mjs";
@@ -377,4 +378,39 @@ test("batched inventory keeps later valid duplicate IDs after missing or corrupt
   const reviewed = await h.request(plugin, "GET", `${API}/jobs/${job.id}`);
   assert.equal(reviewed.outfits[0].status, "review");
   assert.deepEqual(h.requests, ["planning", "image"], "valid fallback references still reach the mocked provider");
+});
+
+
+test("hosted variation and optional exact-piece photo persist through fresh instances and durable task review", async t => {
+  const h = await hostedHarness(t);
+  let plugin = await h.makePlugin();
+  const source = h.originals[0];
+  const saved = await h.request(plugin, "POST", `${API}/${source.id}/variations`, {
+    requestId: randomUUID(), name: "Hosted variation", expectedGarmentIds: source.garmentIds,
+    expectedImage: source.image, replacedGarmentId: "top-1", replacementGarmentId: "top-2",
+  });
+  assert.equal(saved.imageKind, "cutouts");
+  assert.deepEqual(h.requests, []); assert.deepEqual(h.scheduled, []);
+  await plugin.closeBundle(); plugin = await h.makePlugin();
+  const request = { requestId: randomUUID(), modelReferenceId: "default" };
+  const job = await h.request(plugin, "POST", `${API}/${saved.id}/photo`, request, 202);
+  assert.deepEqual(h.requests, []); assert.equal(h.scheduled.length, 1);
+  await plugin.closeBundle(); plugin = await h.makePlugin();
+  await h.request(plugin, "POST", `${API}/${saved.id}/photo`, { ...request, requestId: randomUUID() }, 409);
+  await plugin.runTask(h.scheduled[0]);
+  assert.deepEqual(h.requests, ["image"]);
+  await plugin.closeBundle(); plugin = await h.makePlugin();
+  const review = await h.request(plugin, "GET", `${API}/jobs/${job.id}`);
+  assert.equal(review.outfits[0].status, "review");
+  assert.deepEqual(review.outfits[0].garmentIds, saved.garmentIds);
+  await h.request(plugin, "POST", `${API}/${saved.id}/photo`, request, 202);
+  assert.deepEqual(h.requests, ["image"]);
+  await h.request(plugin, "POST", `${API}/${saved.id}/favourite`, { favourite: true });
+  await h.request(plugin, "POST", `${API}/jobs/${job.id}/outfits/${review.outfits[0].id}/approve`, {});
+  await plugin.closeBundle(); plugin = await h.makePlugin({ readOnly: true });
+  const collection = (await h.request(plugin, "GET", API)).outfits;
+  assert.equal(collection.length, 7);
+  const updated = collection.find(o => o.id === saved.id);
+  assert.equal(updated.imageKind, "modelled"); assert.equal(updated.favourite, true);
+  assert.equal(collection[0].image, `${API}/images/original-1.png`);
 });

@@ -6,5 +6,5 @@ export function orderDiscovery(rankings, { style = "match", lessUsed = false } =
 }
 
 export function discoveryFingerprint(outfits, items) {
-  return JSON.stringify([outfits.map(({ id, name, occasion, reason, garmentIds, status, image, updatedAt }) => [id, name, occasion, reason, garmentIds, status, image, updatedAt]), items.map(({ id, name, part, color, secondaryColor, tags, revision, hidden, image }) => [id, name, part, color, secondaryColor, tags, revision, hidden, image])]);
+  return JSON.stringify([outfits.map(({ id, name, occasion, reason, garmentIds, status, image, imageKind, updatedAt }) => [id, name, occasion, reason, garmentIds, status, image, imageKind, updatedAt]), items.map(({ id, name, part, color, secondaryColor, tags, revision, hidden, image }) => [id, name, part, color, secondaryColor, tags, revision, hidden, image])]);
 }

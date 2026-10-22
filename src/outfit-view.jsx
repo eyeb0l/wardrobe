@@ -9,6 +9,7 @@ import { uiErrorMessage } from "./ui-error.mjs";
 import { ImageCheck } from "./image-check.jsx";
 import { FavouriteButton, OutfitActivity, WearSummary } from "./outfit-activity.jsx";
 import { formatWearDate } from "../shared/outfit-activity.mjs";
+import { OutfitVariation } from "./outfit-variation.jsx";
 import "./outfit-view.css";
 
 const API = "/api/outfits";
@@ -43,6 +44,7 @@ function jobSummary(job) {
   const accepted = outfits.filter((outfit) => outfit.status === "accepted").length;
   const finished = outfits.filter((outfit) => ["review", "accepted", "rejected"].includes(outfit.status)).length;
   const failed = outfits.filter((outfit) => outfit.status === "failed").length;
+  if (job.targetOutfitId && !running(job) && !review && !failed) return accepted ? "Photo added to your variation" : "Photo rejected · your cutout look is saved";
   if (job.status === "planning") return "Choosing combinations from your wardrobe…";
   if (running(job)) return `Creating photos · ${finished} of ${job.count} ready${review ? ` · ${review} to review` : ""}`;
   if (review) return `${review} ${review === 1 ? "outfit" : "outfits"} ready to review${failed ? ` · ${failed} need a retry` : ""}`;
@@ -160,15 +162,16 @@ function AccessorySuggestions({ outfit, visible = true }) {
   </section>;
 }
 
-function OutfitDetails({ outfit, itemsById, visible = true, activity, children }) {
+function OutfitDetails({ outfit, itemsById, visible = true, activity, children, showAccessories = true }) {
   return <div className="outfit-detail-layout">
-    <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className="outfit-photo-fallback" role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <Photo key={outfit.image || outfit.id} src={outfit.image} alt={`${outfit.name}, modelled head to toe`} sizes={DETAIL_PHOTO_SIZES} priority />}</div>
+    <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className="outfit-photo-fallback" role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <Photo key={outfit.image || outfit.id} src={outfit.image} alt={`${outfit.name}, ${outfit.imageKind === "cutouts" ? "cutout preview" : "modelled head to toe"}`} sizes={DETAIL_PHOTO_SIZES} priority />}</div>
     <div className="outfit-detail-copy">
+      {outfit.imageKind === "cutouts" ? <p className="outfit-occasion">Cutout preview</p> : null}
       {activity}
       <p className="outfit-occasion">{occasionText(outfit)}</p>
       <p className="outfit-reason">{outfit.reason}</p>
       <GarmentReferences outfit={outfit} itemsById={itemsById} />
-      {outfit.status === "accepted" ? <AccessorySuggestions key={`${outfit.id}:${outfit.image}`} outfit={outfit} visible={visible} /> : null}
+      {outfit.status === "accepted" && outfit.imageKind !== "cutouts" && showAccessories ? <AccessorySuggestions key={`${outfit.id}:${outfit.image}`} outfit={outfit} visible={visible} /> : null}
       {children}
     </div>
   </div>;
@@ -184,7 +187,8 @@ function setupMessage(config) {
   return "";
 }
 
-function GenerateForm({ config, configError, refreshing, onRefresh, busy, error, onSubmit, requiredGarmentId, itemsById, onRemoveGarment }) {
+function GenerateForm({ config, configError, refreshing, onRefresh, busy, error, onSubmit, requiredGarmentId, itemsById, onRemoveGarment, photoOutfit }) {
+  const [requestId] = useState(() => crypto.randomUUID());
   const garment = itemsById.get(requiredGarmentId);
   const available = requiredGarmentId ? config?.garmentCombinations?.[requiredGarmentId] : config?.availableCombinations;
   const maxCount = Math.max(1, Math.min(12, config?.maxCount || 12, available ?? 12));
@@ -194,13 +198,14 @@ function GenerateForm({ config, configError, refreshing, onRefresh, busy, error,
   const references = config?.modelReferences || [];
   const chosenReference = references.find((reference) => reference.id === modelReferenceId);
   const effectiveReference = chosenReference?.id || "";
-  const problem = configError || setupMessage(config) || (requiredGarmentId && (!garment || available === undefined) ? "This piece is no longer available for outfits. Remove it or refresh your wardrobe." : requiredGarmentId && !available ? "There are no new top-and-bottom combinations with this piece. Add more pieces or remove it to try other looks." : "");
+  const problem = configError || (photoOutfit ? !config?.hasApiKey ? "Photo generation is unavailable until the generation service is connected." : !config.hasModelReference || !config.modelReferences?.length ? "Add a reference photo in wardrobe setup to create a modelled photo." : "" : setupMessage(config)) || (requiredGarmentId && (!garment || available === undefined) ? "This piece is no longer available for outfits. Remove it or refresh your wardrobe." : requiredGarmentId && !available ? "There are no new top-and-bottom combinations with this piece. Add more pieces or remove it to try other looks." : "");
   const validCount = Number.isInteger(Number(count)) && Number(count) >= 1 && Number(count) <= maxCount;
   useEffect(() => { setCount((current) => Math.min(Number(current) || 1, maxCount)); }, [maxCount]);
 
-  return <form className="outfit-generate-form" onSubmit={(event) => { event.preventDefault(); if (!busy && !refreshing && !problem && validCount && effectiveReference) onSubmit({ count: Number(count), direction: direction.trim(), modelReferenceId: effectiveReference, ...(requiredGarmentId ? { requiredGarmentId } : {}) }); }}>
+  return <form className="outfit-generate-form" onSubmit={(event) => { event.preventDefault(); if (!busy && !refreshing && !problem && validCount && effectiveReference) onSubmit({ ...(photoOutfit ? { requestId } : {}), count: photoOutfit ? 1 : Number(count), direction: direction.trim(), modelReferenceId: effectiveReference, ...(requiredGarmentId ? { requiredGarmentId } : {}) }); }}>
     <div className="outfit-form-content">
-    <p className="outfit-form-intro">Your own pieces, modelled using your reference photo. Review each look before adding it to your collection.</p>
+    <p className="outfit-form-intro">{photoOutfit ? "Create a photo of this exact combination using your reference. Review it before adding it to your saved variation." : "Your own pieces, modelled using your reference photo. Review each look before adding it to your collection."}</p>
+    {photoOutfit ? <GarmentReferences outfit={photoOutfit} itemsById={itemsById} /> : null}
     {requiredGarmentId ? <section className="outfit-required-piece" aria-label="Piece included in every outfit">
       {garment ? <Photo src={garment.thumbnail || garment.image} alt="" sizes="64px" /> : null}
       <div><strong>{garment?.name || "Unavailable piece"}</strong><p>Included in every outfit</p></div>
@@ -208,7 +213,7 @@ function GenerateForm({ config, configError, refreshing, onRefresh, busy, error,
     </section> : null}
     {problem ? <div className="outfit-notice" role="status"><p>{problem}</p><button type="button" className="outfit-text-button" onClick={onRefresh} disabled={refreshing || busy}>{refreshing ? "Refreshing…" : "Refresh settings"}</button></div> : null}
     <div className="outfit-form-row">
-      <label className="outfit-field" htmlFor="outfit-count"><span>Number of outfits</span><input id="outfit-count" name="count" type="number" min="1" max={maxCount} step="1" value={count} onChange={(event) => setCount(event.target.value)} disabled={busy} required aria-describedby="outfit-count-hint" /><small id="outfit-count-hint">Choose 1–{maxCount} outfits.</small></label>
+      {!photoOutfit ? <label className="outfit-field" htmlFor="outfit-count"><span>Number of outfits</span><input id="outfit-count" name="count" type="number" min="1" max={maxCount} step="1" value={count} onChange={(event) => setCount(event.target.value)} disabled={busy} required aria-describedby="outfit-count-hint" /><small id="outfit-count-hint">Choose 1–{maxCount} outfits.</small></label> : null}
       <label className="outfit-field" htmlFor="outfit-direction"><span>Styling direction <em>optional</em></span><textarea id="outfit-direction" name="direction" rows="2" maxLength={1000} value={direction} onChange={(event) => setDirection(event.target.value)} disabled={busy} placeholder="Relaxed dinners and warm-weather weekends" /><small>Leave blank for an everyday mix.</small></label>
     </div>
     {references.length ? <fieldset className="outfit-reference-picker" disabled={busy}>
@@ -224,7 +229,7 @@ function GenerateForm({ config, configError, refreshing, onRefresh, busy, error,
     <div className="outfit-form-actions">
       <p className="outfit-form-note">Generation may incur charges. You can close this window while your outfits are being created.</p>
       {error ? <p className="outfit-error" role="alert">{error}</p> : null}
-      <button className="outfit-primary" type="submit" disabled={busy || refreshing || !!problem || !validCount || !effectiveReference}><Plus size={17} aria-hidden="true" />{busy ? "Starting…" : `Generate ${validCount ? count : ""} ${Number(count) === 1 ? "outfit" : "outfits"}`}</button>
+      <button className="outfit-primary" type="submit" disabled={busy || refreshing || !!problem || !validCount || !effectiveReference}><Plus size={17} aria-hidden="true" />{busy ? "Starting…" : photoOutfit ? "Generate modelled photo" : `Generate ${validCount ? count : ""} ${Number(count) === 1 ? "outfit" : "outfits"}`}</button>
     </div>
   </form>;
 }
@@ -258,13 +263,13 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob, visible 
         <span>{outfit.name}</span>{outfit.status === "accepted" ? <Check size={14} aria-hidden="true" /> : null}
       </button>)}</nav>
       <h3 className="outfit-review-title">{selected.name}</h3>
-      <OutfitDetails outfit={selected} itemsById={itemsById} visible={visible}>
+      <OutfitDetails outfit={selected} itemsById={itemsById} visible={visible} showAccessories={!job.targetOutfitId}>
         <div className="outfit-review-actions">
           {selected.status === "failed" ? <p className="outfit-error">{uiErrorMessage(selected.error, "This image couldn't be created. Retry to generate it again.")}</p> : null}
           {["planned", "generating"].includes(selected.status) ? <p className="outfit-small" role="status">{selected.status === "generating" ? "Creating this photo…" : "This photo is next in line."}</p> : null}
-          {canReview ? <><p className="outfit-small">Check your likeness, every piece, and the fit against the references.</p><ImageCheck endpoint={`${API}/jobs/${job.id}/outfits/${selected.id}/check`} fingerprint={JSON.stringify([job.updatedAt, selected.image, selected.status, [...itemsById.values()].map(item => [item.id, item.revision, item.image])])} enabled={imageChecksReady} active={visible} disabled={busy || cropping || running(job)} /><div className="outfit-action-row"><button className="outfit-primary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "approve")}><Check size={17} aria-hidden="true" />Accept into collection</button><button className="outfit-secondary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "reject")}>Reject</button></div></> : null}
-          {selected.status === "accepted" ? <p className="outfit-added"><Check size={17} aria-hidden="true" />Added to your collection.</p> : null}
-          {selected.status === "rejected" ? <p className="outfit-small">Rejected. This look is not in your collection.</p> : null}
+          {canReview ? <><p className="outfit-small">Check your likeness, every piece, and the fit against the references.</p><ImageCheck endpoint={`${API}/jobs/${job.id}/outfits/${selected.id}/check`} fingerprint={JSON.stringify([job.updatedAt, selected.image, selected.status, [...itemsById.values()].map(item => [item.id, item.revision, item.image])])} enabled={imageChecksReady} active={visible} disabled={busy || cropping || running(job)} /><div className="outfit-action-row"><button className="outfit-primary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "approve")}><Check size={17} aria-hidden="true" />{job.targetOutfitId ? "Use this photo" : "Accept into collection"}</button><button className="outfit-secondary" type="button" disabled={busy || cropping} onClick={() => onAction(job.id, selected.id, "reject")}>Reject</button></div></> : null}
+          {selected.status === "accepted" ? <p className="outfit-added"><Check size={17} aria-hidden="true" />{job.targetOutfitId ? "Photo added to your variation." : "Added to your collection."}</p> : null}
+          {selected.status === "rejected" ? <p className="outfit-small">{job.targetOutfitId ? "Photo rejected. Your cutout variation is still saved." : "Rejected. This look is not in your collection."}</p> : null}
           {nextReview && ["accepted", "rejected"].includes(selected.status) ? <button className="outfit-secondary" type="button" onClick={() => select(nextReview.id)}>Next to review <ArrowRight size={16} aria-hidden="true" /></button> : null}
           {canRetry ? <div className="outfit-correction"><label className="outfit-field" htmlFor={`correction-${selected.id}`}><span>{selected.status === "failed" ? "Retry notes" : "Adjust this photo"} <em>optional</em></span><textarea id={`correction-${selected.id}`} rows="2" maxLength={1500} value={correction} disabled={busy || cropping} onChange={(event) => setCorrection(event.target.value)} placeholder="For example, keep the coat open and show the full shoes" /></label><div className="outfit-action-row"><button className="outfit-secondary" type="button" disabled={busy || cropping || running(job)} onClick={() => onAction(job.id, selected.id, "retry", { prompt: correction.trim() })}><ArrowCounterClockwise size={16} aria-hidden="true" />{selected.status === "failed" ? "Retry photo" : "Regenerate photo"}</button>{selected.status === "failed" && <CopyPrompt prompt={selected.generationPrompt} className="outfit-secondary" disabled={busy || cropping} />}</div><ModeledPhotoUpload key={selected.id} kind="outfit" className="outfit-secondary" disabled={busy || running(job)} onEditingChange={setCropping} onUpload={(image) => onAction(job.id, selected.id, "upload", image)} />{running(job) ? <p className="outfit-small">You can retry this photo when the current generation finishes.</p> : null}</div> : null}
         </div>
@@ -275,7 +280,7 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob, visible 
 
 function JobRow({ job, onOpen }) {
   return <button className="outfit-job-row" type="button" onClick={() => onOpen(job.id)}>
-    <span><strong>{job.count} outfit {job.count === 1 ? "idea" : "ideas"}</strong><span className="outfit-job-summary">{jobSummary(job)}</span>{job.direction ? <span className="outfit-job-direction">{job.direction}</span> : null}</span>
+    <span><strong>{job.targetOutfitId ? "Variation photo" : `${job.count} outfit ${job.count === 1 ? "idea" : "ideas"}`}</strong><span className="outfit-job-summary">{jobSummary(job)}</span>{job.direction ? <span className="outfit-job-direction">{job.direction}</span> : null}</span>
     <span className="outfit-job-link">{running(job) ? "View progress" : needsAttention(job) ? "Review outfits" : "View results"}<ArrowRight size={17} aria-hidden="true" /></span>
   </button>;
 }
@@ -469,6 +474,27 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true, generationReque
     if (!isActive.current || document.visibilityState === "hidden") return;
     try { await refreshCollection(); } catch { if (mounted.current) setLoadError("The outfit was saved, but the collection couldn't be refreshed. Reload the collection to see it."); }
   } : undefined);
+  const openVariation = (outfit, initialSwap) => { setActionError(""); setModal({ type: "variation", source: structuredClone(outfit), initialSwap }); };
+  const saveVariation = async (source, body) => {
+    if (busy.current) return;
+    busy.current = true; setBusyKey("variation"); setActionError("");
+    resources.current.collection.invalidate();
+    try {
+      const saved = await request(`${API}/${encodeURIComponent(source.id)}/variations`, { method: "POST", body: JSON.stringify(body) });
+      if (!mounted.current) return;
+      resources.current.collection.invalidate(); resources.current.config.invalidate();
+      setOutfits(current => [...current.filter(item => item.id !== saved.id), saved]);
+      clearFilters(); setDiscoveryResult(null); refreshConfig();
+      if (isActive.current) setModal({ type: "outfit", id: saved.id });
+    } catch (error) {
+      if (mounted.current) { setActionError(uiErrorMessage(error)); await refreshCollection().catch(() => {}); }
+    } finally { busy.current = false; if (mounted.current) setBusyKey(""); }
+  };
+  const openPhoto = (outfit) => {
+    const pending = jobs.find(job => job.targetOutfitId === outfit.id && needsAttention(job));
+    setActionError(""); setModal(pending ? { type: "job", id: pending.id } : { type: "photo", id: outfit.id });
+  };
+  const photoOutfit = modal?.type === "photo" ? outfits.find(outfit => outfit.id === modal.id) : null;
   const currentJobs = jobs.filter(needsAttention);
   const previousJobs = jobs.filter((job) => !needsAttention(job));
   const selectedOutfit = modal?.type === "outfit" ? outfits.find((outfit) => outfit.id === modal.id) : null;
@@ -497,10 +523,12 @@ export function OutfitView({ items = EMPTY_ITEMS, active = true, generationReque
     {loading && !outfits.length ? <p className="outfit-empty" role="status">Loading your outfits…</p> : null}
     {!loading && !loadError && !outfits.length ? <div className="outfit-empty"><h2>Your next look starts here.</h2><p>Generate a collection from your wardrobe, then keep the looks you love.</p></div> : null}
     {!loading && outfits.length > 0 && !displayedOutfits.length ? <div className="outfit-empty"><h2>No outfits match.</h2><p>{hasFilters ? "Try another occasion or piece, or clear your filters." : "Try another search or browse all saved outfits."}</p></div> : null}
-    {displayedOutfits.length ? <section className="outfit-grid" aria-label={currentDiscovery ? "Matching saved outfits" : "Your outfit collection"}>{displayedOutfits.map((outfit, index) => <article className="outfit-card-entry" key={outfit.id}><button className="outfit-card" type="button" onClick={() => { setActionError(""); setModal({ type: "outfit", id: outfit.id }); }} aria-label={`View ${outfit.name}`}><div className="outfit-card-photo"><Photo src={outfit.image} alt={`${outfit.name}, modelled outfit`} priority={index < 3} /></div><div className="outfit-card-caption"><h2>{outfit.name}</h2><ArrowRight size={19} aria-hidden="true" /><p>{occasionText(outfit)}</p><p><WearSummary outfit={outfit} /></p></div></button><FavouriteButton outfit={outfit} busy={!!busyKey} onChange={changeActivity} compact /></article>)}</section> : null}
+    {displayedOutfits.length ? <section className="outfit-grid" aria-label={currentDiscovery ? "Matching saved outfits" : "Your outfit collection"}>{displayedOutfits.map((outfit, index) => <article className="outfit-card-entry" key={outfit.id}><button className="outfit-card" type="button" onClick={() => { setActionError(""); setModal({ type: "outfit", id: outfit.id }); }} aria-label={`View ${outfit.name}`}><div className="outfit-card-photo"><Photo src={outfit.image} alt={`${outfit.name}, ${outfit.imageKind === "cutouts" ? "cutout preview" : "modelled outfit"}`} priority={index < 3} /></div><div className="outfit-card-caption"><h2>{outfit.name}</h2><ArrowRight size={19} aria-hidden="true" /><p>{outfit.imageKind === "cutouts" ? "Cutout preview · " : ""}{occasionText(outfit)}</p><p><WearSummary outfit={outfit} /></p></div></button><FavouriteButton outfit={outfit} busy={!!busyKey} onChange={changeActivity} compact /></article>)}</section> : null}
     {previousJobs.length ? <details className="outfit-history"><summary>Previous generations <span>({previousJobs.length})</span></summary>{previousJobs.map((job) => <JobRow key={job.id} job={job} onOpen={openJob} />)}</details> : null}
     {active && modal?.type === "generate" ? <OutfitModal title="Generate outfits" className="outfit-generate-modal" onClose={closeModal}>{!config && refreshingConfig ? <p className="outfit-form-intro" role="status">Loading generation settings…</p> : <GenerateForm config={config} configError={configError} refreshing={refreshingConfig} onRefresh={refreshConfig} busy={!!busyKey} error={actionError} onSubmit={startGeneration} requiredGarmentId={modal.requiredGarmentId} itemsById={itemsById} onRemoveGarment={() => setModal({ type: "generate" })} />}</OutfitModal> : null}
-    {active && selectedOutfit ? <OutfitModal title={selectedOutfit.name} onClose={closeModal}><OutfitDetails outfit={selectedOutfit} itemsById={itemsById} visible={visible} activity={<OutfitActivity key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} busy={!!busyKey} error={actionError} notice={activityNotice} onChange={changeActivity} />}>{discoveryConfig?.ready ? <OwnedItemSwaps key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} fingerprint={fingerprint} active={visible} /> : null}</OutfitDetails></OutfitModal> : null}
-    {active && selectedJob ? <OutfitModal title={`${selectedJob.count} outfit ${selectedJob.count === 1 ? "idea" : "ideas"}`} className="outfit-review-modal" onClose={closeModal}><ReviewJob key={selectedJob.id} job={selectedJob} itemsById={itemsById} busy={!!busyKey} error={actionError} onAction={outfitAction} onRetryJob={retryJob} visible={visible} imageChecksReady={config?.imageChecks?.ready} /></OutfitModal> : null}
+    {active && selectedOutfit ? <OutfitModal title={selectedOutfit.name} onClose={closeModal}><OutfitDetails outfit={selectedOutfit} itemsById={itemsById} visible={visible} activity={<><div className="outfit-variation-actions"><button type="button" className="outfit-secondary" disabled={!!busyKey} onClick={() => openVariation(selectedOutfit)}>Change one piece</button>{selectedOutfit.imageKind === "cutouts" ? <button type="button" className="outfit-secondary" disabled={!!busyKey} onClick={() => openPhoto(selectedOutfit)}>{jobs.some(job => job.targetOutfitId === selectedOutfit.id && needsAttention(job)) ? "View photo progress" : "Create modelled photo"}</button> : null}</div><OutfitActivity key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} busy={!!busyKey} error={actionError} notice={activityNotice} onChange={changeActivity} /></>}>{discoveryConfig?.ready && selectedOutfit.imageKind !== "cutouts" ? <OwnedItemSwaps key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} fingerprint={fingerprint} active={visible} onSelect={swap => openVariation(selectedOutfit, swap)} /> : null}</OutfitDetails></OutfitModal> : null}
+    {active && modal?.type === "variation" ? <OutfitModal title="Change one piece" onClose={closeModal}><OutfitVariation outfit={modal.source} itemsById={itemsById} initialSwap={modal.initialSwap} busy={!!busyKey} error={actionError} onSave={saveVariation} onCancel={() => { setActionError(""); setModal({ type: "outfit", id: modal.source.id }); }} /></OutfitModal> : null}
+    {active && photoOutfit ? <OutfitModal title="Create modelled photo" className="outfit-generate-modal" onClose={closeModal}>{!config && refreshingConfig ? <p role="status">Loading generation settings…</p> : <GenerateForm key={photoOutfit.id} config={config} configError={configError} refreshing={refreshingConfig} onRefresh={refreshConfig} busy={!!busyKey} error={actionError} itemsById={itemsById} photoOutfit={photoOutfit} onSubmit={body => mutate("photo", `${API}/${encodeURIComponent(photoOutfit.id)}/photo`, body, job => { if (isActive.current) setModal({ type: "job", id: job.id }); })} />}</OutfitModal> : null}
+    {active && selectedJob ? <OutfitModal title={selectedJob.targetOutfitId ? "Modelled photo" : `${selectedJob.count} outfit ${selectedJob.count === 1 ? "idea" : "ideas"}`} className="outfit-review-modal" onClose={closeModal}><ReviewJob key={selectedJob.id} job={selectedJob} itemsById={itemsById} busy={!!busyKey} error={actionError} onAction={outfitAction} onRetryJob={retryJob} visible={visible} imageChecksReady={config?.imageChecks?.ready} /></OutfitModal> : null}
   </main>;
 }
