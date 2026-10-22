@@ -32,6 +32,36 @@ backups. Devices using the same cloud store see changes when they reopen or
 refocus the app. They do not generate photos, call AI, or change saved-usage
 ranking in AI search, which still counts appearances in saved looks.
 
+## Save a variation
+
+Open a saved outfit and choose **Change one piece**. Pick the piece to replace,
+choose an available garment in the same category, and preview the combination
+using your existing cutouts. Give it a name and choose **Save variation**.
+This creates a separate saved look without an AI request or reference photo;
+the original keeps its image, favourites and wear history. The new look has its
+own favourites and wearing history and works with the existing filters.
+
+Variations use the generator's supported top-and-bottom structure, with optional
+outerwear, shoes and an accessory. Every piece must still have an available
+cutout. Deliberate variations can reuse an existing top-and-bottom pair, including
+when only shoes or outerwear change. The automatic generator still avoids
+repeating base pairs.
+
+A saved variation initially shows **Cutout preview**. Choose **Create modelled
+photo** to generate a photograph of those exact pieces using your selected
+reference. This is an explicit, potentially paid image request; no AI styling
+plan is needed. Review the candidate and choose **Use this photo** to update only
+that variation. Rejection, failure or interruption leaves the saved cutout look
+intact. You can retry, add correction notes or use the existing manual-photo
+upload during review. Photos do not create an extra collection entry.
+
+Both cutouts and photos persist in local/cloud storage and existing backups.
+Repeated requests with the same request ID recover the same save/job. Stale
+source outfits and unavailable pieces are rejected before saving; stale photo
+targets cannot overwrite a newer look. Photograph-based search and suggestions
+include a variation after its modelled photo has been approved. Manual browsing,
+filters and **Change one piece** also work before that.
+
 ## Generate outfits
 
 Choose **Generate outfits**, request 1–12 looks, add optional styling direction, and select a model reference. Planning uses garment images and metadata; each combination gets a square modelled photograph.
@@ -46,7 +76,7 @@ If generation fails, you can supply your own photograph instead; see [manual mod
 
 ## Find and refine saved looks
 
-Optional **Find a saved look** searches your accepted outfits with a brief such as “dinner, slightly overdressed, but not corporate.” Refine the matches towards understated or statement looks, or favour pieces that appear in fewer saved outfits. Open a saved look and use **Change one piece** to compare replacement cutouts from your own wardrobe. Suggestions do not alter the saved outfit or generate photographs.
+Optional **Find a saved look** searches your accepted outfits with a brief such as “dinner, slightly overdressed, but not corporate.” Refine the matches towards understated or statement looks, or favour pieces that appear in fewer saved outfits. Open a photographed saved look and use **Get replacement suggestions** to compare owned alternatives. **Preview variation** opens the same cutout editor with the suggested piece selected. Suggestions alone do not save a look or generate a photograph.
 
 Search and swaps examine saved photographs and garment cutouts through OpenAI Decisions. Optional **Check crop quality** and **Check photo against pieces** flag concerns for your review without accepting or regenerating anything. Enable these features with the existing server-only OpenAI key and flag described in [Outfit discovery](OUTFIT_DISCOVERY.md).
 

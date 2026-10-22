@@ -19,7 +19,7 @@ For hosted use, add the new flag to the intended deployment environment and rede
 
 - **Find a saved look** searches accepted looks against an occasion or mood. Each candidate includes its saved photo and the actual cutouts of its selected garments.
 - **Best match / More understated / More striking** and **Favour pieces in fewer saved looks** reorder the existing judgements locally. Saved appearances are not wearing history.
-- **Change one piece** compares up to six owned alternatives in the same category. Decisions sees the original outfit photo, original piece, fixed-piece cutouts and candidate cutouts. Its prompt explicitly distinguishes the existing photograph from the proposed replacement. It does not generate a preview or change the saved look.
+- **Get replacement suggestions** compares up to six owned alternatives in the same category. Decisions sees the original outfit photo, original piece, fixed-piece cutouts and candidate cutouts. Its prompt explicitly distinguishes the existing photograph from the proposed replacement. It does not generate a preview or change the saved look.
 
 | Route | Request / result |
 | --- | --- |
@@ -164,3 +164,10 @@ The 2026-10-08 human-labelled comparison used the same 20 saved looks under thre
 These accuracy and latency averages include successful trials; the baseline has five rather than six successful everyday trials. nDCG@3 measures ordering against graded relevance (1 is ideal), not a probability of correctness. Identical-input repeats had identical scores for all methods. Consensus preserved its winner across the two ensembles for every brief, yet two winners were not preferred human picks. Consensus had the strongest dinner result; absolute judging led overall and for the other two briefs. All successful trials fit the 12-second deadline on this local 20-look collection.
 
 Absolute judging is selected for the draft implementation, with the evaluated rubric and concurrency bound unchanged. Three briefs from one collection do not establish general quality, cross-request calibration or latency for larger wardrobes. Continue measuring these separately; keep uncertain/no-match behaviour and manual control in place.
+
+
+Saved cutout variations remain available in normal browsing and filters, but are
+excluded from photograph-based rankings and replacement suggestions until a
+modelled photo is approved. Suggested owned replacements offer **Preview
+variation**, which opens the manual cutout editor; saving that preview requires
+no additional AI call. See [saved variations](OUTFITS.md#save-a-variation).

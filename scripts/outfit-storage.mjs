@@ -92,6 +92,9 @@ function validateOutfit(record, file, prefix, job = false) {
   for (const key of ["prompt", "error"]) optional(record, key, nullableText, file, prefix);
   for (const key of ["createdAt", "updatedAt"]) optional(record, key, timestamp, file, prefix);
   optional(record, "favourite", (value) => typeof value === "boolean", file, prefix);
+  optional(record, "variationOf", (value) => text(value) && ID.test(value) && value !== record.id, file, prefix);
+  optional(record, "imageKind", (value) => ["cutouts", "modelled"].includes(value), file, prefix);
+  optional(record, "variationPhotoId", (value) => text(value) && ID.test(value), file, prefix);
   optional(record, "wearHistory", (events) => Array.isArray(events) && events.every((event) =>
     object(event) && text(event.id) && UUID.test(event.id) && validWearDate(event.date) && timestamp(event.createdAt)
     && strings(event.garmentIds) && event.garmentIds.length > 0
@@ -153,6 +156,11 @@ export function validateJob(value, expectedId) {
   requireValue(JOB_STATUSES.includes(value.status), file, "status");
   requireValue(text(value.direction), file, "direction");
   optional(value, "requiredGarmentId", (id) => text(id) && /^[a-z0-9][a-z0-9-]{0,119}$/.test(id), file, "job");
+  optional(value, "targetOutfitId", (id) => text(id) && ID.test(id), file, "job");
+  if (value.targetOutfitId !== undefined) {
+    requireValue(value.count === 1 && Array.isArray(value.outfits) && value.outfits.length === 1, file, "variation photo candidate");
+    requireValue(Boolean(acceptedFilename(value.targetImage)), file, "targetImage");
+  }
   requireValue(text(value.modelReferenceId) && Boolean(value.modelReferenceId.trim()), file, "modelReferenceId");
   for (const key of ["createdAt", "updatedAt"]) requireValue(timestamp(value[key]), file, key);
   optional(value, "error", nullableText, file, "job");

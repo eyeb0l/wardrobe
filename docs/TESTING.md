@@ -1,5 +1,41 @@
 # Testing on squiggle
 
+## Saved outfit variations
+
+Use the existing Node 22 and pinned Chromium setup below. These focused tests
+cover separate cutout saves, exact replacement selection, duplicate prevention,
+concurrent writes, stale/unavailable pieces, optional-photo rejection and retry,
+approval recovery, and fresh hosted instances:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/outfit-variations.test.mjs scripts/outfit-serverless.test.mjs scripts/outfit-discovery.test.mjs
+WARDROBE_BROWSER_PORT=5273 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-variations-browser \
+  npm run test:browser -- tests/browser/outfit-variations.spec.mjs
+rg --files /tmp/wardrobe-variations-browser
+```
+
+Choose an unused port and unique artifact directory. Playwright starts an isolated
+Vite server, waits for readiness and stops it after the run. Both desktop and
+mobile tests exercise replacement selection, empty categories, live cutout
+previews, cancellation, failed saves, reloads and optional photo review. Saving
+works without an API key; optional photo generation works when automatic outfit
+combinations are exhausted. Inspect `variation-preview.png`,
+`variation-controls.png`, `variation-saved.png`, `variation-photo-review.png` and
+`browser-health.json` in each viewport's output. The tests reject unexpected
+console/network failures and horizontal overflow. Expected HTTP 503 responses
+exercise save recovery. Fixtures and provider responses are synthetic: they
+verify the workflow, not real AI photo fidelity. No live model calls are made.
+
+Reviewed synthetic screenshots for this feature:
+[desktop replacement preview](screenshots/outfit-variations/preview-desktop.png),
+[mobile replacement controls](screenshots/outfit-variations/preview-mobile.png),
+[desktop saved variation](screenshots/outfit-variations/saved-desktop.png), and
+[mobile saved variation](screenshots/outfit-variations/saved-mobile.png).
+
+Run the full standard checks below before submission.
+
 ## Favourites, outfit filters and wearing history
 
 Follow the Node 22, dependency and Chromium setup below. The activity API tests
