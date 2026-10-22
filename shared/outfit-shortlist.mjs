@@ -24,11 +24,11 @@ function combinationKey(outfit, itemsById) {
   return JSON.stringify((base.length ? base : outfit.garmentIds).slice().sort());
 }
 
-export function outfitShortlist(outfits, itemsById, { occasion = '', mode = 'recent', today = localDate() } = {}) {
+export function outfitShortlist(outfits, itemsById, { occasion = '', mode = 'recent', today = localDate(), failedImages = new Set() } = {}) {
   // Aggregate before filtering, including wears in other occasions/variations.
   const history = garmentWearHistory(outfits, today);
-  const available = outfits.filter(outfit => outfit.status === 'accepted' && outfit.image && outfit.garmentIds?.length
-    && outfit.garmentIds.every(id => { const item = itemsById.get(id); return item?.image && !item.hidden && !item.deleted; }));
+  const available = outfits.filter(outfit => outfit.status === 'accepted' && outfit.image && !failedImages.has(outfit.image) && outfit.garmentIds?.length
+    && outfit.garmentIds.every(id => { const item = itemsById.get(id); return item?.image && !failedImages.has(item.image) && !item.hidden && !item.deleted; }));
   const eligible = available.filter(outfit => (!occasion || outfit.occasion?.includes(occasion)) && (mode !== 'favourites' || outfit.favourite));
   const ranked = eligible.map(outfit => {
     const pieces = [...new Set(outfit.garmentIds)].map(id => ({ id, name: itemsById.get(id).name, ...(history.get(id) || { count: 0, lastWorn: '' }) }));

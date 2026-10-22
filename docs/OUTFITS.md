@@ -28,13 +28,17 @@ Variations with the same main top/bottom or dress share one choice so shoe or
 accessory changes do not fill the shortlist. When fewer than three distinct
 matching looks are available, it shows fewer. Missing, hidden or deleted garments,
 missing image references and unaccepted candidates are excluded. Saved cutout
-variations and existing saved dress looks are eligible.
+variations and existing saved dress looks are eligible. The current choices check
+their preview and garment images before enabling selection. A missing or corrupt
+image removes affected looks and fills the slot with the next choice. Use
+**Retry images** after restoring an image or recovering connectivity.
 
 Choose a look to open its existing details, where you can change one piece,
 favourite it or log a wear. The shortlist updates after logging, undoing or
 changing a favourite. It uses your current collection locally, requires no API
 key and makes no AI calls. A failed collection or wardrobe refresh hides the choices until
-recovery. **How choices are made** explains the rules in the app.
+recovery. A legacy browser-edit migration warning does not hide a successfully
+loaded wardrobe. **How choices are made** explains the rules in the app.
 
 ## Choose a saved outfit
 

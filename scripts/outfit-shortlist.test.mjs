@@ -103,3 +103,16 @@ test('wear additions, undo and favourite changes immediately recompute the selec
   outfits[0].favourite = false;
   assert.deepEqual(ids(shortlist(outfits, { mode: 'favourites' })), ['look-1']);
 });
+
+test('failed images exclude affected looks while preserving history and permit retry', () => {
+  const outfits = [look(0, { image: '/broken-look.png', wearHistory: [wear(today, ['top-2'])] }), look(1), look(2)];
+  const inventory = new Map(items);
+  inventory.set('top-1', { ...items.get('top-1'), image: '/broken-piece.png' });
+  const failedImages = new Set(['/broken-look.png', '/broken-piece.png']);
+  const result = shortlist(outfits, { failedImages }, inventory);
+  assert.deepEqual(ids(result), ['look-2']);
+  assert.equal(result.choices[0].lastWorn, today, 'failed preview does not erase logged wear');
+  assert.equal(result.unavailableCount, 2);
+  assert.equal(shortlist(outfits, {}, inventory).choices.length, 3, 'retry can consider all choices again');
+  assert.equal(failedImages.size, 2, 'ranking does not mutate availability state');
+});

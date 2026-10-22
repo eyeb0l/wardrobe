@@ -20,11 +20,13 @@ Use an unused port and unique artifact directory. Playwright starts and stops
 Vite with isolated fixture data. Desktop (1365 × 1000) and mobile (390 × 844)
 Chromium exercise occasion/mode selection, dated explanations, shared garment
 history, cutout looks, empty favourites, logging, undo, favourite changes,
-variation navigation, reloads and failed collection/wardrobe read recovery. The fixture uses a fixed
+variation navigation, reloads, failed collection/wardrobe read recovery, malformed
+legacy browser edits, and missing/corrupt images with retry. The fixture uses a fixed
 local day and an explicit `en-GB` locale for date assertions. Inspect
 `shortlist-recent.png`, `shortlist-favourites.png`, `shortlist-empty.png` and each
 `browser-health.json`. Unexpected console/network errors, framework overlays and
-horizontal overflow fail the tests; an intentional 503 checks recovery. The
+horizontal overflow fail the tests; intentional 503 responses and one specific
+404 image response check recovery. The
 shortlist makes no AI calls; images and API persistence are synthetic fixtures.
 
 Reviewed synthetic screenshots for this feature:
@@ -32,6 +34,8 @@ Reviewed synthetic screenshots for this feature:
 [mobile shortlist](screenshots/outfit-shortlist/recent-mobile.png),
 [desktop favourites and piece history](screenshots/outfit-shortlist/favourites-desktop.png), and
 [mobile favourites and piece history](screenshots/outfit-shortlist/favourites-mobile.png).
+Image failure recovery: [desktop](screenshots/outfit-shortlist/image-recovery-desktop.png)
+and [mobile](screenshots/outfit-shortlist/image-recovery-mobile.png).
 
 For the full browser suite on a runner that terminates long shell commands,
 run `npm run test:browser -- --project=desktop` and then

@@ -24,16 +24,18 @@ const initial=[
 const test=base.extend({
   wardrobe:async({page,context},use,info)=>{
     const health={errors:[],failedRequests:[],httpErrors:[]};
-    const state={outfits:structuredClone(initial),posts:[],failRead:false,failWardrobe:false};
+    const state={outfits:structuredClone(initial),items:structuredClone(items),posts:[],failRead:false,failWardrobe:false,brokenImages:false};
     await page.clock.setFixedTime(new Date('2026-10-22T12:00:00Z'));
     page.on('pageerror',e=>health.errors.push(e.message));
-    page.on('console',m=>{if(m.type()==='error'&&!m.text().includes('503 (Service Unavailable)'))health.errors.push(m.text());});
+    page.on('console',m=>{if(m.type()==='error'&&!m.text().includes('503 (Service Unavailable)')&&!(state.brokenImages&&m.text().includes('404 (Not Found)')&&m.location().url.endsWith('/api/shortlist-missing.png')))health.errors.push(m.text());});
     page.on('requestfailed',r=>{if(!r.failure()?.errorText.includes('ERR_ABORTED'))health.failedRequests.push(r.url());});
-    page.on('response',r=>{if(r.status()>=400&&r.status()!==503)health.httpErrors.push(r.url());});
+    page.on('response',r=>{if(r.status()>=400&&r.status()!==503&&!(state.brokenImages&&r.url().endsWith('/api/shortlist-missing.png')))health.httpErrors.push(r.url());});
     await context.addInitScript(()=>localStorage.setItem('wardrobe:welcome:v1','complete'));
     await context.route('**/api/**',async route=>{
       const p=new URL(route.request().url()).pathname;
-      if(p==='/api/import/wardrobe')return state.failWardrobe?route.fulfill({status:503,json:{error:'Wardrobe unavailable. Try again.'}}):route.fulfill({json:items});
+      if(p==='/api/shortlist-missing.png')return state.brokenImages?route.fulfill({status:404,body:'Missing',headers:{'Cache-Control':'no-store'}}):route.fulfill({contentType:'image/png',body:Buffer.from(pictures[2].split(',')[1],'base64')});
+      if(p==='/api/shortlist-corrupt.png')return route.fulfill({contentType:'image/png',body:state.brokenImages?Buffer.from('corrupt'):Buffer.from(pictures[3].split(',')[1],'base64'),headers:{'Cache-Control':'no-store'}});
+      if(p==='/api/import/wardrobe')return state.failWardrobe?route.fulfill({status:503,json:{error:'Wardrobe unavailable. Try again.'}}):route.fulfill({json:state.items});
       if(p==='/api/import/jobs')return route.fulfill({json:[]});
       if(p==='/api/import/config'||p==='/api/outfits/config')return route.fulfill({json:{ready:false,hasApiKey:false,modelReferences:[]}});
       if(p==='/api/outfits/discovery/config')return route.fulfill({json:{ready:false,enabled:false}});
@@ -144,5 +146,36 @@ test('empty favourites, unknown history and failed collection refresh have hones
   wardrobe.failWardrobe=false;
   await panel(page).getByRole('button',{name:'Refresh wardrobe',exact:true}).click();
   await expect(names(page)).toHaveText(['A fresh start']);
+  expect(wardrobe.posts).toHaveLength(0);
+});
+
+
+test('malformed legacy edits do not hide a successfully loaded wardrobe shortlist',async({page,wardrobe},info)=>{
+  await page.evaluate(()=>localStorage.setItem('open-wardrobe-edits-v1','{invalid'));
+  await page.reload();
+  await panel(page).getByRole('combobox',{name:'Shortlist occasion'}).selectOption('casual');
+  await expect(names(page)).toHaveText(['A walk in the park','Dinner in rust','Linen afternoon']);
+  await expect(panel(page).getByRole('button',{name:'Choose A walk in the park'})).toBeEnabled();
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+  await expect(names(page)).toHaveCount(3);
+  expect(await page.evaluate(()=>localStorage.getItem('open-wardrobe-edits-v1'))).toBe('{invalid');
+  await panel(page).screenshot({path:info.outputPath('shortlist-migration-warning.png')});
+  expect(wardrobe.posts).toHaveLength(0);
+});
+
+test('missing previews and corrupt garment images are excluded and can be retried',async({page,wardrobe},info)=>{
+  wardrobe.brokenImages=true;
+  wardrobe.outfits.find(o=>o.id==='look-2').image='/api/shortlist-missing.png';
+  wardrobe.items.find(i=>i.id==='top-3').image='/api/shortlist-corrupt.png';
+  await page.reload();
+  await panel(page).getByRole('combobox',{name:'Shortlist occasion'}).selectOption('casual');
+  await expect(names(page)).toHaveText(['Linen afternoon','An autumn favourite','A fresh start']);
+  await expect(panel(page).getByRole('button',{name:'Retry images',exact:true})).toBeVisible();
+  await panel(page).screenshot({path:info.outputPath('shortlist-image-recovery.png')});
+  wardrobe.brokenImages=false;
+  await panel(page).getByRole('button',{name:'Retry images',exact:true}).click();
+  await expect(names(page)).toHaveText(['A walk in the park','Dinner in rust','Linen afternoon']);
+  await expect(panel(page).getByRole('button',{name:'Choose Dinner in rust'})).toBeEnabled();
+  await expect(panel(page).getByRole('button',{name:'Retry images',exact:true})).toHaveCount(0);
   expect(wardrobe.posts).toHaveLength(0);
 });
