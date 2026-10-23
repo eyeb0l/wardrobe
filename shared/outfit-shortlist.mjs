@@ -3,23 +3,21 @@ import { inLaundry } from './garment-availability.mjs';
 
 // A garment worn in two logged looks on the same day was still worn on one day.
 // Use the event's pieces: an edited outfit must not rewrite what was worn.
-export function garmentWearDates(outfits, today = localDate()) {
+export function garmentWearDates(outfits, today = localDate(), garmentWears = []) {
   const days = new Map();
-  for (const outfit of outfits) {
-    if (outfit.status !== 'accepted') continue;
-    for (const event of outfit.wearHistory || []) {
-      if (!validWearDate(event.date) || event.date > today) continue;
-      for (const id of event.garmentIds || []) {
-        if (!days.has(id)) days.set(id, new Set());
-        days.get(id).add(event.date);
-      }
+  const events = [...garmentWears, ...outfits.filter(outfit => outfit.status === 'accepted').flatMap(outfit => outfit.wearHistory || [])];
+  for (const event of events) {
+    if (!validWearDate(event.date) || event.date > today) continue;
+    for (const id of event.garmentIds || []) {
+      if (!days.has(id)) days.set(id, new Set());
+      days.get(id).add(event.date);
     }
   }
   return new Map([...days].map(([id, dates]) => [id, [...dates].sort().reverse()]));
 }
 
-export function garmentWearHistory(outfits, today = localDate()) {
-  return new Map([...garmentWearDates(outfits, today)].map(([id, dates]) => [id, { count: dates.length, lastWorn: dates[0] }]));
+export function garmentWearHistory(outfits, today = localDate(), garmentWears = []) {
+  return new Map([...garmentWearDates(outfits, today, garmentWears)].map(([id, dates]) => [id, { count: dates.length, lastWorn: dates[0] }]));
 }
 
 function combinationKey(outfit, itemsById) {
@@ -34,9 +32,9 @@ export function readySavedLooks(outfits, itemsById, { garmentId = '', occasion =
     && outfit.garmentIds.every(id => { const item = itemsById.get(id); return item?.image && !failedImages.has(item.image) && !item.hidden && !item.deleted; }));
 }
 
-export function outfitShortlist(outfits, itemsById, { occasion = '', mode = 'recent', today = localDate(), failedImages = new Set() } = {}) {
+export function outfitShortlist(outfits, itemsById, { occasion = '', mode = 'recent', today = localDate(), garmentWears = [], failedImages = new Set() } = {}) {
   // Aggregate before filtering, including wears in other occasions/variations.
-  const history = garmentWearHistory(outfits, today);
+  const history = garmentWearHistory(outfits, today, garmentWears);
   const available = readySavedLooks(outfits, itemsById, { failedImages });
   const eligible = available.filter(outfit => (!occasion || outfit.occasion?.includes(occasion)) && (mode !== 'favourites' || outfit.favourite));
   const ranked = eligible.map(outfit => {

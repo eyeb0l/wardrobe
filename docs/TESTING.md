@@ -1,5 +1,43 @@
 # Testing on squiggle
 
+## Quick garment wear logging
+
+Reuse Node 22 and the pinned headless Chromium installation below, choosing an
+unused port and fresh artifact directory:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/garment-wear.test.mjs scripts/outfit-activity.test.mjs scripts/outfit-shortlist.test.mjs scripts/wardrobe-rediscovery.test.mjs scripts/cloud-store.test.mjs
+WARDROBE_BROWSER_PORT=5321 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-garment-wear-browser \
+  npm run test:browser -- tests/browser/garment-wear.spec.mjs
+rg --files /tmp/wardrobe-garment-wear-browser
+```
+
+Playwright starts Vite, waits for readiness and stops its server. Desktop
+(1365 × 1000) and mobile (390 × 844) exercise individual/bulk logging, category
+selection, backdating and future-date prevention, reload/correction, per-day
+counts shared with outfit history, independent Undo and optional selected-piece
+laundry, unchanged plan confirmation, read/write failures, safe retry and lost
+response recovery, incoming changes, local-day rollover and stale reads during
+mutation. Inspect `garment-wear-individual.png`, `garment-wear-history.png`,
+`garment-wear-bulk.png`, `garment-wear-wardrobe.png` and each `browser-health.json`.
+Unexpected console/network errors, overlays and horizontal overflow fail tests;
+explicit 409/503 responses exercise recovery.
+
+Browser images, records and API persistence are synthetic. Node tests exercise
+real API/storage validation, atomic batches, origin checks, concurrent writes,
+idempotent retries, Undo retry protection, immutable garment snapshots, timezone
+boundaries, restart persistence, and aggregation into shortlist/rediscovery.
+The cloud-store test uses fresh serverless API instances and independent PGlite
+store clients under writer leases. No private wardrobe data or paid AI calls
+are used. Run the full standard checks below before submission.
+
+Reviewed synthetic screenshots: [desktop bulk logging](screenshots/garment-wear/bulk-desktop.png),
+[mobile bulk logging](screenshots/garment-wear/bulk-mobile.png),
+[desktop backdating and entries](screenshots/garment-wear/individual-desktop.png), and
+[mobile backdating and entries](screenshots/garment-wear/individual-mobile.png).
+
 ## Wardrobe rediscovery
 
 Reuse the pinned Node 22 and headless Chromium setup below. Choose unused ports

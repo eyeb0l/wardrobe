@@ -142,6 +142,13 @@ export function validateManifest(value, file = "outfits.json") {
   requireValue(Array.isArray(value.outfits), file, "outfits array");
   value.outfits.forEach((record, index) => validateOutfit(record, file, `outfits[${index}]`));
   uniqueOutfits(value.outfits, file);
+  optional(value, "garmentWears", (events) => Array.isArray(events) && events.every((event) =>
+    object(event) && text(event.id) && UUID.test(event.id) && validWearDate(event.date) && timestamp(event.createdAt)
+    && strings(event.garmentIds) && event.garmentIds.length > 0 && event.garmentIds.length <= 2000
+    && event.garmentIds.every(id => ID.test(id)) && new Set(event.garmentIds).size === event.garmentIds.length)
+    && new Set(events.map(event => event.id)).size === events.length, file, "collection");
+  optional(value, "removedGarmentWearIds", (ids) => strings(ids) && ids.every(id => UUID.test(id))
+    && new Set(ids).size === ids.length && !(value.garmentWears || []).some(event => ids.includes(event.id)), file, "collection");
   optional(value, "outfitPlansRevision", (revision) => text(revision) && UUID.test(revision), file, "collection");
   optional(value, "outfitPlans", (plans) => Array.isArray(plans) && plans.every((plan) =>
     object(plan) && validWearDate(plan.date) && text(plan.outfitId) && ID.test(plan.outfitId))

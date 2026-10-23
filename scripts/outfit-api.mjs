@@ -1035,7 +1035,45 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if ((options.readOnly || options.serverless) && url.pathname === `${API}/jobs` && req.method === "GET") await loadJobs(undefined, { all: true });
       if (url.pathname === API && req.method === "GET") {
         const current = await manifest();
-        return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits(current), plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial" });
+        return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits(current), plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] });
+      }
+      const garmentWear = url.pathname.match(/^\/api\/outfits\/garment-wears(?:\/([a-fA-F0-9-]{36})\/remove)?$/);
+      if (garmentWear && req.method === "POST") {
+        const input = await readBody(req, 512 * 1024);
+        const saved = await exclusive(async () => {
+          const current = await manifest();
+          const events = current.garmentWears || [];
+          let event = null;
+          if (garmentWear[1]) {
+            const id = garmentWear[1];
+            if (!UUID.test(id)) throw fail("Invalid wear entry.");
+            current.garmentWears = events.filter(entry => entry.id !== id);
+            // A delayed retry of the original log cannot resurrect an Undo.
+            current.removedGarmentWearIds = [...new Set([...(current.removedGarmentWearIds || []), id])];
+          } else {
+            if (typeof input.requestId !== "string" || !UUID.test(input.requestId)) throw fail("Start a new wear entry and try again.");
+            if (!Number.isInteger(input.timezoneOffset) || input.timezoneOffset < -840 || input.timezoneOffset > 720) throw fail("Refresh to use your current local date.");
+            const today = new Date(Date.now() - input.timezoneOffset * 60_000).toISOString().slice(0, 10);
+            if (!validWearDate(input.date) || input.date > today) throw fail("Choose a valid date on or before today.");
+            const ids = input.garmentIds;
+            if (!Array.isArray(ids) || !ids.length || ids.length > 2000 || ids.some(id => !validId(id)) || new Set(ids).size !== ids.length) throw fail("Choose the pieces you wore.");
+            if ((current.removedGarmentWearIds || []).includes(input.requestId)) throw fail("This entry was removed. Start a new log to record another wear.", 409);
+            event = events.find(entry => entry.id === input.requestId);
+            if (event) {
+              if (event.date !== input.date || JSON.stringify([...event.garmentIds].sort()) !== JSON.stringify([...ids].sort())) throw fail("This request was already used for different pieces or a date. Start a new log.", 409);
+              return { garmentWears: events, event };
+            }
+            const library = await readJson(path.join(dataDir, "library.json"), []);
+            if (!Array.isArray(library)) throw fail("Your wardrobe could not be read. Refresh and try again.", 503);
+            const available = new Set(library.filter(item => item && !item.hidden && !item.deleted).map(item => item.id));
+            if (ids.some(id => !available.has(id))) throw fail("A selected piece is no longer available. Refresh and select the pieces again.", 409);
+            event = { id: input.requestId, date: input.date, garmentIds: [...ids], createdAt: now() };
+            current.garmentWears = [...events, event];
+          }
+          await atomicJson(path.join(dataDir, "outfits.json"), current);
+          return { garmentWears: current.garmentWears, event };
+        });
+        return sendJson(res, 200, saved);
       }
       if (url.pathname === `${API}/plans` && req.method === "POST") {
         const input = await readBody(req, 4096);

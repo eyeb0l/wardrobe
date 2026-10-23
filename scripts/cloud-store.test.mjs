@@ -465,7 +465,7 @@ test('garment availability batches persist through the cloud store and conflict 
   assert.ok((await withStorage(h.store, () => readLibrary(file))).every(item => item.availability === 'ready'));
 });
 
-test('daily plans and wear confirmation persist across independent hosted clients under writer leases', async t => {
+test('daily plans, outfit confirmation and direct garment wear persist across independent hosted clients under writer leases', async t => {
   const h = await harness(t);
   const { wardrobeOutfitApi } = await import('./outfit-api.mjs');
   const { Readable } = await import('node:stream');
@@ -503,5 +503,18 @@ test('daily plans and wear confirmation persist across independent hosted client
   const result = await call(other, 'GET', '/api/outfits');
   assert.deepEqual(result.plans, [{ date: today, outfitId: 'look' }]);
   assert.equal(result.outfits[0].wearHistory.length, 1);
+  assert.equal(JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/outfits.json`, 'utf8')).custom, 'keep');
+  // Direct garment entries share the same metadata, without confirming plans or
+  // adding another outfit wear. Exercise new serverless instances for every call.
+  const direct = { requestId: crypto.randomUUID(), date: today, garmentIds: ['top'], timezoneOffset: new Date().getTimezoneOffset() };
+  const logged = await call(other, 'POST', '/api/outfits/garment-wears', direct);
+  assert.deepEqual((await call(h.store, 'GET', '/api/outfits')).garmentWears, logged.garmentWears);
+  assert.deepEqual(await call(h.store, 'POST', '/api/outfits/garment-wears', direct), logged);
+  await call(other, 'POST', `/api/outfits/garment-wears/${direct.requestId}/remove`, {});
+  await call(h.store, 'POST', '/api/outfits/garment-wears', direct, 409);
+  const undone = await call(other, 'GET', '/api/outfits');
+  assert.deepEqual(undone.garmentWears, []);
+  assert.deepEqual(undone.plans, result.plans);
+  assert.deepEqual(undone.outfits[0].wearHistory, result.outfits[0].wearHistory);
   assert.equal(JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/outfits.json`, 'utf8')).custom, 'keep');
 });

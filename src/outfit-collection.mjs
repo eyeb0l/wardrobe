@@ -7,6 +7,7 @@ import { uiErrorMessage } from './ui-error.mjs';
 // response must not replace a wear or plan just saved in the other view.
 export function useOutfitCollection(activeRoute) {
   const [outfits, setOutfits] = useState([]);
+  const [garmentWears, setGarmentWears] = useState([]);
   const [plans, setPlans] = useState([]);
   const [plansRevision, setPlansRevision] = useState('initial');
   const [loading, setLoading] = useState(true);
@@ -14,7 +15,7 @@ export function useOutfitCollection(activeRoute) {
   const resource = useRef(null);
   if (!resource.current) resource.current = createViewResource({
     load: signal => wardrobeRequest('/api/outfits', { signal }),
-    onValue: value => { setOutfits(value.outfits || []); setPlans(value.plans || []); setPlansRevision(value.plansRevision || 'initial'); setLoadError(''); },
+    onValue: value => { setOutfits(value.outfits || []); setGarmentWears(value.garmentWears || []); setPlans(value.plans || []); setPlansRevision(value.plansRevision || 'initial'); setLoadError(''); },
     onError: error => setLoadError(uiErrorMessage(error)),
     onLoading: setLoading,
   });
@@ -30,5 +31,5 @@ export function useOutfitCollection(activeRoute) {
     document.addEventListener('visibilitychange', focus);
     return () => { resource.current.cancel(); window.removeEventListener('focus', focus); document.removeEventListener('visibilitychange', focus); };
   }, [activeRoute]);
-  return { outfits, setOutfits, plans, setPlans, plansRevision, setPlansRevision, loading, loadError, setLoadError, refresh, resource: resource.current };
+  return { outfits, setOutfits, garmentWears, setGarmentWears, plans, setPlans, plansRevision, setPlansRevision, loading, loadError, setLoadError, refresh, resource: resource.current };
 }

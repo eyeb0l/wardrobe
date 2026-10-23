@@ -1,0 +1,10 @@
+.worn-laundry { margin-block: 16px; }
+.worn-laundry summary { padding: 12px 0; cursor: pointer; font-size: 12px; line-height: 1.5; }
+.worn-laundry p { font-size: 12px; line-height: 1.6; }
+.worn-laundry fieldset { padding: 0; margin: 0 0 12px; border: 0; min-width: 0; }
+.worn-laundry legend { font-size: 13px; margin-bottom: 8px; }
+.worn-laundry label { display: flex; align-items: center; gap: 9px; min-height: 36px; font-size: 12px; line-height: 1.5; }
+.worn-laundry input { margin: 0; accent-color: var(--ink); }
+.worn-laundry .outfit-error { color: var(--accent); }
+.worn-laundry .outfit-text-button { background: transparent; border: 0; padding: 6px 0; color: var(--ink); text-decoration: underline; cursor: pointer; }
+.worn-laundry summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }

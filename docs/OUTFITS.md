@@ -2,18 +2,52 @@
 
 Open **Outfits** or `/outfits` to browse photographs, styling notes and the exact wardrobe pieces used.
 
+## Quick garment wear logging
+
+Open any garment in **Wardrobe** and choose **Wore this today**. To log several
+pieces together, choose **Log wear** above the wardrobe grid, select the pieces
+you wore, then **Wore these today**. **Select all shown for wear logging** follows
+the current category and availability filters; changing either clears selection.
+Use **Done selecting** to return to ordinary browsing. Pieces in laundry can
+still be logged when recording an actual wear.
+
+Expand **Log another date or edit Wardrobe entries** to choose a past date.
+Future dates are rejected, and today follows your device's local calendar.
+Each garment counts once per calendar day across individual entries, bulk
+entries, saved outfits and variations. A selection already fully logged for
+that date is disabled; a mixed selection can add the remaining pieces. Bulk
+entries retain the exact selected garment IDs, even if a garment is later removed.
+
+After saving, **Undo** removes that entry for all its listed pieces. Other
+entries and outfit wears for the same day remain. The expanded entry list also
+supports removal after a reload; correct a date by removing the entry and
+logging again. Repeated save requests recover the same entry, and delayed
+retries cannot restore an undone entry. These records update garment history,
+rediscovery and shortlist explanations immediately; they do not log an outfit
+wear or confirm a daily plan.
+
+**Send pieces to laundry (optional)** is available after logging, including a
+backdated entry. Nothing is selected automatically. Select only the pieces that
+need washing and submit the separate laundry change. Undoing a wear leaves
+laundry unchanged; mark pieces Ready from Wardrobe when they are available again.
+
+Save or discard garment edits before logging. Failed wardrobe/history refreshes
+block changes until recovery. Direct wear entries persist in the existing local
+or cloud outfit collection and backups, without AI calls or a schema migration.
+
 ## Rediscover wardrobe pieces
 
 **Wear a piece again** in Wardrobe offers up to three Ready garments in the
 current category, with the oldest logged wear first. Dated history comes before
 pieces with no history. Each suggestion shows its distinct logged days and
 last-worn date; **No wears logged** does not mean never worn. The section is
-hidden while rearranging or viewing laundry. The ordinary wardrobe grid remains
-available for every piece.
+hidden while rearranging, selecting pieces for logging, or viewing laundry.
+The ordinary wardrobe grid remains available for every piece.
 
 Open a suggestion or any garment to see its **Wear history**, including a list
 of logged dates. History uses the actual pieces recorded in each wear entry,
-across all saved looks and variations, with each garment counting once per day.
+across Wardrobe entries, saved looks and variations, with each garment counting
+once per day.
 Laundry and occasion filters do not erase past wear evidence; future or invalid
 dates are ignored. This is recorded history, not a claim about all actual use.
 
@@ -69,8 +103,8 @@ These controls are independent of the collection filters below.
 
 Each choice explains the most recent logged wear of any piece in that look.
 Expand **Piece history** to see each garment's last-worn date and number of logged
-days, including wears in other outfits and variations. Only the pieces selected
-in each wear entry count; logging the same garment in two looks on one date
+days, including Wardrobe entries and wears in other outfits and variations. Only
+the pieces selected in each wear entry count; logging the same garment in two looks on one date
 counts as one day. Editing a saved combination does not rewrite past wear entries.
 
 Looks with no garment history follow those with dated evidence and say **No wears

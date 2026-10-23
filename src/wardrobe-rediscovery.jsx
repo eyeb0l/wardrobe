@@ -17,11 +17,11 @@ function PieceChoice({ item, count, lastWorn, onOpen, onImageError }) {
   </button>;
 }
 
-export function WardrobeRediscovery({ items, outfits, today, unavailable, onRefresh, onOpen }) {
+export function WardrobeRediscovery({ items, outfits, garmentWears, today, unavailable, onRefresh, onOpen }) {
   const id = useId();
   const [failed, setFailed] = useState(new Set());
   const [attempt, setAttempt] = useState(0);
-  const choices = useMemo(() => wardrobeRediscovery(items, outfits, { today, failedImages: failed }).slice(0, 3), [items, outfits, today, failed]);
+  const choices = useMemo(() => wardrobeRediscovery(items, outfits, { today, garmentWears, failedImages: failed }).slice(0, 3), [items, outfits, garmentWears, today, failed]);
   const hasFailures = items.some(item => failed.has(item.image));
   return <section className="wardrobe-rediscovery" aria-labelledby={`${id}-title`}>
     <h2 id={`${id}-title`}>Wear a piece again</h2>
@@ -29,7 +29,7 @@ export function WardrobeRediscovery({ items, outfits, today, unavailable, onRefr
     {unavailable ? <p role="status">{unavailable} <button type="button" className="secondary-button" onClick={onRefresh}>Refresh rediscovery</button></p> : <>
       <div className="rediscovery-grid">{choices.map(row => <PieceChoice key={`${row.item.id}-${row.item.image}-${attempt}`} {...row} onOpen={onOpen} onImageError={source => setFailed(current => new Set([...current, source]))} />)}</div>
       {!choices.length ? <p role="status">No Ready pieces with available cutouts in this category.</p> : null}
-      <p className="rediscovery-note">Based on wears logged in saved looks and variations. No history does not mean never worn.</p>
+      <p className="rediscovery-note">Based on Wardrobe entries and wears logged in saved looks and variations. No history does not mean never worn.</p>
       {hasFailures ? <p role="status">Some cutouts could not load and are left out. <button type="button" className="secondary-button" onClick={() => { setFailed(new Set()); setAttempt(value => value + 1); }}>Retry cutouts</button></p> : null}
     </>}
   </section>;
@@ -49,12 +49,12 @@ function ReadyLook({ outfit, itemsById, days, disabled, onOpen, onPlan, onImageE
   </article>;
 }
 
-export function GarmentRediscovery({ item, itemsById, outfits, days, unavailable, disabled, onRefresh, onOpen, onPlan }) {
+export function GarmentRediscovery({ item, itemsById, outfits, garmentWears, days, unavailable, disabled, onRefresh, onOpen, onPlan }) {
   const id = useId();
   const [occasion, setOccasion] = useState('');
   const [failed, setFailed] = useState(new Set());
   const [attempt, setAttempt] = useState(0);
-  const dates = useMemo(() => garmentWearDates(outfits, days[0]).get(item.id) || [], [outfits, days, item.id]);
+  const dates = useMemo(() => garmentWearDates(outfits, days[0], garmentWears).get(item.id) || [], [outfits, garmentWears, days, item.id]);
   const matching = outfits.filter(outfit => outfit.status === 'accepted' && outfit.garmentIds.includes(item.id));
   const occasions = [...new Set(matching.flatMap(outfit => outfit.occasion))].sort();
   if (occasion && !occasions.includes(occasion)) occasions.push(occasion);
@@ -66,7 +66,7 @@ export function GarmentRediscovery({ item, itemsById, outfits, days, unavailable
     {unavailable ? <p role="status">{unavailable} <button className="secondary-button" type="button" onClick={onRefresh}>Refresh rediscovery</button></p> : <>
       <p><HistorySummary count={dates.length} lastWorn={dates[0]} /></p>
       {dates.length ? <details><summary>Logged dates</summary><ul className="garment-wear-dates">{dates.map(date => <li key={date}><time dateTime={date}>{formatWearDate(date)}</time></li>)}</ul></details> : null}
-      <p>Across saved looks and variations; each calendar day counts once. No wears logged does not mean never worn.</p>
+      <p>Across Wardrobe entries, saved looks and variations; each calendar day counts once. No wears logged does not mean never worn.</p>
       <h3>Ready saved looks with this piece</h3>
       <label className="field" htmlFor={`${id}-occasion`}><span>Look occasion</span><select id={`${id}-occasion`} value={occasion} onChange={event => setOccasion(event.target.value)}><option value="">All occasions</option>{occasions.map(value => <option key={value} value={value}>{value.replaceAll('-', ' ')}</option>)}</select></label>
       {disabled ? <p role="status">Save or discard your garment changes before choosing a look.</p> : null}
