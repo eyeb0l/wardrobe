@@ -33,6 +33,11 @@ The cloud-store test uses fresh serverless API instances and independent PGlite
 store clients under writer leases. No private wardrobe data or paid AI calls
 are used. Run the full standard checks below before submission.
 
+Reviewed synthetic screenshots: [desktop bulk logging](screenshots/garment-wear/bulk-desktop.png),
+[mobile bulk logging](screenshots/garment-wear/bulk-mobile.png),
+[desktop backdating and entries](screenshots/garment-wear/individual-desktop.png), and
+[mobile backdating and entries](screenshots/garment-wear/individual-mobile.png).
+
 ## Wardrobe rediscovery
 
 Reuse the pinned Node 22 and headless Chromium setup below. Choose unused ports
