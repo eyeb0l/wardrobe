@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
+import { GarmentWearControls } from "./garment-wear-controls.jsx";
 import { useOutfitCollection } from "./outfit-collection.mjs";
 import { usePlanningDays } from "./planning-days.mjs";
 import { WardrobeRediscovery, GarmentRediscovery } from "./wardrobe-rediscovery.jsx";
@@ -309,7 +310,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   );
 }
 
-function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, onViewOutfits, rediscovery }) {
+function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, onViewOutfits, rediscovery, wearActions }) {
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
   const samplingCanvasRef = useRef(null);
@@ -493,6 +494,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
       )}
 
       <fieldset className="viewer-details editing" disabled={saving} style={{ border: 0, minWidth: 0, margin: 0 }}>
+        <GarmentWearControls {...wearActions} ids={[item.id]} unavailable={isDirty ? "Save or discard your garment changes before logging a wear." : wearActions.unavailable} />
         <GarmentRediscovery item={item} {...rediscovery} disabled={isDirty || rediscovery.busy} />
         <div className="viewer-style-action">
           <button className="secondary-button" type="button" disabled={isDirty} title={isDirty ? "Save or discard your changes first" : undefined} onClick={() => onViewOutfits(item)}>View saved outfits with this piece</button>
@@ -546,6 +548,9 @@ export function App() {
   const [activeType, setActiveType] = useState("all");
   const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [laundrySelection, setLaundrySelection] = useState([]);
+  const [wearSelecting, setWearSelecting] = useState(false);
+  const [wearSelection, setWearSelection] = useState([]);
+  const [garmentWearBusy, setGarmentWearBusy] = useState(false);
   const [availabilityBusy, setAvailabilityBusy] = useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
   const [availabilityNotice, setAvailabilityNotice] = useState("");
@@ -631,6 +636,7 @@ export function App() {
     const filtered = items.filter(item => (activeType === "all" || item.part === activeType) && (availabilityFilter === "all" || garmentAvailability(item) === availabilityFilter));
     return [...filtered].sort(compareWardrobeItems);
   }, [activeType, availabilityFilter, items]);
+  const selectedWear = visibleItems.filter(item => wearSelection.includes(item.id));
   const selectedLaundry = visibleItems.filter(item => inLaundry(item) && laundrySelection.includes(item.id));
 
   const reorderItem = async (id, targetId) => {
@@ -664,6 +670,7 @@ export function App() {
 
   const chooseType = (typeId) => {
     setActiveType(typeId);
+    setWearSelection([]);
     setLaundrySelection([]);
     setSelectedId(null);
   };
@@ -687,6 +694,34 @@ export function App() {
       finally { mutating.current = false; setAvailabilityBusy(false); }
     }
   };
+
+  const changeGarmentWear = async (path, body, removingId) => {
+    if (mutating.current) throw new Error("A wardrobe change is still saving. Please try again.");
+    if (rediscoveryUnavailable) throw new Error("Refresh your wardrobe and wear history before logging changes.");
+    mutating.current = true; setGarmentWearBusy(true);
+    collection.resource.invalidate();
+    try {
+      const saved = await wardrobeRequest(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      collection.resource.invalidate();
+      collection.setGarmentWears(saved.garmentWears);
+      return saved.event;
+    } catch (error) {
+      collection.resource.invalidate();
+      const recovered = await collection.refresh().catch(() => null);
+      if (error.status === 409) await refreshWardrobe({ force: true });
+      // Recover an acknowledged-on-disk write whose response was lost. Reusing
+      // the request ID is also safe if the recovery read failed.
+      const event = recovered?.garmentWears?.find(entry => entry.id === body.requestId);
+      if (event) return event;
+      if (removingId && recovered && !recovered.garmentWears?.some(entry => entry.id === removingId)) return null;
+      throw error;
+    } finally { mutating.current = false; setGarmentWearBusy(false); }
+  };
+  const wearActions = { outfits: collection.outfits, garmentWears: collection.garmentWears, today: planningDays[0], itemsById,
+    busy: garmentWearBusy || availabilityBusy || orderSaving, unavailable: rediscoveryUnavailable, onRefresh: refreshRediscovery,
+    onLog: body => changeGarmentWear("/api/outfits/garment-wears", body),
+    onRemove: id => changeGarmentWear(`/api/outfits/garment-wears/${encodeURIComponent(id)}/remove`, {}, id),
+    onAvailabilityChange: changeAvailability, wardrobeError: wardrobeReadError, onRefreshWardrobe: refreshWardrobe };
 
   const markReady = async () => {
     setAvailabilityError(""); setAvailabilityNotice("");
@@ -751,7 +786,7 @@ export function App() {
       {(outfitsOpened || route === "/outfits") ? (
         <div hidden={route !== "/outfits"}>
           <Suspense fallback={<p className="status" role="status">Loading Outfits</p>}>
-            <OutfitView collection={collection} items={items} wardrobeLoading={loading} wardrobeError={wardrobeReadError} onRefreshWardrobe={refreshWardrobe} onAvailabilityChange={changeAvailability} availabilityBusy={availabilityBusy} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
+            <OutfitView collection={collection} items={items} wardrobeLoading={loading} wardrobeError={wardrobeReadError} onRefreshWardrobe={refreshWardrobe} onAvailabilityChange={changeAvailability} availabilityBusy={availabilityBusy || garmentWearBusy} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
           </Suspense>
         </div>
       ) : null}
@@ -760,7 +795,8 @@ export function App() {
         <header className="gallery-header">
           <div className="gallery-meta-row">
             <p className="piece-count" role="status">{loading ? "Your wardrobe" : `${visibleItems.length} ${visibleItems.length === 1 ? "piece" : "pieces"}`}</p>
-            {!!items.length && <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving || availabilityBusy || availabilityFilter !== "all"} title={availabilityFilter !== "all" ? "Show all availability before rearranging" : undefined} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>}
+            {!!items.length && <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving || availabilityBusy || garmentWearBusy || wearSelecting || availabilityFilter !== "all"} title={availabilityFilter !== "all" ? "Show all availability before rearranging" : undefined} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>}
+            {items.length ? <button className="secondary-button" type="button" aria-pressed={wearSelecting} disabled={orderSaving || availabilityBusy || garmentWearBusy || rearranging} onClick={() => { setWearSelecting(value => !value); setWearSelection([]); setLaundrySelection([]); }}>{wearSelecting ? "Done selecting" : "Log wear"}</button> : null}
           </div>
           <nav className="category-nav" aria-label="Filter wardrobe by item type">
             {TYPES.map((type) => (
@@ -776,8 +812,8 @@ export function App() {
             ))}
           </nav>
           <div className="wardrobe-availability">
-            <label className="field"><span>Availability</span><select value={availabilityFilter} disabled={availabilityBusy} onChange={event => { setAvailabilityFilter(event.target.value); setLaundrySelection([]); setRearranging(false); setDrag(null); setAvailabilityNotice(""); }}><option value="all">All availability</option><option value="ready">Ready</option><option value="laundry">In laundry</option></select></label>
-            {availabilityFilter === "laundry" ? <div className="laundry-actions">
+            <label className="field"><span>Availability</span><select value={availabilityFilter} disabled={availabilityBusy || garmentWearBusy} onChange={event => { setWearSelection([]); setWearSelecting(false); setAvailabilityFilter(event.target.value); setLaundrySelection([]); setRearranging(false); setDrag(null); setAvailabilityNotice(""); }}><option value="all">All availability</option><option value="ready">Ready</option><option value="laundry">In laundry</option></select></label>
+            {availabilityFilter === "laundry" && !wearSelecting ? <div className="laundry-actions">
               <label><input type="checkbox" disabled={!visibleItems.length || availabilityBusy} checked={!!visibleItems.length && selectedLaundry.length === visibleItems.length} onChange={event => setLaundrySelection(event.target.checked ? visibleItems.map(item => item.id) : [])} />Select all shown</label>
               <button className="secondary-button" type="button" disabled={!selectedLaundry.length || availabilityBusy || !!wardrobeReadError} onClick={markReady}>{availabilityBusy ? "Saving…" : `Mark ready (${selectedLaundry.length})`}</button>
             </div> : null}
@@ -793,7 +829,12 @@ export function App() {
             <button className="secondary-button" type="button" disabled={orderSaving} onClick={retryOrderRefresh}>Refresh wardrobe</button>
           </div>}
         </header>
-        {items.length && !rearranging && availabilityFilter !== "laundry" ? <WardrobeRediscovery items={visibleItems} outfits={collection.outfits} today={planningDays[0]} unavailable={rediscoveryUnavailable} onRefresh={refreshRediscovery} onOpen={setSelectedId} /> : null}
+        {items.length && !rearranging && !wearSelecting && availabilityFilter !== "laundry" ? <WardrobeRediscovery items={visibleItems} outfits={collection.outfits} garmentWears={collection.garmentWears} today={planningDays[0]} unavailable={rediscoveryUnavailable} onRefresh={refreshRediscovery} onOpen={setSelectedId} /> : null}
+
+        {wearSelecting ? <section className="wardrobe-wear-selection" aria-label="Select pieces to log wear">
+          <label><input type="checkbox" checked={!!visibleItems.length && selectedWear.length === visibleItems.length} disabled={garmentWearBusy || availabilityBusy || !visibleItems.length} onChange={event => setWearSelection(event.target.checked ? visibleItems.map(item => item.id) : [])} />Select all shown for wear logging</label>
+          <GarmentWearControls key={JSON.stringify(selectedWear.map(item => item.id).sort())} {...wearActions} ids={selectedWear.map(item => item.id)} />
+        </section> : null}
 
         {syncNotice && <p className="status" role="status">{syncNotice}</p>}
         {error && <p className="status error">{uiErrorMessage(error)}</p>}
@@ -813,14 +854,15 @@ export function App() {
             ) : (
               <div key={item.id} className="availability-item">
                 <GalleryItem item={item} selected={selectedId === item.id} onOpen={setSelectedId} />
-                {availabilityFilter === "laundry" ? <label className="laundry-select"><input type="checkbox" checked={laundrySelection.includes(item.id)} disabled={availabilityBusy} onChange={event => setLaundrySelection(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />{item.name || "Select piece"}</label> : null}
+                {wearSelecting ? <label className="wear-select"><input type="checkbox" checked={wearSelection.includes(item.id)} disabled={garmentWearBusy || availabilityBusy} onChange={event => setWearSelection(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />{item.name || "Select piece"}</label> : null}
+                {availabilityFilter === "laundry" && !wearSelecting ? <label className="laundry-select"><input type="checkbox" checked={laundrySelection.includes(item.id)} disabled={availabilityBusy} onChange={event => setLaundrySelection(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />{item.name || "Select piece"}</label> : null}
               </div>
             ))}
           </section>
         )}
       </main>
 
-      {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} rediscovery={{ itemsById, outfits: collection.outfits, days: planningDays, unavailable: rediscoveryUnavailable, onRefresh: refreshRediscovery, onOpen: id => openRediscoveredLook(id), onPlan: openRediscoveredLook, busy: availabilityBusy }} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} onStyle={(item) => {
+      {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} wearActions={wearActions} rediscovery={{ itemsById, outfits: collection.outfits, garmentWears: collection.garmentWears, days: planningDays, unavailable: rediscoveryUnavailable, onRefresh: refreshRediscovery, onOpen: id => openRediscoveredLook(id), onPlan: openRediscoveredLook, busy: availabilityBusy }} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} onStyle={(item) => {
         setOutfitRequest({ garmentId: item.id });
         setSelectedId(null);
         window.history.pushState({}, "", "/outfits");

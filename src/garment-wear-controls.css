@@ -1,0 +1,22 @@
+.garment-wear-controls { margin: 0 0 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); min-width: 0; }
+.garment-wear-controls p, .garment-wear-controls span { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.garment-wear-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.garment-wear-controls summary { padding: 12px 0; font-size: 12px; cursor: pointer; }
+.garment-wear-controls form { display: grid; gap: 12px; padding: 8px 0 16px; }
+.garment-wear-controls input[type=date] { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; background: var(--paper); border: 1px solid var(--line); color: var(--ink); font: inherit; }
+.garment-wear-controls .garment-wear-error { color: var(--accent); }
+.garment-wear-link { border: 0; padding: 6px 0; color: var(--ink); background: transparent; text-decoration: underline; text-underline-offset: 3px; font: inherit; font-size: 12px; cursor: pointer; }
+.garment-wear-controls ul { list-style: none; margin: 0; padding: 0; }
+.garment-wear-controls li { display: flex; align-items: start; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line); padding: 12px 0; font-size: 12px; }
+.garment-wear-controls li p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.garment-wear-controls li > button { flex-shrink: 0; }
+.garment-wear-controls button:disabled { opacity: .5; cursor: not-allowed; }
+.garment-wear-controls summary:focus-visible, .garment-wear-controls input:focus-visible, .garment-wear-controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.wardrobe-wear-selection { margin: 0 56px 28px; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+.wardrobe-wear-selection > label, .wear-select { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 1.5; }
+.wardrobe-wear-selection > label { min-height: 44px; }
+.wear-select { margin-top: 10px; min-height: 36px; }
+.wardrobe-wear-selection input, .wear-select input { accent-color: var(--ink); }
+@media (max-width: 1180px) { .wardrobe-wear-selection { margin-inline: 34px; } }
+@media (max-width: 960px) { .wardrobe-wear-selection { margin-inline: 24px; } }
+@media (max-width: 580px) { .wardrobe-wear-selection { margin-inline: 18px; } }
