@@ -2,6 +2,35 @@
 
 Open **Outfits** or `/outfits` to browse photographs, styling notes and the exact wardrobe pieces used.
 
+## Rediscover wardrobe pieces
+
+**Wear a piece again** in Wardrobe offers up to three Ready garments in the
+current category, with the oldest logged wear first. Dated history comes before
+pieces with no history. Each suggestion shows its distinct logged days and
+last-worn date; **No wears logged** does not mean never worn. The section is
+hidden while rearranging or viewing laundry. The ordinary wardrobe grid remains
+available for every piece.
+
+Open a suggestion or any garment to see its **Wear history**, including a list
+of logged dates. History uses the actual pieces recorded in each wear entry,
+across all saved looks and variations, with each garment counting once per day.
+Laundry and occasion filters do not erase past wear evidence; future or invalid
+dates are ignored. This is recorded history, not a claim about all actual use.
+
+Garment details also show **Ready saved looks with this piece**. Choose a look
+occasion to narrow the results. Looks with a laundry, hidden, deleted or missing
+piece are left out. Previews and garment cutouts must load before the look can
+be chosen; failed images are excluded with a retry action. If there are no
+matching saved looks, the empty state explains why.
+
+**View look** opens existing outfit details. **Plan for today/tomorrow** opens
+the existing plan chooser with that look selected. Saving remains explicit and
+shows any plan it will replace. Save or discard garment edits before following
+these actions. Wardrobe and Outfits share the collection snapshot, so wear,
+Undo and plan updates are reflected when switching views. Focus refreshes device
+changes; failed collection or wardrobe reads hide choices until recovery.
+Rediscovery uses existing records and makes no AI calls or new storage writes.
+
 ## Plan today or tomorrow
 
 **Your plans** sits above the shortlist. Choose one saved look for today and one

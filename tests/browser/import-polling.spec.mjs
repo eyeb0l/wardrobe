@@ -20,6 +20,7 @@ test('import progress polls every active job in one gently paced request', async
   const polls = [], singleReads = [];
   await page.addInitScript(() => localStorage.setItem('wardrobe:welcome:v1', 'complete'));
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/outfits' && route.request().method() === 'GET') return route.fulfill({ json: { outfits: [] } });
     const url = new URL(route.request().url());
     if (url.pathname === '/api/import/wardrobe') return route.fulfill({ json: [] });
     if (url.pathname === '/api/import/config') return route.fulfill({ json: { ready: true, hasApiKey: true, hasModelReference: true, modelReferences: [{ id: 'default', label: 'Default', imageUrl: png }] } });

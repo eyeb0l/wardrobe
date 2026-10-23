@@ -288,7 +288,7 @@ function JobRow({ job, onOpen }) {
   </button>;
 }
 
-export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardrobeError = "", onRefreshWardrobe, onAvailabilityChange, availabilityBusy = false, active = true, generationRequest, onGenerationHandled }) {
+export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = false, wardrobeError = "", onRefreshWardrobe, onAvailabilityChange, availabilityBusy = false, active = true, generationRequest, onGenerationHandled }) {
   const filterId = useId();
   const [favouritesOnly, setFavouritesOnly] = useState(false);
   const [garmentFilter, setGarmentFilter] = useState("");
@@ -296,14 +296,10 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
   const [activityNotice, setActivityNotice] = useState(null);
   const [discoveryConfig, setDiscoveryConfig] = useState(null);
   const [discoveryResult, setDiscoveryResult] = useState(null);
-  const [outfits, setOutfits] = useState([]);
-  const [plans, setPlans] = useState([]);
-  const [plansRevision, setPlansRevision] = useState("initial");
+  const { outfits, setOutfits, plans, setPlans, plansRevision, setPlansRevision, loading, loadError, setLoadError, refresh: refreshCollection } = collection;
   const planningDays = usePlanningDays();
   const [jobs, setJobs] = useState([]);
   const [config, setConfig] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
   const [configError, setConfigError] = useState("");
   const [jobsError, setJobsError] = useState("");
   const [jobWarnings, setJobWarnings] = useState([]);
@@ -315,13 +311,18 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
   useEffect(() => {
     if (active && generationRequest) {
       setActionError("");
-      if (generationRequest.type === "filter") {
+      if (["plan", "open"].includes(generationRequest.type)) {
+        if (loading || loadError) return;
+        const outfit = outfits.find(item => item.id === generationRequest.outfitId);
+        if (!outfit) setActionError("That saved look is no longer available. Choose another look.");
+        else setModal(generationRequest.type === "plan" ? { type: "plan", id: outfit.id, date: generationRequest.date, revision: generationRequest.revision } : { type: "outfit", id: outfit.id });
+      } else if (generationRequest.type === "filter") {
         setGarmentFilter(generationRequest.garmentId);
         setOccasionFilter(""); setFavouritesOnly(false); setDiscoveryResult(null); setModal(null);
       } else setModal({ type: "generate", requiredGarmentId: generationRequest.garmentId });
       onGenerationHandled();
     }
-  }, [active, generationRequest, onGenerationHandled]);
+  }, [active, generationRequest, onGenerationHandled, loading, loadError, outfits]);
   const mounted = useRef(false);
   const isActive = useRef(active);
   isActive.current = active;
@@ -351,12 +352,6 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
       onValue: setDiscoveryConfig,
       onError: () => setDiscoveryConfig(null),
     }),
-    collection: createViewResource({
-      load: (signal) => request(API, { signal }),
-      onValue: (value) => { setOutfits(value.outfits || []); setPlans(value.plans || []); setPlansRevision(value.plansRevision || "initial"); setLoadError(""); },
-      onError: (error) => setLoadError(uiErrorMessage(error)),
-      onLoading: (value) => { if (mounted.current) setLoading(value); },
-    }),
     config: createViewResource({
       load: (signal) => request(`${API}/config`, { signal }),
       onValue: (value) => { setConfig(value); setConfigError(""); },
@@ -375,7 +370,6 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
     }),
   };
 
-  const refreshCollection = useCallback(() => resources.current.collection.refresh({ force: true }), []);
   const refreshConfig = useCallback(() => { void resources.current.config.refresh({ force: true }).catch(() => {}); }, []);
   const refreshView = useCallback((force = false) => {
     for (const resource of Object.values(resources.current)) void resource.refresh({ force }).catch(() => {});
@@ -455,11 +449,11 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
     if (busy.current) return;
     busy.current = true;
     setBusyKey(`activity-${outfit.id}`); setActionError(""); setActivityNotice(null);
-    resources.current.collection.invalidate();
+    collection.resource.invalidate();
     try {
       const saved = await request(`${API}/${encodeURIComponent(outfit.id)}/${action}`, { method: "POST", body: JSON.stringify(body) });
       if (!mounted.current) return;
-      resources.current.collection.invalidate();
+      collection.resource.invalidate();
       setOutfits((current) => current.map((item) => item.id === saved.id ? saved : item));
       if (action === "wears") {
         setActivityNotice({ outfitId: outfit.id, text: `Wear logged for ${formatWearDate(body.date)}.`, eventId: saved.wearHistory.find((event) => event.date === body.date)?.id });
@@ -469,7 +463,7 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
     } catch (error) {
       if (mounted.current) {
         setActionError(uiErrorMessage(error));
-        resources.current.collection.invalidate();
+        collection.resource.invalidate();
         // Recover uncertain writes; the server also deduplicates outfit/date logs.
         await refreshCollection().catch(() => {});
       }
@@ -479,7 +473,7 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
   const startGeneration = (body) => mutate("create", `${API}/jobs`, body, (job) => { if (isActive.current) setModal({ type: "job", id: job.id }); });
   const retryJob = (id) => mutate(`retry-${id}`, `${API}/jobs/${encodeURIComponent(id)}/retry`);
   const outfitAction = (jobId, outfitId, action, body) => mutate(`${action}-${outfitId}`, `${API}/jobs/${encodeURIComponent(jobId)}/outfits/${encodeURIComponent(outfitId)}/${action}`, body, action === "approve" ? async () => {
-    resources.current.collection.invalidate();
+    collection.resource.invalidate();
     if (!isActive.current || document.visibilityState === "hidden") return;
     try { await refreshCollection(); } catch { if (mounted.current) setLoadError("The outfit was saved, but the collection couldn't be refreshed. Reload the collection to see it."); }
   } : undefined);
@@ -487,11 +481,11 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
   const saveVariation = async (source, body) => {
     if (busy.current) return;
     busy.current = true; setBusyKey("variation"); setActionError("");
-    resources.current.collection.invalidate();
+    collection.resource.invalidate();
     try {
       const saved = await request(`${API}/${encodeURIComponent(source.id)}/variations`, { method: "POST", body: JSON.stringify(body) });
       if (!mounted.current) return;
-      resources.current.collection.invalidate(); resources.current.config.invalidate();
+      collection.resource.invalidate(); resources.current.config.invalidate();
       setOutfits(current => [...current.filter(item => item.id !== saved.id), saved]);
       clearFilters(); setDiscoveryResult(null); refreshConfig();
       if (isActive.current) setModal(modal?.planDate ? { type: "plan", date: modal.planDate, id: saved.id, revision: modal.planRevision } : { type: "outfit", id: saved.id });
@@ -503,17 +497,17 @@ export function OutfitView({ items = EMPTY_ITEMS, wardrobeLoading = false, wardr
   const savePlan = async (body) => {
     if (busy.current || loading || loadError || wardrobeLoading || wardrobeError) return;
     busy.current = true; setBusyKey("plan"); setActionError("");
-    resources.current.collection.invalidate();
+    collection.resource.invalidate();
     try {
       const saved = await request(`${API}/plans`, { method: "POST", body: JSON.stringify({ ...body, revision: modal?.type === "plan" ? modal.revision ?? plansRevision : plansRevision, timezoneOffset: new Date().getTimezoneOffset() }) });
       if (!mounted.current) return;
-      resources.current.collection.invalidate();
+      collection.resource.invalidate();
       setPlans(saved.plans); setPlansRevision(saved.plansRevision);
       if (isActive.current) setModal(null);
     } catch (error) {
       if (mounted.current) {
         setActionError(uiErrorMessage(error));
-        resources.current.collection.invalidate();
+        collection.resource.invalidate();
         await refreshCollection().catch(() => {});
         // A conflicted choice must be reopened against the refreshed plan.
         if (error.status === 409 && isActive.current) setModal(null);

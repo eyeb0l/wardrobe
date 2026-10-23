@@ -59,6 +59,7 @@ const test = base.extend({
     });
     await page.addInitScript(() => localStorage.setItem('wardrobe:welcome:v1', 'complete'));
     await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/outfits' && route.request().method() === 'GET') return route.fulfill({ json: { outfits: [] } });
       const path = new URL(route.request().url()).pathname;
       if (path === '/api/import/wardrobe') return route.fulfill({ json: wardrobe });
       if (path === '/api/import/jobs' && route.request().method() === 'GET') return route.fulfill({ json: [] });
