@@ -17,6 +17,7 @@ test('upload offers optional gentle tidying and holds the result for review', as
   const uploads = [];
   await page.addInitScript(() => localStorage.setItem('wardrobe:welcome:v1', 'complete'));
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/outfits' && route.request().method() === 'GET') return route.fulfill({ json: { outfits: [] } });
     const req = route.request();
     const url = new URL(req.url());
     const p = url.pathname;

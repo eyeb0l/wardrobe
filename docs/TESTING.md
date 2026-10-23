@@ -1,5 +1,39 @@
 # Testing on squiggle
 
+## Wardrobe rediscovery
+
+Reuse the pinned Node 22 and headless Chromium setup below. Choose unused ports
+and a fresh artifact directory:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+node --test scripts/wardrobe-rediscovery.test.mjs scripts/outfit-shortlist.test.mjs
+WARDROBE_BROWSER_PORT=5311 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-rediscovery-browser \
+  npm run test:browser -- tests/browser/wardrobe-rediscovery.spec.mjs
+rg --files /tmp/wardrobe-rediscovery-browser
+```
+
+Playwright starts and stops Vite on the selected port. Desktop (1365 × 1000)
+and mobile (390 × 844) cover Ready/category filtering, per-day history across
+looks and variations, unknown history, matching looks and occasion filters,
+direct planning and reload, wear/Undo changes across views, laundry updates,
+read failures/recovery, dirty-edit guards, and corrupt-image exclusion/retry.
+Inspect `rediscovery-pieces.png`, `rediscovery-first-viewport.png`,
+`rediscovery-ready-looks.png` and each `browser-health.json`. Page identity,
+rendered interactions, overlays, horizontal overflow, console errors and failed
+requests are checked. Expected 409/503 responses exercise recovery.
+
+Browser records, images and API persistence are synthetic. Node tests exercise
+the actual shared ranking, wear-date aggregation and eligibility helpers. The
+feature reuses the existing saved-look, wear and planning APIs; it adds no model
+requests or storage format. No live wardrobe data or paid services are used.
+
+Reviewed synthetic screenshots: [desktop pieces](screenshots/wardrobe-rediscovery/pieces-desktop.png),
+[mobile pieces](screenshots/wardrobe-rediscovery/pieces-mobile.png),
+[desktop history and ready looks](screenshots/wardrobe-rediscovery/ready-looks-desktop.png),
+and [mobile history and ready looks](screenshots/wardrobe-rediscovery/ready-looks-mobile.png).
+
 ## Plan today or tomorrow
 
 Use Node 22 and the repository's pinned headless Chromium installation. Pick

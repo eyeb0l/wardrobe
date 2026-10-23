@@ -2,6 +2,9 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
+import { useOutfitCollection } from "./outfit-collection.mjs";
+import { usePlanningDays } from "./planning-days.mjs";
+import { WardrobeRediscovery, GarmentRediscovery } from "./wardrobe-rediscovery.jsx";
 import { SetupFlow } from "./setup-flow.jsx";
 
 import { uiErrorMessage } from "./ui-error.mjs";
@@ -306,7 +309,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   );
 }
 
-function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, onViewOutfits }) {
+function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, onViewOutfits, rediscovery }) {
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
   const samplingCanvasRef = useRef(null);
@@ -490,6 +493,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
       )}
 
       <fieldset className="viewer-details editing" disabled={saving} style={{ border: 0, minWidth: 0, margin: 0 }}>
+        <GarmentRediscovery item={item} {...rediscovery} disabled={isDirty || rediscovery.busy} />
         <div className="viewer-style-action">
           <button className="secondary-button" type="button" disabled={isDirty} title={isDirty ? "Save or discard your changes first" : undefined} onClick={() => onViewOutfits(item)}>View saved outfits with this piece</button>
         </div>
@@ -535,6 +539,9 @@ export function App() {
   const [shoppingOpened, setShoppingOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/shopping");
   const [outfitsOpened, setOutfitsOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/outfits");
   const [items, setItems] = useState([]);
+  const collection = useOutfitCollection(route === "/outfits" || (route !== "/shopping" && items.length) ? route : "");
+  const planningDays = usePlanningDays();
+  const itemsById = useMemo(() => new Map(items.map(item => [item.id, item])), [items]);
   const [regenerationRequest, setRegenerationRequest] = useState(null);
   const [activeType, setActiveType] = useState("all");
   const [availabilityFilter, setAvailabilityFilter] = useState("all");
@@ -609,6 +616,14 @@ export function App() {
     const timer = setInterval(refreshVisible, 30_000);
     return () => { clearInterval(timer); window.removeEventListener("focus", refreshVisible); document.removeEventListener("visibilitychange", refreshVisible); };
   }, [refreshWardrobe]);
+
+  const rediscoveryUnavailable = loading ? "Loading your wardrobe…" : wardrobeReadError ? "Your wardrobe could not be refreshed." : collection.loading ? "Loading wear history and saved looks…" : collection.loadError ? "Wear history and saved looks could not be refreshed." : "";
+  const refreshRediscovery = () => { void collection.refresh().catch(() => {}); void refreshWardrobe(); };
+  const openRediscoveredLook = (outfitId, date) => {
+    setOutfitRequest({ type: date ? "plan" : "open", outfitId, date, revision: collection.plansRevision });
+    setSelectedId(null);
+    window.history.pushState({}, "", "/outfits"); setRoute("/outfits"); window.scrollTo(0, 0);
+  };
 
   const selectedItem = items.find((item) => item.id === selectedId) || null;
 
@@ -736,7 +751,7 @@ export function App() {
       {(outfitsOpened || route === "/outfits") ? (
         <div hidden={route !== "/outfits"}>
           <Suspense fallback={<p className="status" role="status">Loading Outfits</p>}>
-            <OutfitView items={items} wardrobeLoading={loading} wardrobeError={wardrobeReadError} onRefreshWardrobe={refreshWardrobe} onAvailabilityChange={changeAvailability} availabilityBusy={availabilityBusy} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
+            <OutfitView collection={collection} items={items} wardrobeLoading={loading} wardrobeError={wardrobeReadError} onRefreshWardrobe={refreshWardrobe} onAvailabilityChange={changeAvailability} availabilityBusy={availabilityBusy} active={route === "/outfits"} generationRequest={outfitRequest} onGenerationHandled={() => setOutfitRequest(null)} />
           </Suspense>
         </div>
       ) : null}
@@ -778,6 +793,7 @@ export function App() {
             <button className="secondary-button" type="button" disabled={orderSaving} onClick={retryOrderRefresh}>Refresh wardrobe</button>
           </div>}
         </header>
+        {items.length && !rearranging && availabilityFilter !== "laundry" ? <WardrobeRediscovery items={visibleItems} outfits={collection.outfits} today={planningDays[0]} unavailable={rediscoveryUnavailable} onRefresh={refreshRediscovery} onOpen={setSelectedId} /> : null}
 
         {syncNotice && <p className="status" role="status">{syncNotice}</p>}
         {error && <p className="status error">{uiErrorMessage(error)}</p>}
@@ -804,7 +820,7 @@ export function App() {
         )}
       </main>
 
-      {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} onStyle={(item) => {
+      {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} rediscovery={{ itemsById, outfits: collection.outfits, days: planningDays, unavailable: rediscoveryUnavailable, onRefresh: refreshRediscovery, onOpen: id => openRediscoveredLook(id), onPlan: openRediscoveredLook, busy: availabilityBusy }} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} onStyle={(item) => {
         setOutfitRequest({ garmentId: item.id });
         setSelectedId(null);
         window.history.pushState({}, "", "/outfits");

@@ -22,6 +22,7 @@ const test = base.extend({
       && !(state.allowReadFailure && response.status() === 503 && new URL(response.url()).pathname === '/api/import/wardrobe')) health.httpErrors.push(response.url()); });
     await page.addInitScript(() => localStorage.setItem('wardrobe:welcome:v1', 'complete'));
     await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/outfits' && route.request().method() === 'GET') return route.fulfill({ json: { outfits: [] } });
       const path = new URL(route.request().url()).pathname;
       if (path === '/api/import/wardrobe') return state.readHandler ? state.readHandler(route) : route.fulfill({ json: state.items });
       if (path === '/api/import/jobs') return route.fulfill({ json: [] });
