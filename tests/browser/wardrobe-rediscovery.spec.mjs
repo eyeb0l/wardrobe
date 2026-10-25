@@ -80,6 +80,9 @@ const test=base.extend({
     });
     await page.goto('/');await expect(page).toHaveTitle('Open Wardrobe');
     await expect(page.getByRole('region',{name:'Wear a piece again'})).toBeVisible();
+    await expect(page.locator('.wardrobe-rediscovery details')).not.toHaveAttribute('open');
+    await expect(page.getByRole('button',{name:'Wear Navy blouse',exact:true})).toBeHidden();
+    await page.locator('.rediscovery-toggle').click();
     await use(state);
     await expect(page.locator('vite-error-overlay')).toHaveCount(0);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
@@ -97,11 +100,25 @@ const viewer=page=>page.getByRole('dialog',{name:'Selected wardrobe item'});
 const history=page=>viewer(page).getByRole('region',{name:'Wear history and ready looks'});
 const nav=(page,name)=>page.getByRole('navigation',{name:'Main navigation'}).getByRole('link',{name,exact:true});
 async function openNavy(page){
+  if(await panel(page).locator('details').getAttribute('open')===null)await panel(page).locator('summary').click();
   await panel(page).getByRole('button',{name:'Wear Navy blouse',exact:true}).click();
   await expect(history(page).getByText('1 day logged · Last worn 1 Sept 2026',{exact:true})).toBeVisible();
 }
 
 test('Ready garments have accurate cross-look history and category filtering; unknown history stays explicit',async({page,wardrobe},info)=>{
+  const toggle=panel(page).locator('summary');
+  await toggle.focus();
+  await toggle.press('Enter');
+  await expect(panel(page).getByRole('button',{name:'Wear Navy blouse',exact:true})).toBeHidden();
+  const actions=page.getByRole('group',{name:'Wardrobe actions'});
+  const rearrange=await actions.getByRole('button',{name:'Rearrange',exact:true}).boundingBox();
+  const logWear=await actions.getByRole('button',{name:'Log wear',exact:true}).boundingBox();
+  expect(Math.abs(rearrange.y-logWear.y)).toBeLessThan(1);
+  expect(logWear.x-(rearrange.x+rearrange.width)).toBeCloseTo(8,0);
+  await toggle.evaluate(element=>element.blur());
+  await page.screenshot({path:info.outputPath('wardrobe-collapsed.png')});
+  await toggle.press('Space');
+  await expect(panel(page).getByRole('button',{name:'Wear Navy blouse',exact:true})).toBeVisible();
   await expect(panel(page).locator('strong')).toHaveText(['Navy blouse','Stone trousers','Rust skirt']);
   await expect(panel(page).getByText('1 day logged · Last worn 10 Sept 2026',{exact:true})).toBeVisible();
   await panel(page).screenshot({path:info.outputPath('rediscovery-pieces.png')});
@@ -114,6 +131,10 @@ test('Ready garments have accurate cross-look history and category filtering; un
   await expect(history(page).getByText('No saved looks contain this piece yet.',{exact:false})).toBeVisible();
   await expect(history(page).getByRole('button',{name:'Plan for tomorrow'})).toHaveCount(0);
   expect(wardrobe.posts).toHaveLength(0);
+  await viewer(page).getByRole('button',{name:'Close viewer',exact:true}).click();
+  await page.reload();
+  await expect(panel(page).locator('details')).not.toHaveAttribute('open');
+  await expect(panel(page).getByRole('button',{name:'Wear Navy blouse',exact:true})).toBeHidden();
 });
 
 test('matching Ready looks filter by occasion and directly open today or tomorrow planning',async({page,wardrobe},info)=>{

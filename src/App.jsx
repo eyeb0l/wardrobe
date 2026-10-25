@@ -795,8 +795,10 @@ export function App() {
         <header className="gallery-header">
           <div className="gallery-meta-row">
             <p className="piece-count" role="status">{loading ? "Your wardrobe" : `${visibleItems.length} ${visibleItems.length === 1 ? "piece" : "pieces"}`}</p>
-            {!!items.length && <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving || availabilityBusy || garmentWearBusy || wearSelecting || availabilityFilter !== "all"} title={availabilityFilter !== "all" ? "Show all availability before rearranging" : undefined} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>}
-            {items.length ? <button className="secondary-button" type="button" aria-pressed={wearSelecting} disabled={orderSaving || availabilityBusy || garmentWearBusy || rearranging} onClick={() => { setWearSelecting(value => !value); setWearSelection([]); setLaundrySelection([]); }}>{wearSelecting ? "Done selecting" : "Log wear"}</button> : null}
+            {!!items.length && <div className="gallery-actions" role="group" aria-label="Wardrobe actions">
+              <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving || availabilityBusy || garmentWearBusy || wearSelecting || availabilityFilter !== "all"} title={availabilityFilter !== "all" ? "Show all availability before rearranging" : undefined} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>
+              <button className="secondary-button" type="button" aria-pressed={wearSelecting} disabled={orderSaving || availabilityBusy || garmentWearBusy || rearranging} onClick={() => { setWearSelecting(value => !value); setWearSelection([]); setLaundrySelection([]); }}>{wearSelecting ? "Done selecting" : "Log wear"}</button>
+            </div>}
           </div>
           <nav className="category-nav" aria-label="Filter wardrobe by item type">
             {TYPES.map((type) => (
