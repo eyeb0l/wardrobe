@@ -51,6 +51,11 @@ The cloud-store test uses fresh serverless instances, independent PGlite clients
 writer leases and real PNG cutouts. No private wardrobe data or paid AI services
 are used. Run all standard checks below before submission.
 
+Reviewed synthetic screenshots: [desktop cutout preview](screenshots/save-worn-look/preview-desktop.png),
+[mobile cutout preview](screenshots/save-worn-look/preview-mobile.png),
+[desktop save controls](screenshots/save-worn-look/controls-desktop.png), and
+[mobile save controls](screenshots/save-worn-look/controls-mobile.png).
+
 ## Quick garment wear logging
 
 Reuse Node 22 and the pinned headless Chromium installation below, choosing an
