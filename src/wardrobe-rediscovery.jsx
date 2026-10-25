@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from 'react';
+import { CaretDown } from '@phosphor-icons/react';
 import { OptimizedImage } from './OptimizedImage.jsx';
 import { garmentWearDates, readySavedLooks } from '../shared/outfit-shortlist.mjs';
 import { wardrobeRediscovery } from '../shared/wardrobe-rediscovery.mjs';
@@ -18,20 +19,23 @@ function PieceChoice({ item, count, lastWorn, onOpen, onImageError }) {
 }
 
 export function WardrobeRediscovery({ items, outfits, garmentWears, today, unavailable, onRefresh, onOpen }) {
-  const id = useId();
   const [failed, setFailed] = useState(new Set());
   const [attempt, setAttempt] = useState(0);
   const choices = useMemo(() => wardrobeRediscovery(items, outfits, { today, garmentWears, failedImages: failed }).slice(0, 3), [items, outfits, garmentWears, today, failed]);
   const hasFailures = items.some(item => failed.has(item.image));
-  return <section className="wardrobe-rediscovery" aria-labelledby={`${id}-title`}>
-    <h2 id={`${id}-title`}>Wear a piece again</h2>
-    <p>Ready pieces, with the oldest logged wear first. Start with a piece and find a saved look.</p>
-    {unavailable ? <p role="status">{unavailable} <button type="button" className="secondary-button" onClick={onRefresh}>Refresh rediscovery</button></p> : <>
-      <div className="rediscovery-grid">{choices.map(row => <PieceChoice key={`${row.item.id}-${row.item.image}-${attempt}`} {...row} onOpen={onOpen} onImageError={source => setFailed(current => new Set([...current, source]))} />)}</div>
-      {!choices.length ? <p role="status">No Ready pieces with available cutouts in this category.</p> : null}
-      <p className="rediscovery-note">Based on Wardrobe entries and wears logged in saved looks and variations. No history does not mean never worn.</p>
-      {hasFailures ? <p role="status">Some cutouts could not load and are left out. <button type="button" className="secondary-button" onClick={() => { setFailed(new Set()); setAttempt(value => value + 1); }}>Retry cutouts</button></p> : null}
-    </>}
+  return <section className="wardrobe-rediscovery" aria-label="Wear a piece again">
+    <details>
+      <summary className="rediscovery-toggle"><h2>Wear a piece again</h2><CaretDown size={18} aria-hidden="true" /></summary>
+      <div className="rediscovery-content">
+        <p>Ready pieces, with the oldest logged wear first. Start with a piece and find a saved look.</p>
+        {unavailable ? <p role="status">{unavailable} <button type="button" className="secondary-button" onClick={onRefresh}>Refresh rediscovery</button></p> : <>
+          <div className="rediscovery-grid">{choices.map(row => <PieceChoice key={`${row.item.id}-${row.item.image}-${attempt}`} {...row} onOpen={onOpen} onImageError={source => setFailed(current => new Set([...current, source]))} />)}</div>
+          {!choices.length ? <p role="status">No Ready pieces with available cutouts in this category.</p> : null}
+          <p className="rediscovery-note">Based on Wardrobe entries and wears logged in saved looks and variations. No history does not mean never worn.</p>
+          {hasFailures ? <p role="status">Some cutouts could not load and are left out. <button type="button" className="secondary-button" onClick={() => { setFailed(new Set()); setAttempt(value => value + 1); }}>Retry cutouts</button></p> : null}
+        </>}
+      </div>
+    </details>
   </section>;
 }
 

@@ -49,10 +49,13 @@ button { font: inherit; }
 
 .gallery-meta-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
 }
+
+.gallery-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-left: auto; }
 
 .piece-count {
   margin: 0;

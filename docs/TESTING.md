@@ -1,5 +1,25 @@
 # Testing on squiggle
 
+## Wardrobe toolbar and collapsed rediscovery
+
+Use the pinned Node 22 and headless Chromium setup below:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+WARDROBE_BROWSER_PORT=5337 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-toolbar-browser \
+  npm run test:browser -- tests/browser/wardrobe-rediscovery.spec.mjs tests/browser/wardrobe-reorder.spec.mjs tests/browser/garment-wear.spec.mjs
+rg --files /tmp/wardrobe-toolbar-browser
+```
+
+Choose an unused port and fresh artifact directory. Playwright starts Vite,
+waits for readiness and stops its own server. Desktop and mobile tests verify
+that Rearrange sits beside Log wear, rediscovery starts collapsed (including
+after reload), keyboard and pointer toggles work, and existing rediscovery,
+rearranging and wear logging flows still work. Inspect `wardrobe-collapsed.png`,
+`rediscovery-first-viewport.png` and `browser-health.json`. All data is synthetic;
+no private wardrobe data or paid AI calls are used.
+
 ## Quick garment wear logging
 
 Reuse Node 22 and the pinned headless Chromium installation below, choosing an
