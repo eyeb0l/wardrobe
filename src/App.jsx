@@ -3,6 +3,8 @@ import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/re
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { GarmentWearControls } from "./garment-wear-controls.jsx";
+import { WornLook } from "./worn-look.jsx";
+import { matchingSavedLook } from "../shared/worn-look.mjs";
 import { useOutfitCollection } from "./outfit-collection.mjs";
 import { usePlanningDays } from "./planning-days.mjs";
 import { WardrobeRediscovery, GarmentRediscovery } from "./wardrobe-rediscovery.jsx";
@@ -551,6 +553,7 @@ export function App() {
   const [wearSelecting, setWearSelecting] = useState(false);
   const [wearSelection, setWearSelection] = useState([]);
   const [garmentWearBusy, setGarmentWearBusy] = useState(false);
+  const [wornLookSource, setWornLookSource] = useState(null);
   const [availabilityBusy, setAvailabilityBusy] = useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
   const [availabilityNotice, setAvailabilityNotice] = useState("");
@@ -625,6 +628,7 @@ export function App() {
   const rediscoveryUnavailable = loading ? "Loading your wardrobe…" : wardrobeReadError ? "Your wardrobe could not be refreshed." : collection.loading ? "Loading wear history and saved looks…" : collection.loadError ? "Wear history and saved looks could not be refreshed." : "";
   const refreshRediscovery = () => { void collection.refresh().catch(() => {}); void refreshWardrobe(); };
   const openRediscoveredLook = (outfitId, date) => {
+    setWornLookSource(null);
     setOutfitRequest({ type: date ? "plan" : "open", outfitId, date, revision: collection.plansRevision });
     setSelectedId(null);
     window.history.pushState({}, "", "/outfits"); setRoute("/outfits"); window.scrollTo(0, 0);
@@ -717,10 +721,32 @@ export function App() {
       throw error;
     } finally { mutating.current = false; setGarmentWearBusy(false); }
   };
+  const saveWornLook = async (entryId, body) => {
+    if (mutating.current) throw new Error("A wardrobe change is still saving. Please try again.");
+    if (rediscoveryUnavailable) throw new Error("Refresh your wardrobe and saved looks before saving.");
+    mutating.current = true; setGarmentWearBusy(true); collection.resource.invalidate();
+    try {
+      const result = await wardrobeRequest(`/api/outfits/garment-wears/${encodeURIComponent(entryId)}/look`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      collection.resource.invalidate();
+      collection.setOutfits(current => current.some(outfit => outfit.id === result.outfit.id)
+        ? current.map(outfit => outfit.id === result.outfit.id ? result.outfit : outfit) : [...current, result.outfit]);
+      return result;
+    } catch (error) {
+      collection.resource.invalidate();
+      const recovered = await collection.refresh().catch(() => null);
+      if (error.status === 409) await refreshWardrobe({ force: true });
+      const saved = recovered?.outfits?.find(outfit => outfit.id === `worn-${body.requestId.toLowerCase()}`);
+      if (saved) return { outfit: saved, created: true };
+      const matching = recovered && matchingSavedLook(recovered.outfits || [], body.garmentIds);
+      if (matching && error.status !== 409) return { outfit: matching, created: false };
+      throw error;
+    } finally { mutating.current = false; setGarmentWearBusy(false); }
+  };
   const wearActions = { outfits: collection.outfits, garmentWears: collection.garmentWears, today: planningDays[0], itemsById,
     busy: garmentWearBusy || availabilityBusy || orderSaving, unavailable: rediscoveryUnavailable, onRefresh: refreshRediscovery,
     onLog: body => changeGarmentWear("/api/outfits/garment-wears", body),
     onRemove: id => changeGarmentWear(`/api/outfits/garment-wears/${encodeURIComponent(id)}/remove`, {}, id),
+    onSaveLook: setWornLookSource,
     onAvailabilityChange: changeAvailability, wardrobeError: wardrobeReadError, onRefreshWardrobe: refreshWardrobe };
 
   const markReady = async () => {
@@ -864,6 +890,7 @@ export function App() {
         )}
       </main>
 
+      {wornLookSource ? <WornLook key={wornLookSource.id} source={wornLookSource} entry={collection.garmentWears.find(entry => entry.id === wornLookSource.id)} itemsById={itemsById} outfits={collection.outfits} busy={wearActions.busy} unavailable={rediscoveryUnavailable} onRefresh={refreshRediscovery} onSave={saveWornLook} onOpen={id => openRediscoveredLook(id)} onClose={() => setWornLookSource(null)} /> : null}
       {selectedItem && <ItemViewer key={selectedItem.id} item={selectedItem} wearActions={wearActions} rediscovery={{ itemsById, outfits: collection.outfits, garmentWears: collection.garmentWears, days: planningDays, unavailable: rediscoveryUnavailable, onRefresh: refreshRediscovery, onOpen: id => openRediscoveredLook(id), onPlan: openRediscoveredLook, busy: availabilityBusy }} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onRegenerate={(item) => { setSelectedId(null); setRegenerationRequest({ id: item.id, requestedAt: Date.now() }); }} onStyle={(item) => {
         setOutfitRequest({ garmentId: item.id });
         setSelectedId(null);

@@ -465,15 +465,22 @@ test('garment availability batches persist through the cloud store and conflict 
   assert.ok((await withStorage(h.store, () => readLibrary(file))).every(item => item.availability === 'ready'));
 });
 
-test('daily plans, outfit confirmation and direct garment wear persist across independent hosted clients under writer leases', async t => {
+test('plans, outfit confirmation, direct wear and worn-look saves persist across independent hosted clients under writer leases', async t => {
   const h = await harness(t);
   const { wardrobeOutfitApi } = await import('./outfit-api.mjs');
   const { Readable } = await import('node:stream');
   const { planningDays } = await import('../shared/outfit-plans.mjs');
   const [today, tomorrow] = planningDays();
   await h.store.withLease(async () => {
-    await h.store.writeFile(`${CLOUD_ROOT}/library.json`, JSON.stringify([{ id: 'top', name: 'Top', image: '/api/import/library/top.png' }]));
+    await h.store.writeFile(`${CLOUD_ROOT}/library.json`, JSON.stringify([{ id: 'top', name: 'Top', part: 'upperbody', image: '/api/import/library/top.png' }, { id: 'bottom', name: 'Bottom', part: 'lowerbody', image: '/api/import/library/bottom.png' }]));
     await h.store.writeFile(`${CLOUD_ROOT}/outfits.json`, JSON.stringify({ version: 1, custom: 'keep', outfits: [{ id: 'look', name: 'Look', occasion: ['casual'], garmentIds: ['top'], status: 'accepted', image: 'outfit-images/look.png' }] }));
+  });
+  const sharp = (await import('sharp')).default;
+  const cutout = await sharp({ create: { width: 32, height: 32, channels: 4, background: '#668899' } }).png().toBuffer();
+  await h.store.withLease(async () => {
+    await h.store.mkdir(`${CLOUD_ROOT}/imported`, { recursive: true });
+    await h.store.writeFile(`${CLOUD_ROOT}/imported/top.png`, cutout);
+    await h.store.writeFile(`${CLOUD_ROOT}/imported/bottom.png`, cutout);
   });
   const call = async (store, method, url, body, status = 200) => {
     const serve = () => withStorage(store, async () => {
@@ -506,14 +513,25 @@ test('daily plans, outfit confirmation and direct garment wear persist across in
   assert.equal(JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/outfits.json`, 'utf8')).custom, 'keep');
   // Direct garment entries share the same metadata, without confirming plans or
   // adding another outfit wear. Exercise new serverless instances for every call.
-  const direct = { requestId: crypto.randomUUID(), date: today, garmentIds: ['top'], timezoneOffset: new Date().getTimezoneOffset() };
+  const direct = { requestId: crypto.randomUUID(), date: today, garmentIds: ['top', 'bottom'], timezoneOffset: new Date().getTimezoneOffset() };
   const logged = await call(other, 'POST', '/api/outfits/garment-wears', direct);
   assert.deepEqual((await call(h.store, 'GET', '/api/outfits')).garmentWears, logged.garmentWears);
   assert.deepEqual(await call(h.store, 'POST', '/api/outfits/garment-wears', direct), logged);
+  const { publicLibraryItem } = await import('./wardrobe-library.mjs');
+  const library = JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/library.json`, 'utf8'));
+  const save = { requestId: crypto.randomUUID(), name: 'Worn together', occasion: 'work', garmentIds: direct.garmentIds,
+    expectedPieces: library.map(item => ({ id: item.id, revision: publicLibraryItem(item).revision })) };
+  const savedLook = await call(other, 'POST', `/api/outfits/garment-wears/${direct.requestId}/look`, save);
+  assert.equal(savedLook.created, true);
+  assert.deepEqual(await call(h.store, 'POST', `/api/outfits/garment-wears/${direct.requestId}/look`, save), savedLook);
+  const bytes = await h.other().readFile(`${CLOUD_ROOT}/outfit-images/${savedLook.outfit.image.split('/').at(-1)}`);
+  assert.equal((await sharp(bytes).metadata()).width, 1024);
   await call(other, 'POST', `/api/outfits/garment-wears/${direct.requestId}/remove`, {});
   await call(h.store, 'POST', '/api/outfits/garment-wears', direct, 409);
   const undone = await call(other, 'GET', '/api/outfits');
   assert.deepEqual(undone.garmentWears, []);
+  assert.deepEqual(undone.outfits.find(outfit => outfit.id === savedLook.outfit.id), savedLook.outfit);
+  assert.deepEqual(await call(h.store, 'POST', `/api/outfits/garment-wears/${direct.requestId}/look`, save), savedLook);
   assert.deepEqual(undone.plans, result.plans);
   assert.deepEqual(undone.outfits[0].wearHistory, result.outfits[0].wearHistory);
   assert.equal(JSON.parse(await h.store.readFile(`${CLOUD_ROOT}/outfits.json`, 'utf8')).custom, 'keep');

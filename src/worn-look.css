@@ -1,0 +1,27 @@
+.worn-look-modal { width: min(1060px, calc(100% - 36px)); max-height: calc(100dvh - 36px); padding: 28px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); overflow: auto; }
+.worn-look-modal::backdrop { background: #19191966; }
+.worn-look-modal header { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
+.worn-look-modal h2 { font-size: 24px; font-weight: 500; margin: 6px 0 12px; }
+.worn-look-modal p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.worn-look-modal header p { margin: 0; }
+.worn-look-layout { display: grid; grid-template-columns: 1.15fr 1fr; gap: 28px; margin-top: 24px; }
+.worn-look-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.worn-look-grid figure { margin: 0; min-width: 0; }
+.worn-look-grid figure:only-child { grid-column: 1 / -1; }
+.worn-look-grid img, .worn-look-missing { width: 100%; aspect-ratio: 1; object-fit: contain; background: #eee8de; }
+.worn-look-grid figcaption { padding: 8px 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.worn-look-grid figcaption span { display: block; color: var(--muted); }
+.worn-look-fields { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.worn-look-fields fieldset { border: 0; padding: 0 0 12px; margin: 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.worn-look-fields legend { font-size: 13px; margin-bottom: 8px; }
+.worn-look-piece { display: flex; gap: 10px; align-items: center; min-height: 40px; font-size: 13px; }
+.worn-look-piece input { accent-color: var(--ink); }
+.worn-look-fields input:not([type=checkbox]) { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; }
+.worn-look-fields p { margin: 0; }
+.worn-look-fields [role=alert] { color: var(--accent); }
+.worn-look-result { padding: 16px 0; border-block: 1px solid var(--line); }
+.worn-look-result button { margin-top: 10px; }
+.worn-look-link { border: 0; background: none; color: var(--ink); padding: 8px 0; text-decoration: underline; text-underline-offset: 3px; font: inherit; font-size: 12px; cursor: pointer; }
+.worn-look-modal button:disabled { opacity: .5; cursor: not-allowed; }
+.worn-look-modal :is(button,input):focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+@media (max-width: 700px) { .worn-look-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } .worn-look-modal { padding: 20px; } .worn-look-modal h2 { font-size: 21px; } }

@@ -8,6 +8,8 @@ import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishCandidateImage, publishImage } from "./outfit-storage.mjs";
 import { outfitCutoutPreview } from "./outfit-cutouts.mjs";
+import { readLibrary, publicLibraryItem, withLibraryLock } from "./wardrobe-library.mjs";
+import { WORN_LOOK_PARTS, wornLookIssue, matchingSavedLook } from "../shared/worn-look.mjs";
 import { acquireOutfitStoreLock } from "./outfit-store-lock.mjs";
 import { decisionsConfig, hashEvidence } from "./decisions.mjs";
 import { checkDecisionImages, imageCheckConfig } from "./decision-checks.mjs";
@@ -266,13 +268,13 @@ export function wardrobeOutfitApi(options = {}) {
     return reference;
   }
 
-  async function inventory({ verifyImages = true, verifyImageIds, expectedImageHashes } = {}) {
+  async function inventory({ verifyImages = true, verifyImageIds, expectedImageHashes, parts = PARTS } = {}) {
     const records = await readJson(path.join(dataDir, "library.json"), []);
     if (!Array.isArray(records)) throw fail("The wardrobe library is invalid. Restore library.json before generating.", 503);
     // Fetch fresh file metadata once for the eligible names. Keep records in
     // order: a missing/corrupt first duplicate must not mask a later valid one.
     const candidates = records.map((record) => {
-      if (!record || record.hidden || record.deleted || !validId(record.id) || !PARTS.includes(record.part)) return null;
+      if (!record || record.hidden || record.deleted || !validId(record.id) || !parts.includes(record.part)) return null;
       const match = typeof record.image === "string" && record.image.match(/^\/api\/import\/library\/([a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp))$/i);
       return match ? { record, filename: match[1] } : null;
     }).filter(Boolean);
@@ -865,6 +867,47 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     return target;
   }
 
+  async function saveWornLook(entryId, input) {
+    if (typeof input.requestId !== "string" || !UUID.test(input.requestId)) throw fail("A valid save request is required.");
+    const name = shortText(input.name, "outfit name", 120);
+    const occasion = shortText(input.occasion, "occasion", 50).toLowerCase().replace(/\s+/g, "-");
+    const ids = input.garmentIds;
+    if (!Array.isArray(ids) || !ids.length || ids.length > 5 || ids.some(id => !validId(id)) || new Set(ids).size !== ids.length) throw fail("Choose the pieces for one look.");
+    const expected = input.expectedPieces;
+    if (!Array.isArray(expected) || expected.length !== ids.length || new Set(expected.map(piece => piece?.id)).size !== ids.length
+      || expected.some(piece => !piece || !ids.includes(piece.id) || typeof piece.revision !== "string")) throw fail("Refresh your wardrobe before saving.", 409);
+    const id = `worn-${input.requestId.toLowerCase()}`;
+    const receipt = (outfit, created) => ({ outfit: { ...outfit, image: `${API}/images/${acceptedFilename(outfit.image)}` }, created });
+    return exclusive(() => withLibraryLock(path.join(dataDir, "library.json"), async () => {
+      const current = await manifest();
+      const existing = current.outfits.find(outfit => outfit.id === id);
+      if (existing) {
+        if (existing.garmentWearId !== entryId || existing.name !== name || JSON.stringify(existing.occasion) !== JSON.stringify([occasion])
+          || [...existing.garmentIds].sort().join('|') !== [...ids].sort().join('|')) throw fail("This save request was already used for another look. Reopen the wear entry.", 409);
+        return receipt(existing, true);
+      }
+      const entry = current.garmentWears?.find(event => event.id === entryId);
+      if (!entry) throw fail("This wear entry was removed. Refresh your wear history.", 409);
+      if (ids.some(id => !entry.garmentIds.includes(id))) throw fail("Choose pieces recorded in this wear entry.");
+      const library = await readLibrary(path.join(dataDir, "library.json"));
+      if (expected.some(piece => { const item = library.find(item => item.id === piece.id); return !item || publicLibraryItem(item).revision !== piece.revision; })) throw fail("A selected piece changed. Refresh your wardrobe and review the look before saving.", 409);
+      const items = await inventory({ verifyImageIds: new Set(ids), parts: WORN_LOOK_PARTS });
+      const pieces = ids.map(id => items.get(id));
+      const issue = wornLookIssue(pieces);
+      if (issue) throw fail(issue, pieces.some(piece => !piece) ? 409 : 400);
+      const matching = matchingSavedLook(current.outfits, ids);
+      if (matching) return receipt(matching, false);
+      const ordered = pieces.sort((a, b) => WORN_LOOK_PARTS.indexOf(a.part) - WORN_LOOK_PARTS.indexOf(b.part));
+      const bytes = await outfitCutoutPreview(ordered);
+      const filename = `${id}-${createHash("sha256").update(bytes).digest("hex")}.png`;
+      await publishImage(path.join(imageDir, filename), bytes);
+      const record = { id, name, occasion: [occasion], garmentIds: ordered.map(piece => piece.id), garmentWearId: entryId,
+        reason: `Saved from pieces worn on ${entry.date}.`, imageKind: "cutouts", image: `${API}/images/${filename}`, status: "accepted", createdAt: now() };
+      await atomicJson(path.join(dataDir, "outfits.json"), { ...current, outfits: [...current.outfits, record] });
+      return receipt(record, true);
+    }));
+  }
+
   async function saveVariation(sourceId, input) {
     if (typeof input.requestId !== "string" || !UUID.test(input.requestId)) throw fail("A valid save request is required.");
     const name = shortText(input.name, "outfit name", 120);
@@ -1036,6 +1079,11 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if (url.pathname === API && req.method === "GET") {
         const current = await manifest();
         return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits(current), plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] });
+      }
+      const wornLook = url.pathname.match(/^\/api\/outfits\/garment-wears\/([a-fA-F0-9-]{36})\/look$/);
+      if (wornLook && req.method === "POST") {
+        if (!UUID.test(wornLook[1])) throw fail("Invalid wear entry.");
+        return sendJson(res, 200, await saveWornLook(wornLook[1], await readBody(req)));
       }
       const garmentWear = url.pathname.match(/^\/api\/outfits\/garment-wears(?:\/([a-fA-F0-9-]{36})\/remove)?$/);
       if (garmentWear && req.method === "POST") {

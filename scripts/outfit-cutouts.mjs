@@ -5,7 +5,7 @@ import { mapLimit } from './map-limit.mjs';
 // Save a plain contact layout of the exact cutouts, never the original look's
 // modelled photo. The immutable PNG also works with existing backups and caches.
 export async function outfitCutoutPreview(items) {
-  const columns = items.length > 4 ? 3 : 2;
+  const columns = items.length === 1 ? 1 : items.length > 4 ? 3 : 2;
   const rows = Math.ceil(items.length / columns);
   const gap = 24;
   const width = Math.floor((1024 - gap * (columns + 1)) / columns);

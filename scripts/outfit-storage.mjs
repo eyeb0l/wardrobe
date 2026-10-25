@@ -93,6 +93,7 @@ function validateOutfit(record, file, prefix, job = false) {
   for (const key of ["createdAt", "updatedAt"]) optional(record, key, timestamp, file, prefix);
   optional(record, "favourite", (value) => typeof value === "boolean", file, prefix);
   optional(record, "variationOf", (value) => text(value) && ID.test(value) && value !== record.id, file, prefix);
+  optional(record, "garmentWearId", (value) => text(value) && UUID.test(value), file, prefix);
   optional(record, "imageKind", (value) => ["cutouts", "modelled"].includes(value), file, prefix);
   optional(record, "variationPhotoId", (value) => text(value) && ID.test(value), file, prefix);
   optional(record, "wearHistory", (events) => Array.isArray(events) && events.every((event) =>
