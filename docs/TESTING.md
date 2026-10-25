@@ -20,6 +20,42 @@ rearranging and wear logging flows still work. Inspect `wardrobe-collapsed.png`,
 `rediscovery-first-viewport.png` and `browser-health.json`. All data is synthetic;
 no private wardrobe data or paid AI calls are used.
 
+## Save what you wore
+
+Use the pinned Node 22 and headless Chromium setup below. Choose an unused port
+and fresh artifact directory:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/worn-look.test.mjs scripts/garment-wear.test.mjs scripts/outfit-variations.test.mjs scripts/cloud-store.test.mjs
+WARDROBE_BROWSER_PORT=5331 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-worn-look-browser \
+  npm run test:browser -- tests/browser/worn-look.spec.mjs
+rg --files /tmp/wardrobe-worn-look-browser
+```
+
+Playwright starts Vite, waits for readiness and stops its own server. Desktop
+(1365 × 1000) and mobile (390 × 844) cover logging → preview → save → favourite
+→ plan tomorrow and reload, exact existing matches, choosing a dress/subset,
+independent wear Undo/laundry, shortlist availability, old entries opened through
+garment history, stale revisions, missing cutouts, removed sources, read/write
+failures, lost save responses and focus reads racing a save. Inspect
+`worn-look-preview.png`, `worn-look-controls.png`, and `browser-health.json` for
+each viewport. Page identity, overlays, horizontal overflow, console errors and
+failed requests are checked; explicit 409/503 responses exercise recovery.
+
+Browser API persistence and cutouts are synthetic. Node tests exercise the real
+API, image composition, validation, concurrent/deduplicated saves, immutable
+wear history, restart/retry recovery, origin checks and metadata preservation.
+The cloud-store test uses fresh serverless instances, independent PGlite clients,
+writer leases and real PNG cutouts. No private wardrobe data or paid AI services
+are used. Run all standard checks below before submission.
+
+Reviewed synthetic screenshots: [desktop cutout preview](screenshots/save-worn-look/preview-desktop.png),
+[mobile cutout preview](screenshots/save-worn-look/preview-mobile.png),
+[desktop save controls](screenshots/save-worn-look/controls-desktop.png), and
+[mobile save controls](screenshots/save-worn-look/controls-mobile.png).
+
 ## Quick garment wear logging
 
 Reuse Node 22 and the pinned headless Chromium installation below, choosing an

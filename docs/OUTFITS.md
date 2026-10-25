@@ -35,6 +35,38 @@ Save or discard garment edits before logging. Failed wardrobe/history refreshes
 block changes until recovery. Direct wear entries persist in the existing local
 or cloud outfit collection and backups, without AI calls or a schema migration.
 
+## Save what you wore
+
+After logging a combination in Wardrobe, choose **Save as a look**. The action
+also appears in the expanded Wardrobe entry list after a reload, including when
+opening the entry from one of its garments. It is offered for entries containing
+a dress or a top and bottom.
+
+Review which logged pieces belong together, preview their existing cutouts,
+and enter a look name and occasion. A look uses one dress or one top and bottom,
+with at most one jacket, pair of shoes and accessory. You can choose a subset
+from a larger wear entry; the original logged pieces remain unchanged.
+Unavailable pieces or failed cutouts prevent saving until you review the
+selection or refresh. If the exact combination is already saved, **Open saved
+look** opens it instead of creating another copy. Matching includes every piece,
+regardless of their order or the look's name and occasion.
+
+**Save look** creates an independent cutout look without an AI request or API
+key. **Open saved look** takes you to its usual details, where you can favourite
+it and plan it for today or tomorrow. The new look joins the collection and
+shortlist under the existing occasion, history and availability rules. Laundry
+pieces can be saved as part of a worn combination; those looks join the ready
+shortlist when all their pieces are Ready. The automatic generator and modelled
+photo workflow retain their existing supported combinations.
+
+Saving creates no additional wear entry, confirms no plan, and changes no
+laundry state. Undoing the original wear leaves the saved look intact. The look
+has its own favourite and outfit wear history, while garment history continues
+to use the original log. Saves retain unknown metadata, use existing local/cloud
+storage and backups, and recover retries without duplicating a saved look.
+A removed source entry or changed garment rejects a new save; refresh and review
+before retrying. A completed save remains recoverable even after wear Undo.
+
 ## Rediscover wardrobe pieces
 
 **Wear a piece again** in Wardrobe offers up to three Ready garments in the
