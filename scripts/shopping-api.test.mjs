@@ -14,6 +14,8 @@ import { withStorage } from "./storage-fs.mjs";
 import { SHOPPING_FRAME_INVARIANCE, SHOPPING_VALUE_EXPLANATION } from "./shopping-policy.mjs";
 
 const API = "/api/shopping";
+// Cutout reads run concurrently, so only the reference-first order is stable; compare the cutouts as a set.
+const readNames = (h) => { const [first, ...rest] = h.imageReads.map((entry) => path.basename(entry.file)); return [first, ...rest.sort()]; };
 const assessment = (overrides = {}) => ({
   itemName: "Olive knit top", verdict: "consider", summary: "Useful with the lighter trousers, but close to a top you own.",
   personalFit: "The simple neckline and muted color can work with the reference's palette; actual fit needs a try-on.",
@@ -203,7 +205,7 @@ test("browser edits and deletions control the snapshot while source images remai
   assert.ok(!prompt.includes("untrusted.invalid"));
   assert.ok(!prompt.includes("/etc/passwd"));
   assert.equal(request.input[0].content.filter((item) => item.type === "input_image").length, 3);
-  assert.deepEqual(h.imageReads.map((entry) => path.basename(entry.file)), ["identity.png", "bottom-1.png", "dress-1.png"], "unsubmitted garments and unselected references are never downloaded");
+  assert.deepEqual(readNames(h), ["identity.png", "bottom-1.png", "dress-1.png"], "unsubmitted garments and unselected references are never downloaded");
 });
 
 test("single-pass Shopping excludes corrupt cutouts and retains contiguous labels and exact healthy images", async (t) => {
@@ -218,7 +220,26 @@ test("single-pass Shopping excludes corrupt cutouts and retains contiguous label
   assert.doesNotMatch(request.input[0].content[0].text, /ITEM 2/);
   const sheet = Buffer.from(request.input[0].content.at(-1).image_url.split(",")[1], "base64");
   assert.deepEqual(sheet, (await outfitContactSheets([{ id: "bottom-1", name: "bottom-1", file: path.join(h.dataDir, "imported", "bottom-1.png") }]))[0]);
-  assert.deepEqual(h.imageReads.map((entry) => path.basename(entry.file)), ["identity.png", "top-1.png", "bottom-1.png"]);
+  assert.deepEqual(readNames(h), ["identity.png", "bottom-1.png", "top-1.png"]);
+});
+
+test("Shopping keeps wardrobe order in labels and contact sheets when a later cutout finishes reading first", async (t) => {
+  const h = await harness(t);
+  const [top, bottom] = [h.items[0], h.items.find((item) => item.id === "bottom-1")];
+  let bottomRead;
+  const bottomDone = new Promise((resolve) => { bottomRead = resolve; });
+  h.setImageReadHook(async (file) => { if (file.endsWith("top-1.png")) await bottomDone; else if (file.endsWith("bottom-1.png")) bottomRead(); });
+  await h.analyze({ wardrobeItems: [top, bottom] });
+  const request = h.requests[0].request;
+  assert.deepEqual(readNames(h), ["identity.png", "bottom-1.png", "top-1.png"]);
+  assert.deepEqual(request.text.format.schema.properties.pairings.items.properties.itemIds.items.enum, ["top-1", "bottom-1"]);
+  const prompt = request.input[0].content[0].text;
+  assert.ok(prompt.indexOf('"id":"top-1"') < prompt.indexOf('"id":"bottom-1"'));
+  assert.match(prompt, /"id":"top-1"[^}]*"label":"ITEM 1"/);
+  assert.match(prompt, /"id":"bottom-1"[^}]*"label":"ITEM 2"/);
+  const sheet = Buffer.from(request.input[0].content.at(-1).image_url.split(",")[1], "base64");
+  const file = (item) => path.join(h.dataDir, "imported", `${item.id}.png`);
+  assert.deepEqual(sheet, (await outfitContactSheets([top, bottom].map((item) => ({ id: item.id, name: item.id, file: file(item) }))))[0]);
 });
 
 test("Shopping retains a healthy later image for a duplicate ID and never exposes internal candidate paths", async (t) => {
