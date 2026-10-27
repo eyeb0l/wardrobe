@@ -6,7 +6,7 @@ Crop review now offers **Retry with Sol**. It rechecks the original photo with `
 
 The no-clothing message also offers **Retry with Sol**, using the prepared upload retained in the current page. Its new detections enter the ordinary crop-review queue. Reloading that empty-result page does not retain the upload; an existing import's retry candidates do survive reloads.
 
-Initial detection uses the configured default (`gpt-6-luna` by default), with reasoning effort omitted. Sol is an explicit choice. The feature changes detection only; it does not change image-generation models or automatically regenerate wardrobe images.
+Initial detection uses `OPENAI_DETECTION_MODEL` (`gpt-6.1-terra` by default), with reasoning effort omitted. The [GPT-6 detection evaluation](vision-gpt6-detection-evaluation.md) found Sol still rescued more hard cases than Terra, so the retry remains on Sol. Sol is an explicit choice. The feature changes detection only; it does not change image-generation models or automatically regenerate wardrobe images.
 
 ## Backend behaviour
 

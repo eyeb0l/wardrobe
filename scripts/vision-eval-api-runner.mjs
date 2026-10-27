@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /** Private, bounded-concurrency Responses API evaluation. Default is offline dry run.
  * node scripts/vision-eval-api-runner.mjs --manifest suite.json --ledger-dir private/run
- *   --phase calibration --cases case1,case2 --configs luna-low,luna-medium,luna-high,terra-low,sol-low --repeats 1 [--concurrency 1..5] [--blocks-per-batch 1..3] [--run]
+ *   --phase calibration --cases case1,case2 --configs luna-low,luna-medium,luna-high,terra-low,sol-low --repeats 1 [--concurrency 1..5] [--blocks-per-batch 1..3] [--cap-usd 0.01..10] [--run]
  * Every phase MUST use the same ledger directory. Never delete it to resume.
  * No retry option: a sent request is never automatically sent again.
- * Pricing verified 2026-09-20, Standard/global endpoint, USD per million tokens:
+ * GPT-5.6 pricing verified 2026-09-20 and GPT-6.x pricing verified 2026-10-27,
+ * Standard/global endpoint, USD per million tokens:
  * https://developers.openai.com/api/docs/pricing
  * https://developers.openai.com/api/docs/guides/prompt-caching (input-cost formula)
  * https://developers.openai.com/api/docs/guides/token-counting (includes images/schema)
@@ -16,6 +17,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const HARD_CAP_USD = 10;
+// Later evaluation rounds use their own ledger with a smaller approved cap.
+const GPT6_PHASES = ['gpt6-retry', 'gpt6-import'];
 const NANO = 1_000_000_000;
 export const CONFIGS = Object.freeze({
   'luna-low': { model: 'gpt-5.6-luna', effort: 'low' },
@@ -24,6 +27,9 @@ export const CONFIGS = Object.freeze({
   'terra-low': { model: 'gpt-5.6-terra', effort: 'low' },
   'terra-medium': { model: 'gpt-5.6-terra', effort: 'medium' },
   'sol-low': { model: 'gpt-5.6-sol', effort: 'low' },
+  'luna6-medium': { model: 'gpt-6-luna', effort: 'medium' },
+  'terra61-medium': { model: 'gpt-6.1-terra', effort: 'medium' },
+  'sol61-medium': { model: 'gpt-6.1-sol', effort: 'medium' },
 });
 export const PRICING = Object.freeze({
   verifiedAt: '2026-09-20', source: 'https://developers.openai.com/api/docs/pricing',
@@ -33,6 +39,10 @@ export const PRICING = Object.freeze({
     'gpt-5.6-luna': { input: 0.2, cached: 0.02, write: 0.25, output: 1.2 },
     'gpt-5.6-terra': { input: 2, cached: 0.2, write: 2.5, output: 12 },
     'gpt-5.6-sol': { input: 4, cached: 0.4, write: 5, output: 20 },
+    // GPT-6.x: write is the default 30-minute cache write; write12h is reported separately.
+    'gpt-6-luna': { input: 0.1, cached: 0.01, write: 0.125, write12h: 0.25, output: 0.5 },
+    'gpt-6.1-terra': { input: 1, cached: 0.05, write: 1.25, write12h: 2.5, output: 5 },
+    'gpt-6.1-sol': { input: 2, cached: 0.1, write: 2.5, write12h: 5, output: 10 },
   },
 });
 const hash = (v) => createHash('sha256').update(typeof v === 'string' || Buffer.isBuffer(v) ? v : JSON.stringify(v)).digest('hex');
@@ -58,7 +68,8 @@ function rates(model, inputTokens) {
   const base = PRICING.models[model];
   insist(base, 'Unpriced model');
   const long = inputTokens > PRICING.longContextThreshold;
-  return { input: base.input * (long ? 2 : 1), cached: base.cached * (long ? 2 : 1), write: base.write * (long ? 2 : 1), output: base.output * (long ? 1.5 : 1) };
+  const write12h = base.write12h ?? base.write;
+  return { input: base.input * (long ? 2 : 1), cached: base.cached * (long ? 2 : 1), write: base.write * (long ? 2 : 1), write12h: write12h * (long ? 2 : 1), output: base.output * (long ? 1.5 : 1) };
 }
 export function reservationNano(model, countedInputTokens, maxOutputTokens) {
   insist(int(countedInputTokens) && int(maxOutputTokens) && maxOutputTokens > 0, 'Invalid token bound');
@@ -66,21 +77,27 @@ export function reservationNano(model, countedInputTokens, maxOutputTokens) {
   const inputBound = Math.ceil(countedInputTokens * 1.05) + 256;
   insist(inputBound + maxOutputTokens <= 1_050_000, 'Request exceeds conservative context bound');
   const r = rates(model, inputBound);
-  return { inputBound, nanoUsd: Math.ceil((inputBound * r.write + maxOutputTokens * r.output) * 1000) };
+  return { inputBound, nanoUsd: Math.ceil((inputBound * Math.max(r.write, r.write12h) + maxOutputTokens * r.output) * 1000) };
 }
-export function usageCost(model, usage) {
+export function usageCost(model, usage, payload = {}) {
   if (!usage || !int(usage.input_tokens) || !int(usage.output_tokens)) return null;
   const { input_tokens: input, output_tokens: output } = usage;
   const cached = usage.input_tokens_details?.cached_tokens;
   const writes = usage.input_tokens_details?.cache_write_tokens;
   const reasoning = usage.output_tokens_details?.reasoning_tokens;
+  const reportedLongWrites = usage.input_tokens_details?.cache_write_tokens_details?.ttl_12h_tokens;
+  const longWrites = reportedLongWrites ?? 0;
+  if (!int(longWrites) || longWrites > (writes ?? 0)) return null;
   if (!int(cached) || cached > input || (writes !== undefined && (!int(writes) || cached + writes > input)) || (reasoning !== undefined && (!int(reasoning) || reasoning > output))) return null;
   const r = rates(model, input);
-  const unknownWrites = writes === undefined;
+  // Unreported lifetimes are the default 30 minutes only if the request asked for no other
+  // retention; otherwise every write may be a 12-hour write.
+  const lifetimeKnown = reportedLongWrites !== undefined || r.write12h === r.write || !('prompt_cache_retention' in payload || 'prompt_cache_options' in payload);
+  const exact = writes !== undefined && lifetimeKnown;
   const lowerWrites = writes ?? 0;
   const upperWrites = writes ?? (input - cached);
-  const cost = (w) => Math.ceil(((input - cached - w) * r.input + cached * r.cached + w * r.write + output * r.output) * 1000);
-  return { exact: !unknownWrites, nanoUsd: unknownWrites ? null : cost(writes), lowerNanoUsd: cost(lowerWrites), upperNanoUsd: cost(upperWrites), inputTokens: input, cachedTokens: cached, cacheWriteTokens: writes ?? null, outputTokens: output, reasoningTokens: reasoning ?? null };
+  const cost = (w, long) => Math.ceil(((input - cached - w) * r.input + cached * r.cached + (w - long) * r.write + long * r.write12h + output * r.output) * 1000);
+  return { exact, nanoUsd: exact ? cost(writes, longWrites) : null, lowerNanoUsd: cost(lowerWrites, longWrites), upperNanoUsd: cost(upperWrites, lifetimeKnown ? longWrites : upperWrites), inputTokens: input, cachedTokens: cached, cacheWriteTokens: writes ?? null, outputTokens: output, reasoningTokens: reasoning ?? null };
 }
 export function parseResponse(body) {
   const content = Array.isArray(body?.output) ? body.output.flatMap((item) => Array.isArray(item.content) ? item.content : []) : [];
@@ -126,7 +143,7 @@ function validateRequest(request) {
   for (const message of messages) if (Array.isArray(message.content)) insist(message.content.every(c => ['input_text', 'input_image'].includes(c.type)), 'Only text/image inputs are allowed');
 }
 export async function buildSchedule({ manifest, baseDir, phase, configNames, caseIds, repeats, seed = 'wardrobe-vision-2026-09-20' }) {
-  insist(['calibration', 'screen', 'confirmation', 'diagnostic', 'rescue'].includes(phase), 'Choose a named phase');
+  insist(['calibration', 'screen', 'confirmation', 'diagnostic', 'rescue', ...GPT6_PHASES].includes(phase), 'Choose a named phase');
   insist(int(repeats) && repeats > 0 && repeats <= 10, 'Repeats must be 1..10');
   insist(configNames.length && new Set(configNames).size === configNames.length && configNames.every(c => CONFIGS[c]), 'Invalid or duplicate configs');
   insist(caseIds.length && new Set(caseIds).size === caseIds.length, 'Name unique cases explicitly');
@@ -136,7 +153,7 @@ export async function buildSchedule({ manifest, baseDir, phase, configNames, cas
   const items = [];
   for (const c of cases) {
     insist(c.task && c.split && c.family && int(c.timeoutMs) && c.timeoutMs > 0 && c.timeoutMs <= 600_000, `Missing task/split/family/timeoutMs for ${c.id}`);
-    const allowedSplits = ['diagnostic', 'rescue'].includes(phase) ? [phase] : phase === 'confirmation' ? ['confirm', 'confirmation'] : ['screen', 'screening'];
+    const allowedSplits = ['diagnostic', 'rescue', ...GPT6_PHASES].includes(phase) ? [phase] : phase === 'confirmation' ? ['confirm', 'confirmation'] : ['screen', 'screening'];
     insist(allowedSplits.includes(c.split), `Case split conflicts with ${phase}: ${c.id}`);
     const cap = manifest.outputCaps?.[c.task];
     insist(int(cap) && cap > 0 && cap <= 128_000, `Missing/invalid common output cap for task ${c.task}`);
@@ -183,7 +200,9 @@ export function createTransport(apiKey, fetchImpl = fetch) {
   };
 }
 
-export async function runEvaluation({ manifestPath, ledgerDir, phase, configNames, caseIds, repeats = 1, seed, concurrency = 1, blocksPerBatch = 1, run = false, apiKey, transport, onProgress = () => {} }) {
+export async function runEvaluation({ manifestPath, ledgerDir, phase, configNames, caseIds, repeats = 1, seed, concurrency = 1, blocksPerBatch = 1, capUsd = HARD_CAP_USD, run = false, apiKey, transport, onProgress = () => {} }) {
+  const capNanoUsd = Math.round(capUsd * NANO);
+  insist(Number.isFinite(capUsd) && capNanoUsd > 0 && capNanoUsd <= HARD_CAP_USD * NANO, `Cap must be above zero and at most US$${HARD_CAP_USD}`);
   insist(int(concurrency) && concurrency >= 1 && concurrency <= 5, 'Concurrency must be 1..5');
   insist(int(blocksPerBatch) && blocksPerBatch >= 1 && blocksPerBatch <= 3, 'Blocks per batch must be 1..3');
   const absoluteManifest = path.resolve(manifestPath);
@@ -195,8 +214,9 @@ export async function runEvaluation({ manifestPath, ledgerDir, phase, configName
   try { await mkdir(lockPath, { mode: 0o700 }); } catch (error) { if (error.code === 'EEXIST') throw new Error('Ledger is locked; verify the prior process stopped before manually clearing .runner-lock'); throw error; }
   try {
     const ledgerPath = path.join(ledgerDir, 'ledger.json');
-    const ledger = await readJson(ledgerPath, { version: 1, capNanoUsd: HARD_CAP_USD * NANO, pricing: PRICING, attempts: {}, createdAt: now() });
-    insist(ledger.version === 1 && ledger.capNanoUsd === HARD_CAP_USD * NANO && hash(ledger.pricing) === hash(PRICING), 'Ledger policy/pricing mismatch');
+    // A ledger's cap is fixed when it is created; a later call cannot raise it.
+    const ledger = await readJson(ledgerPath, { version: 1, capNanoUsd, pricing: PRICING, attempts: {}, createdAt: now() });
+    insist(ledger.version === 1 && ledger.capNanoUsd === capNanoUsd && hash(ledger.pricing) === hash(PRICING), 'Ledger policy/pricing mismatch');
     for (const a of Object.values(ledger.attempts)) insist(int(a.reservedNanoUsd) && (a.chargedNanoUsd === null || a.chargedNanoUsd === undefined || int(a.chargedNanoUsd)) && (a.usageUpperNanoUsd === undefined || int(a.usageUpperNanoUsd)), 'Invalid ledger amount');
     const schedulePath = path.join(ledgerDir, `${phase}-schedule.json`);
     const existing = await readJson(schedulePath, null);
@@ -290,7 +310,7 @@ export async function runEvaluation({ manifestPath, ledgerDir, phase, configName
           // Do not put API error messages/headers/secrets in console output.
           await saveJson(path.join(ledgerDir, 'raw', `${item.id}.json`), { httpStatus: result.httpStatus, requestId: result.requestId ?? null, body: result.body, raw: result.raw ?? null });
           const parsed = parseResponse(result.body);
-          const cost = usageCost(item.payload.model, result.body?.usage);
+          const cost = usageCost(item.payload.model, result.body?.usage, item.payload);
           entry.response = parsed; entry.usage = result.body?.usage ?? null; entry.cost = cost;
           const httpSuccess = result.httpStatus >= 200 && result.httpStatus < 300;
           const tierValid = parsed.serviceTier === 'default';
@@ -309,7 +329,7 @@ export async function runEvaluation({ manifestPath, ledgerDir, phase, configName
             entry.status = parsed.apiStatus === 'completed' ? 'completed' : 'incomplete';
             if (!cost.exact) {
               entry.usageUpperNanoUsd = cost.upperNanoUsd;
-              entry.accountingNote = 'Cache write tokens absent: known output cost plus all non-cached input charged at cache-write rate held against cap; cost interval recorded.';
+              entry.accountingNote = 'Cache write count or lifetime absent: known output cost plus every possible cache write charged at the longest write rate held against cap; cost interval recorded.';
             }
             if (entry.latencyMs > item.timeoutMs) entry.operationalFailure = 'deadline_exceeded';
           }
@@ -331,7 +351,7 @@ export async function runEvaluation({ manifestPath, ledgerDir, phase, configName
 }
 function parseCli(argv) {
   const args = {};
-  const allowed = new Set(['manifest', 'ledger-dir', 'phase', 'configs', 'cases', 'repeats', 'seed', 'concurrency', 'blocks-per-batch', 'run']);
+  const allowed = new Set(['manifest', 'ledger-dir', 'phase', 'configs', 'cases', 'repeats', 'seed', 'concurrency', 'blocks-per-batch', 'cap-usd', 'run']);
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, '');
     insist(argv[i].startsWith('--') && allowed.has(name), 'Unknown CLI argument');
@@ -340,7 +360,7 @@ function parseCli(argv) {
     insist(args[name] !== undefined && (args[name] === true || !args[name].startsWith('--')), 'Missing CLI value');
   }
   for (const name of ['manifest', 'ledger-dir', 'phase', 'configs', 'cases']) insist(args[name], `--${name} is required`);
-  return { manifestPath: args.manifest, ledgerDir: args['ledger-dir'], phase: args.phase, configNames: args.configs.split(','), caseIds: args.cases.split(','), repeats: Number(args.repeats ?? 1), seed: args.seed, concurrency: Number(args.concurrency ?? 1), blocksPerBatch: Number(args['blocks-per-batch'] ?? 1), run: args.run === true };
+  return { manifestPath: args.manifest, ledgerDir: args['ledger-dir'], phase: args.phase, configNames: args.configs.split(','), caseIds: args.cases.split(','), repeats: Number(args.repeats ?? 1), seed: args.seed, concurrency: Number(args.concurrency ?? 1), blocksPerBatch: Number(args['blocks-per-batch'] ?? 1), capUsd: Number(args['cap-usd'] ?? HARD_CAP_USD), run: args.run === true };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {

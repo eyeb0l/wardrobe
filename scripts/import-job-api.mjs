@@ -32,6 +32,9 @@ const PARTS = new Set(["upperbody", "dresses", "wholebody_up", "lowerbody", "acc
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const DEFAULT_IMAGE_MODEL = "gpt-image-2.5-sunburst";
 const DEFAULT_VISION_MODEL = "gpt-6-luna";
+// Detection has its own setting: GPT-6.1 Terra measured clearly better than Luna on
+// import detection, while other vision tasks stay on OPENAI_VISION_MODEL.
+const DEFAULT_DETECTION_MODEL = "gpt-6.1-terra";
 const RETRY_VISION_MODEL = "gpt-6.1-sol";
 const RETRY_VISION_EFFORT = "medium";
 const DETECTION_OUTPUT_LIMIT = 16_384;
@@ -907,7 +910,7 @@ export function wardrobeImportApi(options = {}) {
           throw Object.assign(new Error("Unknown detection model option."), { status: 400 });
         }
         const sol = input.detectionModel === "sol" || input.detectionModel === "terra";
-        const detectionModel = sol ? RETRY_VISION_MODEL : setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL);
+        const detectionModel = sol ? RETRY_VISION_MODEL : setting("OPENAI_DETECTION_MODEL", DEFAULT_DETECTION_MODEL);
         if (input.websiteUrl !== undefined && (input.imageDataUrl !== undefined || input.imageBase64 !== undefined)) {
           throw Object.assign(new Error("Choose either a product link or an image for this import."), { status: 400 });
         }

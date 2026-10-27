@@ -370,7 +370,7 @@ test("default models complete the import and review flow with ordered PNG refere
   const created = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
   const id = created.jobs[0].id;
   const analysis = h.requests[0].request;
-  assert.equal(analysis.model, "gpt-6-luna");
+  assert.equal(analysis.model, "gpt-6.1-terra");
   assert.equal(analysis.text.format.strict, true);
   assert.equal(analysis.text.format.schema.properties.items.maxItems, 8);
   assert.match(analysis.input[0].content[1].image_url, /^data:image\/png;base64,/);
@@ -407,10 +407,10 @@ test("default models complete the import and review flow with ordered PNG refere
 });
 
 test("explicit per-stage models and quality remain configurable", async (t) => {
-  const h = await harness(t, { OPENAI_VISION_MODEL: "gpt-5.4-mini", OPENAI_IMAGE_MODEL: "unused-global-model", OPENAI_GARMENT_MODEL: "gpt-image-2", OPENAI_MODELED_MODEL: "gpt-image-2.5-sunburst-2026-09-08", OPENAI_IMAGE_QUALITY: "medium" });
+  const h = await harness(t, { OPENAI_DETECTION_MODEL: "gpt-6-luna", OPENAI_VISION_MODEL: "gpt-5.4-mini", OPENAI_IMAGE_MODEL: "unused-global-model", OPENAI_GARMENT_MODEL: "gpt-image-2", OPENAI_MODELED_MODEL: "gpt-image-2.5-sunburst-2026-09-08", OPENAI_IMAGE_QUALITY: "medium" });
   const created = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
   const id = created.jobs[0].id;
-  assert.equal(h.requests[0].request.model, "gpt-5.4-mini");
+  assert.equal(h.requests[0].request.model, "gpt-6-luna");
   await h.request("POST", `/api/import/jobs/${id}/stages/crop/approve`);
   await h.waitForStage(id, "garment");
   await h.request("POST", `/api/import/jobs/${id}/stages/garment/approve`);
@@ -765,7 +765,7 @@ test("Sol retry reviews full-source candidates without replacing the current cro
   assert.equal(h.requests.length, 2);
   assert.deepEqual(reservations, ["text", "text"]);
   const [normal, retry] = h.requests.map(entry => entry.request);
-  assert.equal(normal.model, "gpt-6-luna");
+  assert.equal(normal.model, "gpt-6.1-terra");
   assert.equal(normal.reasoning, undefined);
   assert.equal(retry.model, "gpt-6.1-sol");
   assert.deepEqual(retry.reasoning, { effort: "medium" });
@@ -847,7 +847,8 @@ test("quota denial and invalid retry IDs prevent Sol dispatch", async t => {
 });
 
 test("empty initial detection can explicitly use fixed Sol medium, while model injection is rejected", async t => {
-  const h = await harness(t, { OPENAI_VISION_MODEL: "custom-default-model" });
+  // The general vision setting no longer selects the detector.
+  const h = await harness(t, { OPENAI_DETECTION_MODEL: "custom-default-model", OPENAI_VISION_MODEL: "custom-vision-model" });
   h.setAnalysis([]);
   const imageBase64 = h.source.toString("base64");
   const empty = await h.request("POST", "/api/import/jobs", { imageBase64 });

@@ -74,7 +74,7 @@ export async function createCaptureHarness({snapshot,accessoryFiles=[]}) {
     const destination=path.join(data,'outfit-images',path.basename(entry.image||entry.file));
     if(path.resolve(source)!==path.resolve(destination)) await fs.copyFile(source,destination);
   }
-  const env = { OPENAI_API_KEY:'offline-fixture-key', OPENAI_API_BASE_URL:BASE, OPENAI_VISION_MODEL:'gpt-5.6-luna', OPENAI_IMAGE_MODEL:'offline-image-disabled', OPENAI_MODELED_MODEL:'offline-image-disabled', WARDROBE_DATA_DIR:'data', WARDROBE_MODEL_REFERENCE:'data/model-reference.png' };
+  const env = { OPENAI_API_KEY:'offline-fixture-key', OPENAI_API_BASE_URL:BASE, OPENAI_DETECTION_MODEL:'gpt-5.6-luna', OPENAI_VISION_MODEL:'gpt-5.6-luna', OPENAI_IMAGE_MODEL:'offline-image-disabled', OPENAI_MODELED_MODEL:'offline-image-disabled', WARDROBE_DATA_DIR:'data', WARDROBE_MODEL_REFERENCE:'data/model-reference.png' };
   const captures = [], scheduled = [];
   const transport = async (url,options) => {
     if (url !== `${BASE}/responses`) throw new Error(`Forbidden transport endpoint: ${url}`);
