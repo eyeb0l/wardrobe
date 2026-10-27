@@ -12,7 +12,7 @@ Website imports read public HTTP(S) pages without logging in or running page Jav
 
 ## Difficult detections
 
-For difficult detections, choose **Retry with Sol** in crop review or after a no-clothing result. This paid retry uses Sol at medium effort; review its candidates before replacing the crop. Luna remains the default. See [retry behaviour and limits](terra-detection-retry.md).
+For difficult detections, choose **Retry with Sol** in crop review or after a no-clothing result. This paid retry uses Sol at medium effort; review its candidates before replacing the crop. Initial detection uses GPT-6.1 Terra by default ([evaluation](vision-gpt6-detection-evaluation.md)). See [retry behaviour and limits](terra-detection-retry.md).
 
 ## Cutouts
 

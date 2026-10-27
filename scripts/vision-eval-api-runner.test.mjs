@@ -185,6 +185,31 @@ test('rescue phase compares explicit Terra efforts without changing production p
   await assert.rejects(buildSchedule({ manifest: { cases: [original], outputCaps: { detection: 1000 } }, baseDir: '.', phase: 'diagnostic', configNames: ['terra-medium'], caseIds: ['rescue-case'], repeats: 1 }), /Case split conflicts/);
 });
 
+test('GPT-6 cache writes are priced by lifetime and reserved at the longer rate', () => {
+  const usage = { input_tokens: 1000, input_tokens_details: { cached_tokens: 100, cache_write_tokens: 500, cache_write_tokens_details: { ttl_30m_tokens: 300, ttl_12h_tokens: 200 } }, output_tokens: 100 };
+  // ordinary400*1 + cached100*.05 + 30m writes300*1.25 + 12h writes200*2.5 + output100*5, per million.
+  assert.equal(usageCost('gpt-6.1-terra', usage).nanoUsd, 1780000);
+  assert.equal(usageCost('gpt-6.1-terra', { ...usage, input_tokens_details: { ...usage.input_tokens_details, cache_write_tokens_details: { ttl_30m_tokens: 0, ttl_12h_tokens: 600 } } }), null);
+  assert.equal(reservationNano('gpt-6.1-terra', 1000, 1000).nanoUsd, (1306 * 2.5 + 1000 * 5) * 1000);
+  assert.equal(reservationNano('gpt-6-luna', 1000, 1000).nanoUsd, (1306 * 0.25 + 1000 * 0.5) * 1000);
+});
+
+test('GPT-6 phases use explicit models and a separate ledger whose cap cannot be raised', async t => {
+  const original = fixture({ id: 'gpt6-case', split: 'gpt6-retry' });
+  const schedule = await buildSchedule({ manifest: { cases: [original], outputCaps: { detection: 1000 } }, baseDir: '.', phase: 'gpt6-retry', configNames: ['luna6-medium', 'terra61-medium', 'sol61-medium'], caseIds: ['gpt6-case'], repeats: 1 });
+  assert.deepEqual(schedule.items.map(item => item.payload.model).sort(), ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-terra']);
+  for (const item of schedule.items) { assert.deepEqual(item.payload.input, original.request.input); assert.equal(item.payload.reasoning.effort, 'medium'); }
+  await assert.rejects(buildSchedule({ manifest: { cases: [original], outputCaps: { detection: 1000 } }, baseDir: '.', phase: 'gpt6-import', configNames: ['luna6-medium'], caseIds: ['gpt6-case'], repeats: 1 }), /Case split conflicts/);
+
+  const options = { ...await setup(t, [original]), phase: 'gpt6-retry', configNames: ['terra61-medium'] };
+  const terra = mocks(async () => completed({ model: 'gpt-6.1-terra' }));
+  const tooSmall = reservationNano('gpt-6.1-terra', 1000, 1000).nanoUsd / 1e9 / 2;
+  const stopped = await runEvaluation({ ...options, capUsd: tooSmall, run: true, transport: terra });
+  assert.equal(stopped.stopped, 'budget_before_matched_block'); assert.equal(stopped.capUsd, tooSmall); assert.equal(stopped.attempts, 0);
+  await assert.rejects(runEvaluation({ ...options, capUsd: 3, transport: terra }), /Ledger policy/);
+  await assert.rejects(runEvaluation({ ...options, capUsd: 11, transport: terra }), /at most US\$10/);
+});
+
 test('provider echoed API key is redacted from both raw text and parsed bodies', async () => {
   const apiKey = 'mock-provider-echo-key';
   const transport = createTransport(apiKey, async () => ({ status: 401, headers: { get: () => 'req-error' }, text: async () => JSON.stringify({ error: { message: `Invalid key: ${apiKey}; repeated ${apiKey}` } }) }));

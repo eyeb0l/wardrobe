@@ -5,7 +5,8 @@
 | Variable | Default / purpose |
 | --- | --- |
 | `OPENAI_API_KEY` | Required for web API generation and analysis |
-| `OPENAI_VISION_MODEL` | `gpt-6-luna`; detection, planning, Shopping and accessory advice |
+| `OPENAI_DETECTION_MODEL` | `gpt-6.1-terra`; import clothing detection |
+| `OPENAI_VISION_MODEL` | `gpt-6-luna`; scene planning, outfit curation, Shopping and accessory advice. Does not affect detection |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst`; default image model |
 | `OPENAI_GARMENT_MODEL` | Overrides the image model for cutouts |
 | `OPENAI_MODELED_MODEL` | Overrides the image model for modelled pieces and outfits |
