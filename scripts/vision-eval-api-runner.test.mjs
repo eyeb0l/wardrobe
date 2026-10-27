@@ -194,6 +194,19 @@ test('GPT-6 cache writes are priced by lifetime and reserved at the longer rate'
   assert.equal(reservationNano('gpt-6-luna', 1000, 1000).nanoUsd, (1306 * 0.25 + 1000 * 0.5) * 1000);
 });
 
+test('GPT-6 cache writes without a reported lifetime are bounded at the 12-hour rate when retention was requested', () => {
+  const unknownWrites = { input_tokens: 1000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 100 };
+  const knownWrites = { ...unknownWrites, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 500 } };
+  const retained = { model: 'gpt-6.1-terra', prompt_cache_retention: '12h' };
+  // Default retention: unreported writes are 30-minute writes.
+  assert.equal(usageCost('gpt-6.1-terra', unknownWrites, { model: 'gpt-6.1-terra' }).upperNanoUsd, (1000 * 1.25 + 100 * 5) * 1000);
+  assert.deepEqual([usageCost('gpt-6.1-terra', knownWrites).exact, usageCost('gpt-6.1-terra', knownWrites).nanoUsd], [true, (500 * 1 + 500 * 1.25 + 100 * 5) * 1000]);
+  // Requested retention: every possible write may be a 12-hour write.
+  assert.equal(usageCost('gpt-6.1-terra', unknownWrites, retained).upperNanoUsd, (1000 * 2.5 + 100 * 5) * 1000);
+  const ambiguous = usageCost('gpt-6.1-terra', knownWrites, retained);
+  assert.deepEqual([ambiguous.exact, ambiguous.nanoUsd, ambiguous.lowerNanoUsd, ambiguous.upperNanoUsd], [false, null, (500 * 1 + 500 * 1.25 + 100 * 5) * 1000, (500 * 1 + 500 * 2.5 + 100 * 5) * 1000]);
+});
+
 test('GPT-6 phases use explicit models and a separate ledger whose cap cannot be raised', async t => {
   const original = fixture({ id: 'gpt6-case', split: 'gpt6-retry' });
   const schedule = await buildSchedule({ manifest: { cases: [original], outputCaps: { detection: 1000 } }, baseDir: '.', phase: 'gpt6-retry', configNames: ['luna6-medium', 'terra61-medium', 'sol61-medium'], caseIds: ['gpt6-case'], repeats: 1 });

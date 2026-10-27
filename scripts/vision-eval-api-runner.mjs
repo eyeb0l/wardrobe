@@ -79,21 +79,25 @@ export function reservationNano(model, countedInputTokens, maxOutputTokens) {
   const r = rates(model, inputBound);
   return { inputBound, nanoUsd: Math.ceil((inputBound * Math.max(r.write, r.write12h) + maxOutputTokens * r.output) * 1000) };
 }
-export function usageCost(model, usage) {
+export function usageCost(model, usage, payload = {}) {
   if (!usage || !int(usage.input_tokens) || !int(usage.output_tokens)) return null;
   const { input_tokens: input, output_tokens: output } = usage;
   const cached = usage.input_tokens_details?.cached_tokens;
   const writes = usage.input_tokens_details?.cache_write_tokens;
   const reasoning = usage.output_tokens_details?.reasoning_tokens;
-  const longWrites = usage.input_tokens_details?.cache_write_tokens_details?.ttl_12h_tokens ?? 0;
+  const reportedLongWrites = usage.input_tokens_details?.cache_write_tokens_details?.ttl_12h_tokens;
+  const longWrites = reportedLongWrites ?? 0;
   if (!int(longWrites) || longWrites > (writes ?? 0)) return null;
   if (!int(cached) || cached > input || (writes !== undefined && (!int(writes) || cached + writes > input)) || (reasoning !== undefined && (!int(reasoning) || reasoning > output))) return null;
   const r = rates(model, input);
-  const unknownWrites = writes === undefined;
+  // Unreported lifetimes are the default 30 minutes only if the request asked for no other
+  // retention; otherwise every write may be a 12-hour write.
+  const lifetimeKnown = reportedLongWrites !== undefined || r.write12h === r.write || !('prompt_cache_retention' in payload || 'prompt_cache_options' in payload);
+  const exact = writes !== undefined && lifetimeKnown;
   const lowerWrites = writes ?? 0;
   const upperWrites = writes ?? (input - cached);
-  const cost = (w) => Math.ceil(((input - cached - w) * r.input + cached * r.cached + (w - longWrites) * r.write + longWrites * r.write12h + output * r.output) * 1000);
-  return { exact: !unknownWrites, nanoUsd: unknownWrites ? null : cost(writes), lowerNanoUsd: cost(lowerWrites), upperNanoUsd: cost(upperWrites), inputTokens: input, cachedTokens: cached, cacheWriteTokens: writes ?? null, outputTokens: output, reasoningTokens: reasoning ?? null };
+  const cost = (w, long) => Math.ceil(((input - cached - w) * r.input + cached * r.cached + (w - long) * r.write + long * r.write12h + output * r.output) * 1000);
+  return { exact, nanoUsd: exact ? cost(writes, longWrites) : null, lowerNanoUsd: cost(lowerWrites, longWrites), upperNanoUsd: cost(upperWrites, lifetimeKnown ? longWrites : upperWrites), inputTokens: input, cachedTokens: cached, cacheWriteTokens: writes ?? null, outputTokens: output, reasoningTokens: reasoning ?? null };
 }
 export function parseResponse(body) {
   const content = Array.isArray(body?.output) ? body.output.flatMap((item) => Array.isArray(item.content) ? item.content : []) : [];
@@ -306,7 +310,7 @@ export async function runEvaluation({ manifestPath, ledgerDir, phase, configName
           // Do not put API error messages/headers/secrets in console output.
           await saveJson(path.join(ledgerDir, 'raw', `${item.id}.json`), { httpStatus: result.httpStatus, requestId: result.requestId ?? null, body: result.body, raw: result.raw ?? null });
           const parsed = parseResponse(result.body);
-          const cost = usageCost(item.payload.model, result.body?.usage);
+          const cost = usageCost(item.payload.model, result.body?.usage, item.payload);
           entry.response = parsed; entry.usage = result.body?.usage ?? null; entry.cost = cost;
           const httpSuccess = result.httpStatus >= 200 && result.httpStatus < 300;
           const tierValid = parsed.serviceTier === 'default';
@@ -325,7 +329,7 @@ export async function runEvaluation({ manifestPath, ledgerDir, phase, configName
             entry.status = parsed.apiStatus === 'completed' ? 'completed' : 'incomplete';
             if (!cost.exact) {
               entry.usageUpperNanoUsd = cost.upperNanoUsd;
-              entry.accountingNote = 'Cache write tokens absent: known output cost plus all non-cached input charged at cache-write rate held against cap; cost interval recorded.';
+              entry.accountingNote = 'Cache write count or lifetime absent: known output cost plus every possible cache write charged at the longest write rate held against cap; cost interval recorded.';
             }
             if (entry.latencyMs > item.timeoutMs) entry.operationalFailure = 'deadline_exceeded';
           }
