@@ -5,7 +5,7 @@ import { WornLaundry } from './worn-laundry.jsx';
 import { uiErrorMessage } from './ui-error.mjs';
 import './garment-wear-controls.css';
 
-export function GarmentWearControls({ ids, outfits, garmentWears, today, itemsById, busy, unavailable, onRefresh, onLog, onRemove, onSaveLook, onAvailabilityChange, wardrobeError, onRefreshWardrobe }) {
+export function GarmentWearControls({ ids, showCount = true, outfits, garmentWears, today, itemsById, busy, unavailable, onRefresh, onLog, onRemove, onSaveLook, onAvailabilityChange, wardrobeError, onRefreshWardrobe }) {
   const id = useId();
   const [date, setDate] = useState(today);
   const pending = useRef(null);
@@ -39,7 +39,7 @@ export function GarmentWearControls({ ids, outfits, garmentWears, today, itemsBy
     || (event.garmentIds.some(id => itemsById.get(id)?.part === 'upperbody') && event.garmentIds.some(id => itemsById.get(id)?.part === 'lowerbody'))
     ? <button className="garment-wear-link" type="button" disabled={busy || !!unavailable} onClick={() => onSaveLook(event)}>Save as a look</button> : null;
   return <section className="garment-wear-controls" aria-label="Log garment wear">
-    <div className="garment-wear-actions"><button type="button" className="secondary-button" disabled={busy || !!unavailable || !ids.length || allLogged(today)} onClick={() => log(today)}>{allLogged(today) ? 'Worn today' : ids.length === 1 ? 'Wore this today' : 'Wore these today'}</button><span>{ids.length} {ids.length === 1 ? 'piece' : 'pieces'} selected</span></div>
+    <div className="garment-wear-actions"><button type="button" className="secondary-button" disabled={busy || !!unavailable || !ids.length || allLogged(today)} onClick={() => log(today)}>{allLogged(today) ? 'Worn today' : ids.length === 1 ? 'Wore this today' : 'Wore these today'}</button>{showCount ? <span>{ids.length} {ids.length === 1 ? 'piece' : 'pieces'} selected</span> : null}</div>
     {unavailable ? <p role="status">{unavailable} <button type="button" className="secondary-button" onClick={onRefresh} disabled={busy}>Refresh wear history</button></p> : null}
     {entry ? <>
       <p className="garment-wear-notice" role="status">Wear logged for {formatWearDate(entry.date)}. <button className="garment-wear-link" type="button" disabled={busy || !!unavailable} onClick={() => remove(entry)}>Undo</button></p>

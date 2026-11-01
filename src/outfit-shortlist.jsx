@@ -28,7 +28,7 @@ function ShortlistEntry({ outfit, pieces, lastWorn, unknownCount, weatherFit, it
       </article>;
 }
 
-export function OutfitShortlist({ garmentWears, outfits, itemsById, onOpen, unavailable, onRefresh, weather, onChangeLocation, onAddWeather }) {
+export function OutfitShortlist({ garmentWears, outfits, itemsById, onOpen, unavailable, onRefresh, weather, onAddWeather }) {
   const id = useId();
   const [occasion, setOccasion] = useState('');
   const [mode, setMode] = useState('recent');
@@ -52,7 +52,6 @@ export function OutfitShortlist({ garmentWears, outfits, itemsById, onOpen, unav
       {weather?.ready ? <fieldset className="outfit-shortlist-modes"><legend>Match weather</legend>{[[0, WEATHER_DAY_LABELS[0]], [1, WEATHER_DAY_LABELS[1]], [-1, 'Off']].map(([value, label]) => <label key={value} className={weatherDayIndex === value ? 'selected' : ''}><input type="radio" name={`${id}-weather`} value={value} checked={weatherDayIndex === value} disabled={value >= 0 && !weather.days[value]} onChange={() => setWeatherDayIndex(value)} />{label}</label>)}</fieldset> : null}
     </div>
     <p className="outfit-small">{weatherDay ? `Looks that suit ${weatherDayLabel} weather come first. ` : ''}{mode === 'favourites' ? 'Your favourites, with pieces worn longer ago first.' : 'Pieces worn longer ago come first, including Wardrobe entries and wears in other outfits.'}</p>
-    {!weather?.location && onChangeLocation ? <p className="outfit-small">Match looks to the forecast: <button type="button" className="outfit-text-button" onClick={onChangeLocation}>add a weather location</button>.</p> : null}
     {unavailable ? <div><p className="outfit-small" role="status">{unavailable}</p>{onRefresh ? <button type="button" className="outfit-text-button" onClick={() => { void onRefresh(); }}>Refresh wardrobe</button> : null}</div> : <>
       <p className="outfit-small" role="status">{result.choices.length ? `${result.choices.length} ${result.choices.length === 1 ? 'look' : 'looks'} to choose from.` : result.laundryCount ? `No ready ${mode === 'favourites' ? 'favourites' : 'looks'} for this occasion. Mark pieces ready when they are available again.` : mode === 'favourites' ? 'No available favourites for this occasion. Try another occasion or favourite a look in your collection.' : 'No available looks for this occasion. Try another occasion or save a look.'}{result.matchingCount > result.distinctCount ? ' Similar variations are grouped.' : ''}</p>
       {result.weatherCounts.unsuitable ? <p className="outfit-small" role="status">{result.weatherCounts.unsuitable} {result.weatherCounts.unsuitable === 1 ? 'look is' : 'looks are'} left out because {result.weatherCounts.unsuitable === 1 ? 'it doesn’t' : 'they don’t'} suit {weatherDayLabel} weather. Choose <strong>Off</strong> under Match weather to include {result.weatherCounts.unsuitable === 1 ? 'it' : 'them'}.</p> : null}

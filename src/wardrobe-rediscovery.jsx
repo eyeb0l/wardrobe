@@ -69,10 +69,9 @@ export function GarmentRediscovery({ item, itemsById, outfits, garmentWears, day
     <h3>Wear history</h3>
     {unavailable ? <p role="status">{unavailable} <button className="secondary-button" type="button" onClick={onRefresh}>Refresh rediscovery</button></p> : <>
       <p><HistorySummary count={dates.length} lastWorn={dates[0]} /></p>
-      {dates.length ? <details><summary>Logged dates</summary><ul className="garment-wear-dates">{dates.map(date => <li key={date}><time dateTime={date}>{formatWearDate(date)}</time></li>)}</ul></details> : null}
-      <p>Across Wardrobe entries, saved looks and variations; each calendar day counts once. No wears logged does not mean never worn.</p>
+      {dates.length ? <details><summary>Logged dates</summary><ul className="garment-wear-dates">{dates.map(date => <li key={date}><time dateTime={date}>{formatWearDate(date)}</time></li>)}</ul><p>Includes Wardrobe entries, saved looks and variations; each calendar day counts once.</p></details> : <p>Only logged wears are counted, so this piece may still have been worn.</p>}
       <h3>Ready saved looks with this piece</h3>
-      <label className="field" htmlFor={`${id}-occasion`}><span>Look occasion</span><select id={`${id}-occasion`} value={occasion} onChange={event => setOccasion(event.target.value)}><option value="">All occasions</option>{occasions.map(value => <option key={value} value={value}>{value.replaceAll('-', ' ')}</option>)}</select></label>
+      {occasions.length > 1 || occasion ? <label className="field" htmlFor={`${id}-occasion`}><span>Look occasion</span><select id={`${id}-occasion`} value={occasion} onChange={event => setOccasion(event.target.value)}><option value="">All occasions</option>{occasions.map(value => <option key={value} value={value}>{value.replaceAll('-', ' ')}</option>)}</select></label> : null}
       {disabled ? <p role="status">Save or discard your garment changes before choosing a look.</p> : null}
       <p role="status">{ready.length} ready {ready.length === 1 ? 'look' : 'looks'}{matchingCount > ready.length ? ` · ${matchingCount - ready.length} left out for laundry, unavailable pieces or images` : ''}.</p>
       {!ready.length ? <p>{!matching.length ? 'No saved looks contain this piece yet. Save a look with this piece to find it here.' : 'Try another occasion or mark laundry pieces Ready when they are available.'}</p> : null}
