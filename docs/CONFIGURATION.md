@@ -35,4 +35,6 @@ For additional local references, add `model-reference-2.png`, `model-reference-3
 
 Generating or analysing sends the relevant images and context to the configured API. Keys stay on the server. Keep credentials, identity photos, snapshots and generated assets out of Git. Shopping drafts and results remain in browser memory and disappear on reload in either mode.
 
+Weather in **Outfits** is off until you choose a location. The browser then requests forecasts and place searches directly from [Open-Meteo](https://open-meteo.com/) (free, no key; data licensed CC BY 4.0). Coordinates are rounded to about 1 km. The location and the latest forecast are kept in that browser's local storage only; they are not saved to the wardrobe, synced between devices or included in backups. **Stop using weather** removes them. Weather suitability for each look is saved with the outfit like its other details.
+
 Local development uses the configured data directory; it does not sync with the hosted wardrobe. Use the [backup guide](BACKUPS.md) for cloud backups and recovery, and the [local storage guide](LOCAL_STORAGE.md) for local writer locks, consistent backups and damaged-file recovery.

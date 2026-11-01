@@ -510,10 +510,10 @@ test("a lost worker that cannot even settle asks the workflow to sleep until its
 
 test("shopping requests take only short leases, while job and outfit routes keep a request writer", () => {
   for (const pathname of ["/api/shopping/analyze", "/api/shopping/gaps", "/api/shopping/import-website", "/api/outfits/discovery/rank"]) assert.equal(leaseFreeRequests(pathname), true, pathname);
-  for (const pathname of ["/api/import/jobs", "/api/outfits/look-1/accessories", "/api/outfits/jobs", "/api/shopping/config"]) assert.equal(leaseFreeRequests(pathname), false, pathname);
+  for (const pathname of ["/api/import/jobs", "/api/outfits/look-1/accessories", "/api/outfits/weather/estimate", "/api/outfits/jobs", "/api/shopping/config"]) assert.equal(leaseFreeRequests(pathname), false, pathname);
 });
 
-for (const pathname of ["/api/import/jobs", "/api/outfits/look-1/accessories"]) {
+for (const pathname of ["/api/import/jobs", "/api/outfits/look-1/accessories", "/api/outfits/weather/estimate"]) {
   test(`${pathname} releases the request writer during provider work and reacquires before saving`, async t => {
     const h = await harness(t);
     let release, started;

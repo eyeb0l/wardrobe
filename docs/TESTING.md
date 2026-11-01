@@ -1,5 +1,39 @@
 # Testing on squiggle
 
+## Weather context for plans and What to wear
+
+Use the pinned Node 22 and headless Chromium setup below. Choose an unused port
+and fresh artifact directory:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+npm ci   # only when node_modules is missing (new worktrees start without it)
+TMPDIR=/dev/shm node --test scripts/outfit-weather.test.mjs scripts/outfit-api.test.mjs scripts/outfit-shortlist.test.mjs scripts/cloud-runtime.test.mjs
+WARDROBE_BROWSER_PORT=5383 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-weather-browser \
+  npm run test:browser -- tests/browser/outfit-weather.spec.mjs
+rg --files /tmp/wardrobe-weather-browser
+```
+
+Playwright starts Vite, waits for readiness and stops its own server. Desktop
+(1365 × 1000) and mobile (390 × 844) cover the opt-in location (place search,
+no results, device geolocation), forecast display and 30-minute local cache
+across reload, forecast failure and retry, stopping weather, plan and plan-chooser
+fit lines, **Match weather** Today/Tomorrow/Off ordering and exclusions, manual
+weather edits with validation and a stale-edit conflict, and batched estimates
+(6 + 1) with an error and retry. Open-Meteo forecast and geocoding requests are
+intercepted with synthetic responses, so nothing leaves the machine. Inspect
+`weather-not-set.png`, `weather-first-viewport.png`, `weather-plans.png`,
+`weather-shortlist.png`, `weather-details.png`, `weather-backfill.png` and every
+`browser-health.json`.
+
+The Node tests cover weather validation, forecast parsing, fit levels and rain
+downgrades, shortlist tiers and counts, manifest validation, the planning schema
+and prompt, saving generated weather on acceptance, batched estimates (request
+shape, invalid output, missing key, one-at-a-time, edits made during the provider
+call win), manual edits/clears/conflicts and restart persistence, plus the hosted
+lease release for `/api/outfits/weather/estimate`. No paid model services are used.
+
 ## Wardrobe toolbar and collapsed rediscovery
 
 Use the pinned Node 22 and headless Chromium setup below:

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { copyFile, currentStorage, link, lstat, readFile, readdir, rename, rm, writeFile } from "./storage-fs.mjs";
 import path from "node:path";
 import { validWearDate } from "../shared/outfit-activity.mjs";
+import { validStoredWeather } from "../shared/outfit-weather.mjs";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const ID = /^[a-z0-9][a-z0-9-]{0,159}$/;
@@ -96,6 +97,7 @@ function validateOutfit(record, file, prefix, job = false) {
   optional(record, "garmentWearId", (value) => text(value) && UUID.test(value), file, prefix);
   optional(record, "imageKind", (value) => ["cutouts", "modelled"].includes(value), file, prefix);
   optional(record, "variationPhotoId", (value) => text(value) && ID.test(value), file, prefix);
+  optional(record, "weather", validStoredWeather, file, prefix);
   optional(record, "wearHistory", (events) => Array.isArray(events) && events.every((event) =>
     object(event) && text(event.id) && UUID.test(event.id) && validWearDate(event.date) && timestamp(event.createdAt)
     && strings(event.garmentIds) && event.garmentIds.length > 0
