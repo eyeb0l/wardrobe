@@ -1,5 +1,10 @@
 import { localDate, validWearDate } from './outfit-activity.mjs';
 import { inLaundry } from './garment-availability.mjs';
+import { weatherFit } from './outfit-weather.mjs';
+
+// With a forecast, suitable looks come first and clearly unsuitable ones are
+// left out (and counted). Looks without weather details follow known fits.
+const WEATHER_TIERS = { good: 0, fair: 1, unknown: 2 };
 
 // A garment worn in two logged looks on the same day was still worn on one day.
 // Use the event's pieces: an edited outfit must not rewrite what was worn.
@@ -32,19 +37,23 @@ export function readySavedLooks(outfits, itemsById, { garmentId = '', occasion =
     && outfit.garmentIds.every(id => { const item = itemsById.get(id); return item?.image && !failedImages.has(item.image) && !item.hidden && !item.deleted; }));
 }
 
-export function outfitShortlist(outfits, itemsById, { occasion = '', mode = 'recent', today = localDate(), garmentWears = [], failedImages = new Set() } = {}) {
+export function outfitShortlist(outfits, itemsById, { occasion = '', mode = 'recent', today = localDate(), garmentWears = [], failedImages = new Set(), weatherDay = null } = {}) {
   // Aggregate before filtering, including wears in other occasions/variations.
   const history = garmentWearHistory(outfits, today, garmentWears);
   const available = readySavedLooks(outfits, itemsById, { failedImages });
-  const eligible = available.filter(outfit => (!occasion || outfit.occasion?.includes(occasion)) && (mode !== 'favourites' || outfit.favourite));
+  const matching = available.filter(outfit => (!occasion || outfit.occasion?.includes(occasion)) && (mode !== 'favourites' || outfit.favourite));
+  const fits = new Map(weatherDay ? matching.map(outfit => [outfit.id, weatherFit(outfit.weather, weatherDay)]) : []);
+  const eligible = matching.filter(outfit => fits.get(outfit.id)?.level !== 'poor');
   const ranked = eligible.map(outfit => {
     const pieces = [...new Set(outfit.garmentIds)].map(id => ({ id, name: itemsById.get(id).name, ...(history.get(id) || { count: 0, lastWorn: '' }) }));
-    return { outfit, pieces, lastWorn: pieces.reduce((date, piece) => piece.lastWorn > date ? piece.lastWorn : date, ''),
+    return { outfit, pieces, weatherFit: fits.get(outfit.id) || null, lastWorn: pieces.reduce((date, piece) => piece.lastWorn > date ? piece.lastWorn : date, ''),
       unknownCount: pieces.filter(piece => !piece.count).length,
       averageWearCount: pieces.reduce((sum, piece) => sum + piece.count, 0) / pieces.length };
   }).sort((a, b) => {
     // Unknown history is not evidence that something is unworn. Show it after
     // looks with dated evidence, and label partial history explicitly in the UI.
+    const weather = (WEATHER_TIERS[a.weatherFit?.level] ?? 0) - (WEATHER_TIERS[b.weatherFit?.level] ?? 0);
+    if (weather) return weather;
     if (!!a.lastWorn !== !!b.lastWorn) return a.lastWorn ? -1 : 1;
     return a.lastWorn.localeCompare(b.lastWorn)
       || a.unknownCount - b.unknownCount
@@ -63,5 +72,6 @@ export function outfitShortlist(outfits, itemsById, { occasion = '', mode = 'rec
   const laundryCount = outfits.filter(outfit => outfit.status === 'accepted'
     && (!occasion || outfit.occasion?.includes(occasion)) && (mode !== 'favourites' || outfit.favourite)
     && outfit.garmentIds?.some(id => inLaundry(itemsById.get(id)))).length;
-  return { choices, matchingCount: eligible.length, distinctCount: combinations.size, laundryCount, unavailableCount: outfits.filter(o => o.status === 'accepted').length - available.length };
+  const weatherCounts = { unsuitable: matching.length - eligible.length, unknown: [...fits.values()].filter(fit => fit.level === 'unknown').length };
+  return { choices, weatherCounts, matchingCount: eligible.length, distinctCount: combinations.size, laundryCount, unavailableCount: outfits.filter(o => o.status === 'accepted').length - available.length };
 }

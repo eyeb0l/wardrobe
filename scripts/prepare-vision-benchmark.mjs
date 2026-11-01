@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import sharp from 'sharp';
 import { outfitContactSheets } from './outfit-api.mjs';
 import { buildModeledSettingPrompt } from './modeled-photo-prompts.mjs';
+import { WEATHER_GUIDANCE, WEATHER_SCHEMA } from '../shared/outfit-weather.mjs';
 
 const root = process.cwd();
 const out = path.resolve(process.argv[2] || 'data/vision-benchmark/2026-09-20');
@@ -23,7 +24,7 @@ const template = (s, prefix, context) => evaluate('`'+between(s, prefix, '`;')+'
 const PARTS = ['upperbody','dresses','wholebody_up','lowerbody','accessories_up','shoes'];
 const detectionPrompt = template(imp, 'const ANALYSIS_PROMPT = `', {});
 const detectionSchema = evaluate(between(imp, 'name: "wardrobe_items", strict: true, schema: ', ' } } },\n    }),') + ' }', {PARTS});
-const curationSchema = evaluate('function curationSchema'+between(outfit, 'function curationSchema', '\n\n  async function curate'), {OUTER:['none','full-front-opening','pullover','closed-uncertain']});
+const curationSchema = evaluate('function curationSchema'+between(outfit, 'function curationSchema', '\n\n  async function curate'), {OUTER:['none','full-front-opening','pullover','closed-uncertain'],WEATHER_SCHEMA});
 const shoppingSchema = evaluate('function assessmentSchema'+between(shop, 'function assessmentSchema', '\n\nfunction validateAssessment'), {VERDICTS:['good-addition','consider','skip','unclear']});
 const library = JSON.parse(await read('data/library.json'));
 const selectedNames = ['burgundy cable-knit v-neck sweater','white button-up shirt','striped crew-neck sweater','black floral long-sleeve top','blue jeans','black mini skirt','light gray trousers','beige tailored coat','black long-sleeve full-skirt dress coat','black Mary Jane pumps','gold hoop earrings','large shoulder tote bag'];
@@ -46,7 +47,7 @@ const cases=[];
 for(const [id,image] of [['detect-dress',dress],['detect-shoes',shoes],['detect-worn',worn],['detect-empty',blank]]) cases.push({id,task:'detection',images:[image],prompt:detectionPrompt,schema:detectionSchema});
 const excluded=[[inventory[1].id,inventory[4].id].sort()];
 for(const [id,direction] of [['curate-everyday','Three distinct everyday looks; include a restrained layered option if feasible.'],['curate-outer','Three distinct looks. Include the beige tailored coat in at least one. Consider the black full-skirt dress coat only if the top can remain visible without inventing an opening.']]) {
- const context={job:{count:3,direction},used:new Set(excluded.map(x=>x.join('|'))),values:inventory,usage:Object.fromEntries(inventory.map(x=>[x.id,0]))};
+ const context={job:{count:3,direction},used:new Set(excluded.map(x=>x.join('|'))),values:inventory,usage:Object.fromEntries(inventory.map(x=>[x.id,0])),WEATHER_GUIDANCE};
  cases.push({id,task:'curation',images:[wardrobe],prompt:template(outfit,'const prompt = `Curate exactly ',context).replace(/^/,'Curate exactly '),schema:curationSchema(inventory.map(x=>x.id),3)});
 }
 cases.push({id:'scene',task:'scene',images:[dress],prompt:buildModeledSettingPrompt({metadata:get('blue floral puff-sleeve midi dress'),previousSetting:'An empty white loft with concrete floors and window shadows.',recentSettings:['A sunlit walled garden with a pale stone bench.','A quiet cobbled lane beside old warm-stone buildings.'],direction:'A relaxed daytime photograph; choose somewhere different from the recent settings.'}),schema:{type:'object',additionalProperties:false,required:['setting'],properties:{setting:{type:'string',minLength:1,maxLength:600}}}});

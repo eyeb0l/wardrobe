@@ -2,6 +2,8 @@ import { useId, useState } from 'react';
 import { OptimizedImage } from './OptimizedImage.jsx';
 import { formatWearDate } from '../shared/outfit-activity.mjs';
 import { planAvailability } from '../shared/outfit-plans.mjs';
+import { weatherFit } from '../shared/outfit-weather.mjs';
+import { WeatherFitLine } from './outfit-weather.jsx';
 
 export { usePlanningDays } from './planning-days.mjs';
 
@@ -19,18 +21,20 @@ function Pieces({ outfit, itemsById }) {
   })}</div>{failed.size ? <p className="outfit-small">Some cutouts could not load. <button type="button" className="outfit-text-button" onClick={() => { setFailed(new Set()); setAttempt(value => value + 1); }}>Retry cutouts</button></p> : null}</>;
 }
 
-export function OutfitPlans({ plans, outfits, itemsById, days, busy, unavailable, onRefresh, onChoose, onClear, onOpen, onVariation, onWear }) {
+export function OutfitPlans({ plans, outfits, itemsById, days, busy, unavailable, onRefresh, onChoose, onClear, onOpen, onVariation, onWear, weather, weatherPanel }) {
   const id = useId();
   const byId = new Map(outfits.map(outfit => [outfit.id, outfit]));
   const past = plans.filter(plan => plan.date < days[0] && !byId.get(plan.outfitId)?.wearHistory?.some(entry => entry.date === plan.date));
   const card = (date, pastPlan = false) => {
     const plan = plans.find(plan => plan.date === date), outfit = byId.get(plan?.outfitId);
     const wore = outfit?.wearHistory?.some(entry => entry.date === date);
+    const forecast = !pastPlan && weather?.ready ? weather.days[days.indexOf(date)] : null;
     return <article className="outfit-plan-card" key={date} aria-label={pastPlan ? `Plan for ${formatWearDate(date)}` : date === days[0] ? 'Today’s plan' : 'Tomorrow’s plan'}>
       <p className="outfit-count">{pastPlan ? formatWearDate(date) : date === days[0] ? 'Today' : 'Tomorrow'}</p>
       {plan ? <>
         <h3>{outfit?.name || 'Saved look unavailable'}</h3>
         {outfit ? <><p className="outfit-small">{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</p><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} /></> : null}
+        {outfit && forecast ? <WeatherFitLine fit={weatherFit(outfit.weather, forecast)} /> : null}
         <Availability outfit={outfit} itemsById={itemsById} unavailable={unavailable} />
         <p className="outfit-small">{wore ? 'Wear logged for this date.' : pastPlan ? 'Past plan · No wear confirmed.' : 'Planned only · No wear confirmed.'}</p>
         <div className="outfit-plan-actions">
@@ -45,14 +49,14 @@ export function OutfitPlans({ plans, outfits, itemsById, days, busy, unavailable
     </article>;
   };
   return <section className="outfit-plans" aria-labelledby={`${id}-title`}>
-    <div className="outfit-shortlist-heading"><div><h2 id={`${id}-title`}>Your plans</h2><p>One saved look for each day. Confirm after you wear it.</p></div></div>
+    <div className="outfit-shortlist-heading outfit-plans-heading"><div><h2 id={`${id}-title`}>Your plans</h2><p>One saved look for each day. Confirm after you wear it.</p></div>{weatherPanel}</div>
     {unavailable ? <p className="outfit-small" role="status">{unavailable} <button type="button" className="outfit-text-button" onClick={onRefresh}>Refresh plans and wardrobe</button></p> : null}
     <div className="outfit-plan-grid">{days.map(date => card(date))}</div>
     {past.length ? <details className="outfit-shortlist-history"><summary>Unconfirmed past plans ({past.length})</summary><div className="outfit-plan-grid">{past.map(plan => card(plan.date, true))}</div></details> : null}
   </section>;
 }
 
-export function PlanChooser({ date, fromDate, initialId, plans, outfits, itemsById, days, busy, unavailable, error, onRefresh, onSave }) {
+export function PlanChooser({ date, fromDate, initialId, plans, outfits, itemsById, days, busy, unavailable, error, onRefresh, onSave, weather }) {
   const id = useId();
   const [outfitId, setOutfitId] = useState(initialId || plans.find(plan => plan.date === date)?.outfitId || '');
   const outfit = outfits.find(item => item.id === outfitId);
@@ -61,7 +65,7 @@ export function PlanChooser({ date, fromDate, initialId, plans, outfits, itemsBy
   return <form className="outfit-plan-form" onSubmit={event => { event.preventDefault(); void onSave({ date, outfitId, ...(fromDate ? { fromDate } : {}) }); }}>
     <p className="outfit-small">{formatWearDate(date)} · Planning does not log a wear or reserve garments.</p>
     <label className="outfit-field" htmlFor={`${id}-look`}><span>Saved look</span><select id={`${id}-look`} value={outfitId} disabled={busy || !!fromDate} onChange={event => setOutfitId(event.target.value)}><option value="">Choose a look</option>{outfits.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-    {outfit ? <><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} /><Availability outfit={outfit} itemsById={itemsById} unavailable={unavailable} /></> : null}
+    {outfit ? <><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} />{weather?.ready && weather.days[days.indexOf(date)] ? <WeatherFitLine fit={weatherFit(outfit.weather, weather.days[days.indexOf(date)])} /> : null}<Availability outfit={outfit} itemsById={itemsById} unavailable={unavailable} /></> : null}
     {current && (fromDate || current.id !== outfitId) ? <p className="outfit-small">Saving will replace {current.name} in this day’s plan.</p> : null}
     {fromDate ? <p className="outfit-small">This moves the plan from {formatWearDate(fromDate)}. Any logged wear stays on its original date.</p> : null}
     {invalid ? <p role="alert" className="outfit-error">The day has changed. Close this dialog and choose today or tomorrow again.</p> : null}

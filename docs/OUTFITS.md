@@ -125,6 +125,51 @@ collection and backups. Other devices refresh on focus; conflicting plan edits
 are rejected and refreshed before you choose again. Failed collection or wardrobe
 reads block plan actions until recovery. No new schema or AI service is required.
 
+## Weather
+
+The **Weather** panel beside **Your plans** shows today's and tomorrow's
+forecast: conditions, high and low, chance of rain and the feels-like range.
+Choose **Add location**, then **Use my location** or search for a place.
+Nothing is requested until you do. Forecasts come from Open-Meteo and stay on
+this device; a forecast is reused for up to 30 minutes, then refreshed when you
+return to the app or the day changes. **Change** lets
+you pick another place or **Stop using weather**. See
+[privacy](CONFIGURATION.md#storage-and-privacy).
+
+Each saved look can carry **weather details**: the coolest and warmest
+feels-like temperatures (whole °C) it is comfortable in exactly as worn, how it
+copes with rain (**Fine in rain**, **Light showers only** or **Best on dry
+days**) and a short note. Newly generated looks get these from the same planning
+request that chooses their pieces; an implausible estimate is dropped rather than
+repeating the paid request. They appear while reviewing a generation and are
+saved when you accept the look.
+
+For looks saved before this, or variations and worn looks (whose pieces changed),
+use either route:
+
+- **Add weather details** in **What to wear**: estimates every look that has no
+  details, six per request, from each look's photo or cutout preview plus its
+  pieces' names, categories, colours and tags. It is an explicit, potentially
+  paid request to `OPENAI_VISION_MODEL`. Progress is saved after each batch;
+  **Stop** keeps finished looks, and an error can be retried for the rest.
+- A look's details: **Estimate weather details** for that look, or **Add them
+  yourself**. **Edit weather details** and **Remove** work for any source.
+
+Estimates never overwrite existing details, and skip a look whose pieces or
+photo changed during the request. Edits are rejected if the details changed on
+another device; the latest details are then reloaded. Weather details persist
+in the local or cloud outfit collection and existing backups, without a schema
+migration. Variations do not inherit their source's details.
+
+**How a look fits a day.** The forecast's feels-like low and high are compared
+with the look's range. Entirely outside it is **Not ideal** (too cold or too
+warm). A low more than 4° below the range (usually overnight) or a high more than
+2° above it is **Workable with care**; otherwise **Good for the weather**.
+Rain is likely at 60% or more, 2 mm or snow; showers at 30% or 0.5 mm. Rain
+lowers a **Best on dry days** look by one level (showers: to Workable at best),
+and a **Light showers only** look to Workable when rain is likely. Each plan,
+the plan chooser and a look's details show the fit and its reason.
+
 ## What to wear
 
 The shortlist at the top of Outfits offers up to three saved looks for your day.
@@ -144,8 +189,15 @@ logged**. Partially logged looks show how many pieces have no history. Neither
 state means the pieces have never been worn. If all your looks were worn recently,
 the shortlist still offers the oldest available choices with their actual dates.
 Ties prefer fuller history, fewer average logged days, then favourites, with
-stable name/ID ordering. The shortlist makes no claim about style suitability
-beyond your saved occasion labels.
+stable name/ID ordering. Beyond weather details and your saved occasion labels,
+the shortlist makes no claim about style suitability.
+
+With a weather location, **Match weather** chooses **Today** (the default),
+**Tomorrow** or **Off**. Looks that are a good fit come first, then workable
+ones, then looks without weather details; wear history orders each group. Looks
+that are **Not ideal** for that day are left out, with a count and a reminder
+that **Off** includes them. Each choice shows its fit, and a count of looks
+without weather details links to **Add weather details**.
 
 Variations with the same main top/bottom or dress share one choice so shoe or
 accessory changes do not fill the shortlist. When fewer than three distinct
@@ -256,7 +308,7 @@ filters and **Change one piece** also work before that.
 
 ## Generate outfits
 
-Choose **Generate outfits**, request 1–12 looks, add optional styling direction, and select a model reference. Planning uses garment images and metadata; each combination gets a square modelled photograph.
+Choose **Generate outfits**, request 1–12 looks, add optional styling direction, and select a model reference. Planning uses garment images and metadata; each combination gets a square modelled photograph and [weather details](#weather).
 
 The web generator requires exactly one top and one bottom per look, with at most one outer layer, one pair of shoes and one accessory. It currently excludes dresses. Top-and-bottom pairs must differ from saved looks and active candidates; changing optional pieces does not make a pair new. Generation requires an API key, a reference and enough unused pairs.
 
