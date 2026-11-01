@@ -54,13 +54,21 @@ export function WeatherLocationForm({ weather, onDone }) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const controller = useRef(null);
-  useEffect(() => () => controller.current?.abort(), []);
-  const choose = location => { weather.setLocation(location); onDone(); };
+  const closed = useRef(false);
+  useEffect(() => {
+    closed.current = false;
+    return () => { closed.current = true; controller.current?.abort(); };
+  }, []);
+  const choose = location => { closed.current = true; weather.setLocation(location); onDone(); };
+  // Geolocation cannot be aborted, so a result arriving after the form closed
+  // (including after Stop using weather) is ignored.
   const locate = async () => {
     controller.current?.abort();
     setBusy('locate'); setError('');
-    try { choose(await currentPosition()); }
-    catch (failure) { setError(failure.message); setBusy(''); }
+    try {
+      const location = await currentPosition();
+      if (!closed.current) choose(location);
+    } catch (failure) { if (!closed.current) { setError(failure.message); setBusy(''); } }
   };
   const search = async event => {
     event.preventDefault();
@@ -119,19 +127,21 @@ function WeatherForm({ outfit, busy, onSave, onCancel }) {
 
 // Weather section in a saved look's details: view, edit, clear or estimate.
 export function OutfitWeather({ outfit, weather, hasApiKey, disabled = false, onSaved, onConflict }) {
-  const [editing, setEditing] = useState(false);
+  // Holds the revision the editor started from, so a refresh while editing
+  // still conflicts instead of overwriting another device's change.
+  const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const range = normalizeWeather(outfit.weather);
   const run = async (key, action) => {
     setBusy(key); setError('');
     try { await action(); }
-    catch (failure) { setError(uiErrorMessage(failure)); if (failure.status === 409) await onConflict?.(); }
+    catch (failure) { setError(uiErrorMessage(failure)); if (failure.status === 409) { setEditing(null); await onConflict?.(); } }
     finally { setBusy(''); }
   };
   const save = value => run('save', async () => {
-    const saved = await post(`/api/outfits/${encodeURIComponent(outfit.id)}/weather`, { weather: value, expectedUpdatedAt: outfit.weather?.updatedAt ?? null });
-    onSaved([saved]); setEditing(false);
+    const saved = await post(`/api/outfits/${encodeURIComponent(outfit.id)}/weather`, { weather: value, expectedUpdatedAt: editing.expectedUpdatedAt });
+    onSaved([saved]); setEditing(null);
   });
   const estimate = () => run('estimate', async () => {
     const result = await post('/api/outfits/weather/estimate', { outfitIds: [outfit.id] });
@@ -141,21 +151,21 @@ export function OutfitWeather({ outfit, weather, hasApiKey, disabled = false, on
   const locked = disabled || !!busy;
   return <section className="outfit-weather-details" aria-label="Weather suitability">
     <h3>Weather</h3>
-    {editing ? <WeatherForm outfit={outfit} busy={busy === 'save'} onSave={save} onCancel={() => { setEditing(false); setError(''); }} />
+    {editing ? <WeatherForm outfit={outfit} busy={busy === 'save'} onSave={save} onCancel={() => { setEditing(null); setError(''); }} />
       : range ? <>
         <p className="outfit-weather-range"><strong>{range.minTempC}°–{range.maxTempC}°</strong> feels-like · {RAIN_LABELS[range.rain]}</p>
         {range.note ? <p className="outfit-small">{range.note}</p> : null}
         <p className="outfit-weather-meta">{SOURCE_LABELS[outfit.weather.source]}.</p>
         {weather?.ready ? weather.days.map((day, index) => day ? <WeatherFitLine key={WEATHER_DAY_LABELS[index]} label={WEATHER_DAY_LABELS[index]} fit={weatherFit(outfit.weather, day)} /> : null) : null}
         <div className="outfit-weather-actions">
-          <button type="button" className="outfit-text-button" onClick={() => { setEditing(true); setError(''); }} disabled={locked}>Edit weather details</button>
+          <button type="button" className="outfit-text-button" onClick={() => { setEditing({ expectedUpdatedAt: outfit.weather?.updatedAt ?? null }); setError(''); }} disabled={locked}>Edit weather details</button>
           <button type="button" className="outfit-text-button" onClick={() => run('clear', async () => { onSaved([await post(`/api/outfits/${encodeURIComponent(outfit.id)}/weather`, { weather: null, expectedUpdatedAt: outfit.weather.updatedAt })]); })} disabled={locked}>{busy === 'clear' ? 'Removing…' : 'Remove'}</button>
         </div>
       </> : <>
         <p className="outfit-small">No weather details yet. Add the temperatures and rain this look suits to match it to the forecast.</p>
         <div className="outfit-weather-actions">
           {hasApiKey ? <button type="button" className="outfit-secondary" onClick={estimate} disabled={locked}>{busy === 'estimate' ? 'Estimating…' : 'Estimate weather details'}</button> : null}
-          <button type="button" className="outfit-text-button" onClick={() => { setEditing(true); setError(''); }} disabled={locked}>Add them yourself</button>
+          <button type="button" className="outfit-text-button" onClick={() => { setEditing({ expectedUpdatedAt: outfit.weather?.updatedAt ?? null }); setError(''); }} disabled={locked}>Add them yourself</button>
         </div>
         {hasApiKey ? <p className="outfit-weather-meta">Estimating sends this look’s photo and piece details to the AI service and may incur charges.</p> : null}
       </>}

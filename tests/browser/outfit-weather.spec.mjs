@@ -221,10 +221,23 @@ test('add weather details by hand, estimate the rest in batches and recover from
   await expect(section.getByText(/^Today: Good for the weather\. Suits/)).toBeVisible();
   await expect(section.getByText(/^Tomorrow: Not ideal for the weather\. Likely/)).toBeVisible();
   expect(wardrobe.weatherPosts.at(-1)).toEqual({ id: 'plain-look', weather: { minTempC: 4, maxTempC: 14, rain: 'suited', note: 'Chinos with a rain shell.' }, expectedUpdatedAt: null });
+  wardrobe.savedUpdatedAt = wardrobe.outfits.find(outfit => outfit.id === 'plain-look').weather.updatedAt;
   await section.screenshot({ path: info.outputPath('weather-details.png') });
 
-  // A stale edit is rejected and the latest details are reloaded.
+  // An edit started before another device's change conflicts even after a
+  // refresh delivers that change, and the latest details are shown.
   wardrobe.expected.push(/\/api\/outfits\/plain-look\/weather/, /409 \(Conflict\)/);
+  await section.getByRole('button', { name: 'Edit weather details' }).click();
+  Object.assign(wardrobe.outfits.find(outfit => outfit.id === 'plain-look').weather, { note: 'Changed on another device.', updatedAt: '2026-10-22T12:30:00.000Z' });
+  const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/outfits' && response.request().method() === 'GET');
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await refreshed;
+  await section.getByRole('spinbutton', { name: 'Warmest (°C)' }).fill('15');
+  await section.getByRole('button', { name: 'Save weather details' }).click();
+  await expect(section.getByRole('alert')).toHaveText('This look’s weather details changed elsewhere. Review the current details and try again.');
+  await expect(section.getByText('Changed on another device.')).toBeVisible();
+  expect(wardrobe.weatherPosts.at(-1).expectedUpdatedAt).toBe(wardrobe.savedUpdatedAt);
+  // A stale removal is rejected the same way.
   wardrobe.outfits.find(outfit => outfit.id === 'plain-look').weather.updatedAt = '2026-10-22T13:00:00.000Z';
   await section.getByRole('button', { name: 'Remove' }).click();
   await expect(section.getByRole('alert')).toHaveText('This look’s weather details changed elsewhere. Review the current details and try again.');
