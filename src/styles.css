@@ -66,67 +66,53 @@ button { font: inherit; }
   text-transform: uppercase;
 }
 
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.gallery-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+  margin-top: 24px;
+}
+
 .category-nav {
-  width: max-content;
+  min-width: 0;
   max-width: 100%;
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 0;
-  margin: 24px 0 0;
-  border: 0;
-  border-radius: 0;
-  padding: 0;
+  gap: 4px;
   overflow-x: auto;
-  background: transparent;
-  box-shadow: none;
   scrollbar-width: none;
 }
 
 .category-nav::-webkit-scrollbar { display: none; }
 
 .category-nav button {
-  position: relative;
   flex: 0 0 auto;
-  min-height: 40px;
+  min-height: 38px;
   border: 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  padding: 10px 18px;
+  padding: 8px 14px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 520;
-  letter-spacing: .055em;
-  text-transform: uppercase;
   cursor: pointer;
-  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
-.category-nav button:first-child { border-left: 1px solid var(--line); }
-.category-nav button + button { border-left: 1px solid var(--line); }
-.category-nav button:last-child { border-right: 1px solid var(--line); }
-.category-nav button:last-child {
-  border-right: 1px solid var(--line);
-}
-
-.category-nav button::after {
-  content: none;
-}
-
-.category-nav button:hover,
-.category-nav button:focus-visible { color: var(--ink); background: rgba(25, 25, 25, .07); }
+.category-nav button:hover { color: var(--ink); background: rgba(25, 25, 25, .06); }
 
 .category-nav button.active {
   background: var(--ink);
   color: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--ink);
 }
 
 .category-nav button:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .gallery-grid {
@@ -292,7 +278,8 @@ button { font: inherit; }
 
 .viewer-heading h2 {
   margin: 0;
-  max-width: calc(100% - 48px);
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 16px;
   font-weight: 500;
   letter-spacing: .05em;
@@ -816,7 +803,6 @@ button { font: inherit; }
   .wardrobe-site-nav { margin-inline: 34px; }
   .gallery-header { padding-inline: 34px; }
   .gallery-grid { padding-inline: 32px; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap-inline: 18px; }
-  .category-nav { max-width: 100%; }
   .viewer { padding-inline: 30px; }
   .has-modeled-image .viewer-details.editing { padding-inline: 30px; }
   .modeled-heading { padding-inline: 30px; }
@@ -825,8 +811,6 @@ button { font: inherit; }
 @media (max-width: 860px) {
   .wardrobe-site-nav { min-height: 72px; margin-inline: 24px; }
   .gallery-header { padding: 28px 24px 0; }
-  .category-nav { width: 100%; margin: 24px 0 0; }
-  .category-nav button { min-height: 38px; padding: 9px 15px; font-size: 11px; }
   .gallery-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 18px 14px;
@@ -865,9 +849,9 @@ button { font: inherit; }
 @media (max-width: 520px) {
   .gallery-header { padding: max(24px, env(safe-area-inset-top)) 18px 0; }
   .piece-count { font-size: 12px; }
-  .category-nav { margin: 20px 0 0; flex-wrap: wrap; gap: 6px; overflow: visible; }
-  .category-nav button { border: 1px solid var(--line); }
-  .category-nav button { min-height: 44px; padding: 9px 14px; font-size: 10px; }
+  .gallery-filters { margin-top: 20px; }
+  .category-nav { width: calc(100% + 36px); margin-inline: -18px; padding-inline: 18px; scroll-padding-inline: 18px; }
+  .category-nav button { min-height: 44px; padding: 8px 13px; }
   .gallery-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px 8px;
@@ -895,7 +879,7 @@ button { font: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   .gallery-item img,
-  .category-nav button::after,
+  .category-nav button,
   .viewer-art-caption { transition: none; }
   .viewer-overlay,
   .viewer-entry { animation: none; }
@@ -951,15 +935,17 @@ button { font: inherit; }
 .reorder-controls button:disabled { opacity: .25; cursor: default; }
 .reorder-controls button:focus-visible { outline: 2px solid var(--accent); }
 
-.wardrobe-availability { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 16px 24px; margin-top: 20px; }
-.wardrobe-availability > .field { width: 220px; max-width: 100%; margin: 0; }
+.wardrobe-availability { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
+.wardrobe-availability > .field { width: 180px; max-width: 100%; margin: 0; }
+.wardrobe-availability > .field select { min-height: 38px; }
 .laundry-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
 .laundry-actions label, .laundry-select { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; line-height: 1.5; }
 .laundry-actions input, .laundry-select input { accent-color: var(--ink); flex-shrink: 0; }
 .availability-item { min-width: 0; }
 .availability-item > .gallery-item { width: 100%; }
 .gallery-item { position: relative; }
-.availability-badge { position: absolute; left: 8px; bottom: 8px; background: var(--paper); border: 1px solid var(--line); padding: 5px 8px; font-size: 11px; color: var(--ink); }
+.gallery-item.in-laundry img { opacity: .55; }
+.availability-badge { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); padding: 3px 9px; border: 1px solid var(--line); background: var(--paper); font-size: 11px; line-height: 1.4; color: var(--muted); white-space: nowrap; }
 .laundry-select { padding: 6px 8px; overflow-wrap: anywhere; }
 .laundry-select:focus-within, .laundry-actions label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (max-width: 520px) { .wardrobe-availability > .field { width: 100%; } }
+@media (max-width: 520px) { .wardrobe-availability > .field select { min-height: 44px; } }

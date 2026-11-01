@@ -131,7 +131,7 @@ function GalleryItem({ item, selected, onOpen, rearranging }) {
 
   return (
     <Tag
-      className={`gallery-item${selected ? " selected" : ""}`}
+      className={`gallery-item${selected ? " selected" : ""}${inLaundry(item) ? " in-laundry" : ""}`}
       type={rearranging ? undefined : "button"}
       onClick={rearranging ? undefined : () => onOpen(item.id)}
       aria-label={rearranging ? undefined : `View ${item.name || type}`}
@@ -487,16 +487,14 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
       ) : (
         <>
           <div className="viewer-heading">
-            <div>
-              <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
-            </div>
+            <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
           </div>
           {garmentArtwork}
         </>
       )}
 
       <fieldset className="viewer-details editing" disabled={saving} style={{ border: 0, minWidth: 0, margin: 0 }}>
-        <GarmentWearControls {...wearActions} ids={[item.id]} unavailable={isDirty ? "Save or discard your garment changes before logging a wear." : wearActions.unavailable} />
+        <GarmentWearControls {...wearActions} ids={[item.id]} showCount={false} unavailable={isDirty ? "Save or discard your garment changes before logging a wear." : wearActions.unavailable} />
         <GarmentRediscovery item={item} {...rediscovery} disabled={isDirty || rediscovery.busy} />
         <div className="viewer-style-action">
           <button className="secondary-button" type="button" disabled={isDirty} title={isDirty ? "Save or discard your changes first" : undefined} onClick={() => onViewOutfits(item)}>View saved outfits with this piece</button>
@@ -826,6 +824,7 @@ export function App() {
               <button className="secondary-button" type="button" aria-pressed={wearSelecting} disabled={orderSaving || availabilityBusy || garmentWearBusy || rearranging} onClick={() => { setWearSelecting(value => !value); setWearSelection([]); setLaundrySelection([]); }}>{wearSelecting ? "Done selecting" : "Log wear"}</button>
             </div>}
           </div>
+          <div className="gallery-filters">
           <nav className="category-nav" aria-label="Filter wardrobe by item type">
             {TYPES.map((type) => (
               <button
@@ -840,11 +839,12 @@ export function App() {
             ))}
           </nav>
           <div className="wardrobe-availability">
-            <label className="field"><span>Availability</span><select value={availabilityFilter} disabled={availabilityBusy || garmentWearBusy} onChange={event => { setWearSelection([]); setWearSelecting(false); setAvailabilityFilter(event.target.value); setLaundrySelection([]); setRearranging(false); setDrag(null); setAvailabilityNotice(""); }}><option value="all">All availability</option><option value="ready">Ready</option><option value="laundry">In laundry</option></select></label>
+            <label className="field"><span className="visually-hidden">Availability</span><select value={availabilityFilter} disabled={availabilityBusy || garmentWearBusy} onChange={event => { setWearSelection([]); setWearSelecting(false); setAvailabilityFilter(event.target.value); setLaundrySelection([]); setRearranging(false); setDrag(null); setAvailabilityNotice(""); }}><option value="all">All availability</option><option value="ready">Ready</option><option value="laundry">In laundry</option></select></label>
             {availabilityFilter === "laundry" && !wearSelecting ? <div className="laundry-actions">
               <label><input type="checkbox" disabled={!visibleItems.length || availabilityBusy} checked={!!visibleItems.length && selectedLaundry.length === visibleItems.length} onChange={event => setLaundrySelection(event.target.checked ? visibleItems.map(item => item.id) : [])} />Select all shown</label>
               <button className="secondary-button" type="button" disabled={!selectedLaundry.length || availabilityBusy || !!wardrobeReadError} onClick={markReady}>{availabilityBusy ? "Saving…" : `Mark ready (${selectedLaundry.length})`}</button>
             </div> : null}
+          </div>
           </div>
           {availabilityNotice ? <p className="status" role="status">{availabilityNotice}</p> : null}
           {availabilityError ? <p className="status error" role="alert">{uiErrorMessage(availabilityError)}</p> : null}

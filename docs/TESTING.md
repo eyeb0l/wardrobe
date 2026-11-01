@@ -34,6 +34,27 @@ shape, invalid output, missing key, one-at-a-time, edits made during the provide
 call win), manual edits/clears/conflicts and restart persistence, plus the hosted
 lease release for `/api/outfits/weather/estimate`. No paid model services are used.
 
+## Visual polish passes
+
+Layout and styling changes that span several views should run the full suite
+on both viewports (about 9 minutes), then inspect the saved screenshots for the
+touched views:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+WARDROBE_BROWSER_PORT=5463 \
+  WARDROBE_BROWSER_ARTIFACTS=/dev/shm/wardrobe-polish-browser \
+  npm run test:browser -- --forbid-only
+find /dev/shm/wardrobe-polish-browser -name '*.png'
+```
+
+Good screenshots to check: `wardrobe-collapsed.png`, `laundry-bulk.png`,
+`wardrobe-rearrange.png`, `garment-wear-bulk.png`, `daily-plans.png`, `shortlist-recent.png` and
+`weather-plans.png`. For views without a saved screenshot, write a temporary
+spec under `tests/browser/` that routes `**/api/**` to synthetic fixtures (copy
+the fixture from `wardrobe-rediscovery.spec.mjs`), screenshot `/`, `/outfits`
+and `/shopping`, and delete it before committing.
+
 ## Wardrobe toolbar and collapsed rediscovery
 
 Use the pinned Node 22 and headless Chromium setup below:

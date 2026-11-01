@@ -33,17 +33,19 @@ export function OutfitPlans({ plans, outfits, itemsById, days, busy, unavailable
       <p className="outfit-count">{pastPlan ? formatWearDate(date) : date === days[0] ? 'Today' : 'Tomorrow'}</p>
       {plan ? <>
         <h3>{outfit?.name || 'Saved look unavailable'}</h3>
-        {outfit ? <><p className="outfit-small">{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</p><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} /></> : null}
+        {outfit ? <><p className="outfit-small outfit-plan-occasion">{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</p><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} /></> : null}
         {outfit && forecast ? <WeatherFitLine fit={weatherFit(outfit.weather, forecast)} /> : null}
         <Availability outfit={outfit} itemsById={itemsById} unavailable={unavailable} />
         <p className="outfit-small">{wore ? 'Wear logged for this date.' : pastPlan ? 'Past plan · No wear confirmed.' : 'Planned only · No wear confirmed.'}</p>
         <div className="outfit-plan-actions">
           {outfit && date <= days[0] ? <button type="button" className="outfit-primary" disabled={busy || !!unavailable || wore} onClick={() => onWear(outfit, date)}>{wore ? 'Wear confirmed' : 'Wore this'}</button> : null}
-          {outfit ? <button type="button" className="outfit-text-button" onClick={() => onOpen(outfit.id)}>View look</button> : null}
           {!pastPlan ? <button type="button" className="outfit-secondary" disabled={busy || !!unavailable} onClick={() => onChoose(date)}>Change look</button> : null}
-          {outfit && !pastPlan ? <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onVariation(outfit, date)}>Change one piece</button> : null}
-          {outfit ? <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onChoose(date === days[1] ? days[0] : days[1], outfit.id, date)}>{date === days[1] ? 'Move to today' : 'Move to tomorrow'}</button> : null}
-          <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onClear(date)}>Clear plan</button>
+          <div className="outfit-plan-links">
+            {outfit ? <button type="button" className="outfit-text-button" onClick={() => onOpen(outfit.id)}>View look</button> : null}
+            {outfit && !pastPlan ? <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onVariation(outfit, date)}>Change one piece</button> : null}
+            {outfit ? <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onChoose(date === days[1] ? days[0] : days[1], outfit.id, date)}>{date === days[1] ? 'Move to today' : 'Move to tomorrow'}</button> : null}
+            <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onClear(date)}>Clear plan</button>
+          </div>
         </div>
       </> : <><h3>Leave one less decision for later.</h3><p className="outfit-small">Choose a saved look. You can change it any time.</p><button type="button" className="outfit-secondary" disabled={busy || !!unavailable || !outfits.length} onClick={() => onChoose(date)}>Choose look</button></>}
     </article>;
