@@ -35,8 +35,10 @@ export function OutfitPlans({ plans, outfits, itemsById, days, busy, unavailable
         <h3>{outfit?.name || 'Saved look unavailable'}</h3>
         {outfit ? <><p className="outfit-small outfit-plan-occasion">{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</p><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} /></> : null}
         {outfit && forecast ? <WeatherFitLine fit={weatherFit(outfit.weather, forecast)} /> : null}
-        <Availability outfit={outfit} itemsById={itemsById} unavailable={unavailable} />
-        <p className="outfit-small">{wore ? 'Wear logged for this date.' : pastPlan ? 'Past plan · No wear confirmed.' : 'Planned only · No wear confirmed.'}</p>
+        <div className="outfit-plan-status">
+          <Availability outfit={outfit} itemsById={itemsById} unavailable={unavailable} />
+          <p className="outfit-small">{wore ? 'Wear logged for this date.' : pastPlan ? 'Past plan · No wear confirmed.' : 'Planned only · No wear confirmed.'}</p>
+        </div>
         <div className="outfit-plan-actions">
           {outfit && date <= days[0] ? <button type="button" className="outfit-primary" disabled={busy || !!unavailable || wore} onClick={() => onWear(outfit, date)}>{wore ? 'Wear confirmed' : 'Wore this'}</button> : null}
           {!pastPlan ? <button type="button" className="outfit-secondary" disabled={busy || !!unavailable} onClick={() => onChoose(date)}>Change look</button> : null}
