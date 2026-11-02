@@ -170,7 +170,7 @@ function AccessorySuggestions({ outfit, visible = true }) {
 
 function OutfitDetails({ outfit, itemsById, visible = true, activity, children, showAccessories = true }) {
   return <div className="outfit-detail-layout">
-    <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className="outfit-photo-fallback" role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <Photo key={outfit.image || outfit.id} src={outfit.image} alt={`${outfit.name}, ${outfit.imageKind === "cutouts" ? "cutout preview" : "modelled head to toe"}`} sizes={DETAIL_PHOTO_SIZES} priority />}</div>
+    <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className={`outfit-photo-fallback${outfit.status === "generating" ? " is-generating" : ""}`} role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <Photo key={outfit.image || outfit.id} src={outfit.image} alt={`${outfit.name}, ${outfit.imageKind === "cutouts" ? "cutout preview" : "modelled head to toe"}`} sizes={DETAIL_PHOTO_SIZES} priority />}</div>
     <div className="outfit-detail-copy">
       {outfit.imageKind === "cutouts" ? <p className="outfit-occasion">Cutout preview</p> : null}
       {activity}
@@ -266,7 +266,7 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob, visible 
     </div>
     {outfits.length ? <>
       <nav className="outfit-review-strip" aria-label="Choose an outfit to review">{outfits.map((outfit, index) => <button type="button" key={outfit.id} className={outfit.id === selected?.id ? "selected" : ""} onClick={() => select(outfit.id)} aria-pressed={outfit.id === selected?.id} aria-label={`${index + 1}. ${outfit.name}: ${outfit.status === "review" ? "ready to review" : outfit.status === "accepted" ? "added to collection" : outfit.status === "failed" ? "needs a retry" : outfit.status === "rejected" ? "rejected" : "creating photo"}`}>
-        {outfit.image ? <Photo src={outfit.image} alt="" sizes="40px" /> : <span className="outfit-review-number">{String(index + 1).padStart(2, "0")}</span>}
+        {outfit.image ? <Photo src={outfit.image} alt="" sizes="40px" /> : <span className={`outfit-review-number${outfit.status === "generating" ? " is-generating" : ""}`}>{String(index + 1).padStart(2, "0")}</span>}
         <span>{outfit.name}</span>{outfit.status === "accepted" ? <Check size={14} aria-hidden="true" /> : null}
       </button>)}</nav>
       <h3 className="outfit-review-title">{selected.name}</h3>
