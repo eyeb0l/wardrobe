@@ -49,7 +49,15 @@ export function ReferencePhotos({ config, onChange, disabled = false }) {
         body: JSON.stringify({ imageDataUrl: dataUrl, ...(reference?.imageUrl ? { previousImageUrl: reference.imageUrl } : {}) }),
       });
       const value = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(uiErrorMessage(value.error, "The reference photo couldn’t be saved. Please try again."));
+      if (!response.ok) {
+        // Another device changed the photos: show the current ones so the
+        // next confirmation is made against what is actually saved.
+        if (response.status === 409) {
+          const latest = await fetch("/api/import/config", { cache: "no-store" }).then((result) => result.ok ? result.json() : null).catch(() => null);
+          if (latest) { onChange(latest); setPending(null); }
+        }
+        throw new Error(uiErrorMessage(value.error, "The reference photo couldn’t be saved. Please try again."));
+      }
       onChange(value);
       const label = reference?.label || value.modelReferences?.find((item) => item.id === value.createdReferenceId)?.label || "New reference";
       const name = label === "Default" ? "Default reference" : label;

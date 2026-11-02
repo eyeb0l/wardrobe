@@ -19,7 +19,8 @@ test('reference photos can be added, compared, replaced and extended from Setup 
   for (const name of await readdir(data)) if (name.startsWith('model-reference')) await rm(join(data, name), { force: true });
   const health = { errors: [], failedRequests: [], httpErrors: [] };
   page.on('pageerror', error => health.errors.push(error.message));
-  page.on('console', message => { if (message.type() === 'error') health.errors.push(message.text()); });
+  // The stale-photo check below expects exactly one 409 from the replace route.
+  page.on('console', message => { if (message.type() === 'error' && !/409 \(Conflict\)/.test(message.text())) health.errors.push(message.text()); });
   page.on('requestfailed', request => { if (!request.failure()?.errorText.includes('ERR_ABORTED')) health.failedRequests.push(request.url()); });
   page.on('response', response => { if (response.status() >= 400) health.httpErrors.push(`${response.status()} ${response.url()}`); });
   const shot = (name) => page.screenshot({ path: testInfo.outputPath(`${name}-${testInfo.project.name}.png`), fullPage: true });
@@ -70,6 +71,22 @@ test('reference photos can be added, compared, replaced and extended from Setup 
     return [...canvas.getContext('2d').getImageData(0, 0, 1, 1).data.slice(0, 3)];
   }), [0x33, 0x66, 0xaa]), { message: 'the open page shows the new photo, not a cached copy' }).toBe(true);
 
+  // Another device replaces the photo while this dialog is open: the save is
+  // refused, the current photo is shown, and a fresh confirmation succeeds.
+  await writeFile(join(data, 'model-reference.png'), await sharp({ create: { width: 900, height: 900, channels: 3, background: '#996633' } }).png().toBuffer());
+  await choose(references.getByRole('button', { name: 'Replace Default reference' }), await file('again.jpg', 1000, 1000, '#222222'));
+  await references.getByRole('button', { name: 'Replace photo' }).click();
+  await expect(references.getByRole('alert')).toHaveText(/changed since you opened it/);
+  await expect.poll(async () => close(await thumbnail.evaluate(image => {
+    const canvas = Object.assign(document.createElement('canvas'), { width: 1, height: 1 });
+    canvas.getContext('2d').drawImage(image, 0, 0, 1, 1);
+    return [...canvas.getContext('2d').getImageData(0, 0, 1, 1).data.slice(0, 3)];
+  }), [0x99, 0x66, 0x33]), { message: 'the conflict shows the photo saved elsewhere' }).toBe(true);
+  await choose(references.getByRole('button', { name: 'Replace Default reference' }), await file('again.jpg', 1000, 1000, '#222222'));
+  await references.getByRole('button', { name: 'Replace photo' }).click();
+  await expect(references.getByRole('status')).toHaveText(/Default reference replaced/);
+  expect(close(await pixel(join(data, 'model-reference.png')), [0x22, 0x22, 0x22])).toBe(true);
+
   await choose(references.getByRole('button', { name: 'Add another photo' }), await file('second.jpg', 768, 1024, '#447744'));
   await references.getByRole('button', { name: 'Save photo' }).click();
   await expect(references.getByRole('status')).toHaveText('Reference 2 added.');
@@ -81,5 +98,6 @@ test('reference photos can be added, compared, replaced and extended from Setup 
   const healthFile = testInfo.outputPath('browser-health.json');
   await mkdir(dirname(healthFile), { recursive: true });
   await writeFile(healthFile, JSON.stringify(health, null, 2));
-  expect(health).toEqual({ errors: [], failedRequests: [], httpErrors: [] });
+  expect(health.httpErrors.map(entry => entry.replace(/\?.*$/, '').replace(/^409 https?:\/\/[^/]+/, '409 '))).toEqual(['409 /api/import/model-references/default']);
+  expect({ ...health, httpErrors: [] }).toEqual({ errors: [], failedRequests: [], httpErrors: [] });
 });
