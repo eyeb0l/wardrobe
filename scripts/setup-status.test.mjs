@@ -48,8 +48,11 @@ for (const scenario of [
     assert.equal(status.hasModelReference, scenario.reference);
     assert.equal(status.ready, Boolean(scenario.key.trim()) && scenario.reference);
     assert.equal(status.setupMode, scenario.hosted ? "hosted" : "local");
+    // This reference lives outside the data folder, so the app must not overwrite it.
+    assert.equal(status.canSetDefaultReference, false);
+    assert.deepEqual(status.modelReferences.map(({ id, editable }) => [id, editable]), scenario.reference ? [["default", false]] : []);
     assert.doesNotMatch(body, /test-private-key|private-database-url|private-blob-token/);
-    assert.deepEqual(Object.keys(status).sort(), ["hasApiKey", "hasModelReference", "imageChecks", "modelReference", "modelReferences", "ready", "setupMode"].sort());
+    assert.deepEqual(Object.keys(status).sort(), ["canSetDefaultReference", "hasApiKey", "hasModelReference", "imageChecks", "modelReference", "modelReferences", "ready", "setupMode"].sort());
     await assert.rejects(stat(path.join(root, ".env")), { code: "ENOENT" });
   });
 }

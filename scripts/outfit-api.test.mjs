@@ -20,7 +20,7 @@ test("configuration uses current model precedence, custom data root and numbered
   assert.equal(config.availableCombinations, 18);
   assert.equal(config.maxCount, 12);
   assert.deepEqual(config.modelReferences.map((item) => item.id), ["default", "model-reference-2"]);
-  assert.equal(config.modelReferences[1].imageUrl, "/api/import/model-references/model-reference-2");
+  assert.match(config.modelReferences[1].imageUrl, /^\/api\/import\/model-references\/model-reference-2\?v=[a-z0-9]+-[a-z0-9]+$/);
   assert.ok(!JSON.stringify(config).includes("outfit-test-key"));
   await rm(path.join(h.root, "identity.png"));
   const secondOnly = await h.request("GET", `${API}/config`);

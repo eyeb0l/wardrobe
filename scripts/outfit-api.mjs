@@ -20,6 +20,7 @@ import { assertSameOriginMutation } from "./request-guards.mjs";
 import { mapLimit } from "./map-limit.mjs";
 import { contactThumbnail, contactTiles } from "./contact-tiles.mjs";
 import { WEATHER_GUIDANCE, WEATHER_SCHEMA, normalizeWeather, weatherRecord } from "../shared/outfit-weather.mjs";
+import { publicModelReferences } from "./model-reference-url.mjs";
 export { contactThumbnail } from "./contact-tiles.mjs";
 
 const API = "/api/outfits";
@@ -530,7 +531,7 @@ Looks: ${JSON.stringify(looks)}`;
     const hasModelReference = refs.length > 0;
     const combinations = outfitCombinations(items, await usedPairs(items));
     const availableCombinations = combinations.total;
-    return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), counts, maxCount: 12, availableCombinations, garmentCombinations: combinations.byGarment, models: models(), imageChecks: imageCheckConfig("outfit-review", { ...process.env, ...options.env }) };
+    return { ready: hasApiKey && hasModelReference && availableCombinations > 0, hasApiKey, hasModelReference, modelReferences: await publicModelReferences(refs), counts, maxCount: 12, availableCombinations, garmentCombinations: combinations.byGarment, models: models(), imageChecks: imageCheckConfig("outfit-review", { ...process.env, ...options.env }) };
   }
 
   async function apiRequest(endpoint, init, telemetry, beforeTelemetry) {

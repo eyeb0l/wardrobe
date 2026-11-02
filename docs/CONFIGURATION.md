@@ -23,7 +23,9 @@ See [model compatibility and prompt checks](model-migration.md) for API contract
 
 ## Model references
 
-For additional local references, add `model-reference-2.png`, `model-reference-3.png`, etc. under `WARDROBE_DATA_DIR`. The default remains the path in `WARDROBE_MODEL_REFERENCE`; changing the data directory does not move that default automatically. Choose a thumbnail in **Model reference** before approving a garment or regenerating its modelled image. Each generation uses one reference; imports save the selection for retries. **Refresh photos** discovers added references without restarting. Local reference files do not update hosted references.
+To add or replace reference photos from the app, open **Setup & guide → Reference photos**. Choose **Replace** under a photo or **Add another photo**; the app shows the current and new photo side by side and saves only after you confirm. Uploads accept JPEG, PNG, WebP or HEIC (converted in the browser), at least 512 pixels on the shorter side, and are saved as metadata-free PNGs. Imports, retries and new outfits that select a replaced reference use the new photo; photos you've already saved are unchanged. If someone else replaced the same photo since you opened it, the save is refused so you can review the current one. The app writes only inside `WARDROBE_DATA_DIR`: a local default configured elsewhere through `WARDROBE_MODEL_REFERENCE` stays read-only (replace that file directly), and a symbolic link at a reference path is replaced rather than written through.
+
+For additional local references, you can also add `model-reference-2.png`, `model-reference-3.png`, etc. under `WARDROBE_DATA_DIR`. The default remains the path in `WARDROBE_MODEL_REFERENCE`; changing the data directory does not move that default automatically. Choose a thumbnail in **Model reference** before approving a garment or regenerating its modelled image. Each generation uses one reference; imports save the selection for retries. **Refresh photos** discovers added references without restarting. Local reference files do not update hosted references.
 
 ## Storage and privacy
 

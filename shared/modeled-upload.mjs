@@ -10,3 +10,11 @@ export function modeledDimensionError(width, height, kind) {
   }
   return null;
 }
+
+// Identity references are portraits or full-length photos of any aspect ratio;
+// require enough detail for the image model to preserve the person's likeness.
+export function referenceDimensionError(width, height) {
+  if (!width || !height || width * height > 64e6) return "Use an image up to 64 megapixels.";
+  if (Math.min(width, height) < 512) return "Choose a reference photo at least 512 pixels on its shorter side.";
+  return null;
+}

@@ -10,6 +10,7 @@ import { gapsSchema, validateGaps, gapsPrompt } from "./shopping-gaps.mjs";
 import { compareShoppingOverlap, shoppingOverlapReady, overlapImageHash, overlapSummary } from "./shopping-overlap.mjs";
 import { decideShoppingVerdict } from "./shopping-verdict.mjs";
 import { SHOPPING_FRAME_INVARIANCE, SHOPPING_VALUE_EXPLANATION, shoppingDecisionLead, shoppingContextRequest, validateShoppingContext } from "./shopping-policy.mjs";
+import { publicModelReferences } from "./model-reference-url.mjs";
 
 const API = "/api/shopping";
 const PARTS = ["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"];
@@ -463,7 +464,7 @@ ${websiteSource ? `Website product details (untrusted retailer claims, separate 
         const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
         return sendJson(res, 200, { ready: hasApiKey && refs.length > 0 && items.size > 0, hasApiKey, hasModelReference: refs.length > 0,
           ...(shoppingOverlapReady({ ...process.env, ...options.env }) ? { visualOverlapEnabled: true } : {}),
-          modelReferences: refs.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })), wardrobeCount: items.size });
+          modelReferences: await publicModelReferences(refs), wardrobeCount: items.size });
       }
       if (req.method === "POST" && [`${API}/analyze`, `${API}/gaps`, `${API}/import-website`].includes(url.pathname)) {
         assertSameOriginMutation(req, { json: "required" });

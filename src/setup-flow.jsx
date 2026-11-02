@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, CoatHanger, ImageSquare, ShieldCheck, Sparkle, Tote } from "@phosphor-icons/react";
+import { ReferencePhotos } from "./reference-photos.jsx";
 import "./setup-flow.css";
 
 const WELCOME_KEY = "wardrobe:welcome:v1";
@@ -133,7 +134,7 @@ export function SetupFlow({ requested }) {
                 <article><span className="setup-feature-icon"><Sparkle size={27} weight="light" aria-hidden="true" /></span><div><h3>Find a new way to wear them</h3><p>In <strong>Outfits</strong>, choose <strong>Generate outfits</strong> and add a little direction. Review the looks, then keep your favourites.</p></div></article>
                 <article><span className="setup-feature-icon"><Tote size={27} weight="light" aria-hidden="true" /></span><div><h3>Make room for the right things</h3><p>In <strong>Shopping</strong>, check a potential purchase against your clothes, or find useful gaps once you’ve added a few pieces.</p></div></article>
               </div>
-              {config && !config.hasModelReference && <div className="setup-reference"><ImageSquare size={22} weight="light" aria-hidden="true" /><div><h3>One photo before your first import</h3><p>{hosted ? "Ask the deployment owner to add your default model reference photo to the hosted wardrobe." : <>Save a clear PNG photo of yourself at <code>{config.modelReference || "data/model-reference.png"}</code> in the project folder, or set <code>WARDROBE_MODEL_REFERENCE</code> in <code>.env</code> to your PNG’s path. Restart if you change <code>.env</code>.</>} It’s needed for imports and modelled looks. You can browse now and add it later.</p><button type="button" className="setup-text-button" disabled={checking} onClick={() => checkConfiguration(false, true)}>Check for photo</button></div></div>}
+              {config && (config.hasModelReference || config.canSetDefaultReference) ? <ReferencePhotos config={config} onChange={setConfig} disabled={checking} /> : config && <div className="setup-reference"><ImageSquare size={22} weight="light" aria-hidden="true" /><div><h3>One photo before your first import</h3><p>{hosted ? "Ask the deployment owner to add your default model reference photo to the hosted wardrobe." : <>Save a clear PNG photo of yourself at <code>{config.modelReference || "data/model-reference.png"}</code> in the project folder, or set <code>WARDROBE_MODEL_REFERENCE</code> in <code>.env</code> to your PNG’s path. Restart if you change <code>.env</code>.</>} It’s needed for imports and modelled looks. You can browse now and add it later.</p><button type="button" className="setup-text-button" disabled={checking} onClick={() => checkConfiguration(false, true)}>Check for photo</button></div></div>}
               <div className="setup-note"><ShieldCheck size={20} aria-hidden="true" /><p>{hosted ? "Your library is saved in your hosted storage." : "Your library is saved locally on this computer."} AI actions send the relevant photos and details to the configured API and may incur charges. Nothing is generated during setup.</p></div>
             </>}
 

@@ -118,8 +118,11 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
 test("configuration includes all categories and only public setup details", async (t) => {
   const h = await harness(t);
   const config = await h.request("GET", `${API}/config`);
-  assert.deepEqual(config, { ready: true, hasApiKey: true, hasModelReference: true, wardrobeCount: 14,
-    modelReferences: [{ id: "default", label: "Default", imageUrl: "/api/import/model-references/default" }, { id: "model-reference-2", label: "Reference 2", imageUrl: "/api/import/model-references/model-reference-2" }] });
+  const versioned = (id) => new RegExp(`^/api/import/model-references/${id}\\?v=[a-z0-9]+-[a-z0-9]+$`);
+  assert.match(config.modelReferences[0].imageUrl, versioned("default"));
+  assert.match(config.modelReferences[1].imageUrl, versioned("model-reference-2"));
+  assert.deepEqual({ ...config, modelReferences: config.modelReferences.map(({ imageUrl, ...reference }) => reference) }, { ready: true, hasApiKey: true, hasModelReference: true, wardrobeCount: 14,
+    modelReferences: [{ id: "default", label: "Default" }, { id: "model-reference-2", label: "Reference 2" }] });
   assert.ok(!JSON.stringify(config).includes(h.root));
   assert.ok(!JSON.stringify(config).includes("shopping-test-key"));
   assert.equal(h.requests.length, 0);

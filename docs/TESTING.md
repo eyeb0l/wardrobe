@@ -75,6 +75,39 @@ rearranging and wear logging flows still work. Inspect `wardrobe-collapsed.png`,
 `rediscovery-first-viewport.png` and `browser-health.json`. All data is synthetic;
 no private wardrobe data or paid AI calls are used.
 
+## Reference photos
+
+Use the pinned Node 22 and headless Chromium setup below. Choose an unused port
+and fresh artifact directory:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/import-job-api.test.mjs scripts/setup-status.test.mjs scripts/cloud-runtime.test.mjs scripts/outfit-api.test.mjs scripts/shopping-api.test.mjs
+WARDROBE_BROWSER_PORT=5427 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-refphotos-browser \
+  npm run test:browser -- tests/browser/reference-photos.spec.mjs
+rg --files /tmp/wardrobe-refphotos-browser
+```
+
+The browser test uses the real local API against Playwright's isolated
+`fixture-data` directory (no route mocks, no API key). Desktop and mobile cover
+**Setup & guide → Reference photos**: rejecting a photo under 512 px, adding the
+first default, comparing current and new photos, cancelling without changes,
+replacing (the file on disk and the open page's thumbnail both change), and
+adding Reference 2. Inspect `reference-replace-confirm-*.png`,
+`reference-photos-saved-*.png` and `browser-health.json`.
+
+The Node tests cover replace/add validation, stale-confirmation 409s, metadata
+stripping, symlinks being replaced rather than written through, a local default
+outside the data folder staying read-only, versioned reference URLs in the
+import, outfit and Shopping configs, and the hosted path through the real
+import plugin with a PGlite cloud store and private in-memory Blobs.
+
+Reviewed synthetic screenshots: [desktop confirmation](screenshots/reference-photos/replace-confirm-desktop.png),
+[mobile confirmation](screenshots/reference-photos/replace-confirm-mobile.png),
+[desktop saved](screenshots/reference-photos/saved-desktop.png), and
+[mobile saved](screenshots/reference-photos/saved-mobile.png).
+
 ## Save what you wore
 
 Use the pinned Node 22 and headless Chromium setup below. Choose an unused port

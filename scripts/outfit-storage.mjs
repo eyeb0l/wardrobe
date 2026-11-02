@@ -23,8 +23,13 @@ const temporarySibling = (file) => path.join(path.dirname(file), `.outfit-write-
 // A store declaring atomicWrites (the cloud store: one fenced row write) needs
 // no temporary sibling and second round trip. Local files use write + rename;
 // `copyFallback` keeps the importer's copy for filesystems that refuse rename.
-export async function atomicJson(file, value, { mode, copyFallback = false } = {}) {
-  const contents = `${JSON.stringify(value, null, 2)}\n`;
+export async function atomicJson(file, value, options) {
+  return atomicFile(file, `${JSON.stringify(value, null, 2)}\n`, options);
+}
+
+// Replaces the file (or a symlink at its path) without writing through it, so
+// a reader sees either the previous contents or the complete new contents.
+export async function atomicFile(file, contents, { mode, copyFallback = false } = {}) {
   if (currentStorage()?.atomicWrites) return writeFile(file, contents);
   const temporary = temporarySibling(file);
   try {
