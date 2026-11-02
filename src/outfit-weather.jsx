@@ -31,19 +31,19 @@ function WeatherDay({ label, day, loading }) {
 
 // Compact forecast beside "Your plans". Nothing is fetched until a location is chosen.
 export function WeatherPanel({ weather, onChangeLocation, disabled = false }) {
-  if (!weather.location) return <aside className="outfit-weather" aria-label="Weather">
-    <p className="outfit-weather-title">Weather</p>
-    <p className="outfit-weather-meta">Add a location to match your looks to the forecast.</p>
+  if (!weather.location) return <aside className="outfit-weather outfit-weather-empty" aria-label="Weather">
+    <div><p className="outfit-weather-title">Weather</p>
+    <p className="outfit-weather-meta">Add a location to match your looks to the forecast.</p></div>
     <button type="button" className="outfit-secondary" onClick={onChangeLocation} disabled={disabled}><MapPin size={16} aria-hidden="true" />Add location</button>
   </aside>;
   return <aside className="outfit-weather" aria-label="Weather" aria-busy={weather.loading}>
     <div className="outfit-weather-header">
       <p className="outfit-weather-title"><MapPin size={14} aria-hidden="true" /><span>{weather.location.name}</span></p>
       <button type="button" className="outfit-text-button" onClick={onChangeLocation} disabled={disabled} aria-label={`Change weather location, currently ${weather.location.name}`}>Change</button>
+      <p className="outfit-weather-credit">Forecast by <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a></p>
     </div>
     {weather.days.map((day, index) => <WeatherDay key={WEATHER_DAY_LABELS[index]} label={WEATHER_DAY_LABELS[index]} day={day} loading={weather.loading} />)}
-    {weather.error ? <p className="outfit-weather-meta outfit-plan-warning" role="status">{weather.error} <button type="button" className="outfit-text-button" onClick={() => { void weather.refresh(); }}>Retry forecast</button></p> : null}
-    <p className="outfit-weather-credit">Forecast by <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a></p>
+    {weather.error ? <p className="outfit-weather-meta outfit-plan-warning outfit-weather-error" role="status">{weather.error} <button type="button" className="outfit-text-button" onClick={() => { void weather.refresh(); }}>Retry forecast</button></p> : null}
   </aside>;
 }
 
