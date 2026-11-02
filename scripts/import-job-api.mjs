@@ -15,12 +15,13 @@ import { decisionUsageLog } from "./decision-usage.mjs";
 import path from "node:path";
 import sharp from "sharp";
 import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
-import { normalizeModeledUpload } from "./modeled-upload.mjs";
+import { normalizeModeledUpload, normalizeReferenceUpload } from "./modeled-upload.mjs";
+import { modelReferenceImageUrl, publicModelReferences } from "./model-reference-url.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 import { buildModeledPhotoPrompt, buildModeledSettingPrompt, normalizeModeledSetting } from "./modeled-photo-prompts.mjs";
 import { importWebsiteProduct } from "./website-import.mjs";
 import { isDetectionRetryRunning } from "../shared/detection-retry.mjs";
-import { atomicJson as sharedAtomicJson } from "./outfit-storage.mjs";
+import { atomicJson as sharedAtomicJson, atomicFile, publishImage } from "./outfit-storage.mjs";
 import { assertSameOriginMutation } from "./request-guards.mjs";
 
 const API_ROOT = "/api/import/jobs";
@@ -331,6 +332,7 @@ export function wardrobeImportApi(options = {}) {
   // empty; there the writer lease and durable task records serialize work.
   let running = new Map();
   const preparingModeled = new Map();
+  const referenceWrites = globalThis[Symbol.for("wardrobe.import-api.reference-writes.v1")] ||= new Map();
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
   const apiBaseUrl = () => setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, "");
   const timeoutMs = options.requestTimeoutMs ?? (options.serverless ? 210_000 : undefined);
@@ -362,18 +364,69 @@ export function wardrobeImportApi(options = {}) {
     return reference;
   }
 
+  // The app writes references only inside its data directory. A local default
+  // configured elsewhere (for example, a photo in another folder) is the
+  // user's own file and stays read-only here; hosted references always qualify.
+  const defaultReferenceWritable = () => path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png")) === path.join(dataDir, "model-reference.png");
+
+  async function replaceModelReference(id, input) {
+    const check = async () => {
+      const current = (await modelReferences()).find((item) => item.id === id);
+      if (id === "default" ? !defaultReferenceWritable() : !current) {
+        throw Object.assign(new Error(id === "default" ? "This default reference is a file outside the wardrobe data folder. Replace that file directly." : "This reference photo is no longer available. Refresh the reference photos and try again."), { status: id === "default" ? 409 : 404 });
+      }
+      return current;
+    };
+    await check();
+    const bytes = await normalizeReferenceUpload(input);
+    const file = path.join(dataDir, id === "default" ? "model-reference.png" : `${id}.png`);
+    // Hosted writes already hold the writer lease; this orders local requests
+    // so the version check and the write it guards cannot interleave.
+    const previous = referenceWrites.get(file) || Promise.resolve();
+    const write = previous.then(async () => {
+      const current = await check();
+      // The person confirmed replacing the photo they were shown. If another
+      // device changed it since, keep both decisions visible rather than clobbering.
+      const expected = typeof input.previousImageUrl === "string" ? input.previousImageUrl : null;
+      if ((current ? await modelReferenceImageUrl(current.id, current.path) : null) !== expected) {
+        throw Object.assign(new Error("This reference photo changed since you opened it. Review the current photo, then try again."), { status: 409 });
+      }
+      await mkdir(dataDir, { recursive: true });
+      await atomicFile(current?.path ?? file, bytes);
+    });
+    const settled = write.catch(() => {});
+    referenceWrites.set(file, settled);
+    try { await write; }
+    finally { if (referenceWrites.get(file) === settled) referenceWrites.delete(file); }
+  }
+
+  async function addModelReference(input) {
+    const bytes = await normalizeReferenceUpload(input);
+    await mkdir(dataDir, { recursive: true });
+    const used = (await readdir(dataDir)).map((name) => Number(name.match(/^model-reference-([1-9]\d*)\.png$/)?.[1])).filter(Number.isSafeInteger);
+    const id = `model-reference-${Math.max(1, ...used) + 1}`;
+    try { await publishImage(path.join(dataDir, `${id}.png`), bytes); }
+    catch (error) {
+      if (error.status === 409) throw Object.assign(new Error("Another reference photo was added at the same time. Refresh the reference photos and try again."), { status: 409 });
+      throw error;
+    }
+    return id;
+  }
+
   async function setupStatus() {
     const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
     const referenceSetting = setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png");
     const references = await modelReferences();
     const hasModelReference = references.some((item) => item.id === "default");
+    const canSetDefaultReference = defaultReferenceWritable();
     return {
       ready: hasApiKey && hasModelReference,
       setupMode: options.serverless ? "hosted" : "local",
       hasApiKey,
       hasModelReference,
       modelReference: referenceSetting,
-      modelReferences: references.map(({ id, label }) => ({ id, label, imageUrl: `/api/import/model-references/${id}` })),
+      canSetDefaultReference,
+      modelReferences: await publicModelReferences(references, (reference) => reference.id !== "default" || canSetDefaultReference),
       imageChecks: decisionsConfig({ ...process.env, ...options.env }),
     };
   }
@@ -800,7 +853,15 @@ export function wardrobeImportApi(options = {}) {
       if (url.pathname === "/api/import/config" && req.method === "GET") {
         return json(res, 200, await setupStatus());
       }
+      if (url.pathname === "/api/import/model-references" && req.method === "POST") {
+        const id = await addModelReference(await body(req, MODELED_UPLOAD_BODY_BYTES, true));
+        return json(res, 201, { ...await setupStatus(), createdReferenceId: id });
+      }
       const referenceMatch = url.pathname.match(/^\/api\/import\/model-references\/(default|model-reference-[1-9]\d*)$/);
+      if (referenceMatch && req.method === "PUT") {
+        await replaceModelReference(referenceMatch[1], await body(req, MODELED_UPLOAD_BODY_BYTES, true));
+        return json(res, 200, await setupStatus());
+      }
       if (referenceMatch && req.method === "GET") {
         const reference = await resolveModelReference(referenceMatch[1]);
         if (await sendDisplayImage(req, res, reference.path, url)) return;

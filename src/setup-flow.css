@@ -43,6 +43,29 @@
 .setup-reference h3 { font-size: 13px; }
 .setup-reference p { font-size: 12px; }
 .setup-reference .setup-text-button { font-size: 12px; margin-top: 7px; padding: 5px 0; min-height: 32px; }
+.reference-photos { border: 1px solid var(--line); padding: 16px; border-radius: 8px; margin: 0 0 22px; }
+.reference-photos__heading { display: flex; align-items: flex-start; gap: 12px; }
+.reference-photos__heading > svg { flex-shrink: 0; color: var(--accent); margin-top: 1px; }
+.reference-photos h3 { font-size: 13px; }
+.reference-photos p { color: var(--muted); font-size: 12px; line-height: 1.65; margin: 0; }
+.reference-photos__list { list-style: none; padding: 0; margin: 16px 0 0 34px; display: flex; flex-wrap: wrap; gap: 14px; }
+.reference-photos__list li { display: grid; justify-items: start; gap: 4px; width: 96px; font-size: 11px; color: var(--ink); }
+.reference-photos__list img, .reference-photos__compare img { display: block; width: 96px; height: 120px; object-fit: cover; border-radius: 6px; background: #e9e4da; border: 1px solid var(--line); }
+.reference-photos__list .setup-text-button { min-height: 32px; padding: 4px 0; font-size: 12px; }
+.reference-photos__actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 12px 0 0 34px; }
+.reference-photos__actions .setup-primary { gap: 10px; padding: 11px 18px; min-height: 44px; }
+.reference-photos__add { display: inline-flex; align-items: center; gap: 6px; }
+.reference-photos__status { font-size: 12px; color: var(--muted); }
+.reference-photos__confirm { margin: 16px 0 0 34px; }
+.reference-photos__confirm > p { color: var(--ink); }
+.reference-photos__confirm .reference-photos__actions { margin-left: 0; }
+.reference-photos__compare { display: flex; gap: 14px; margin: 0 0 12px; }
+.reference-photos__compare figure { margin: 0; }
+.reference-photos__compare img { width: 128px; height: 160px; }
+.reference-photos__compare figcaption { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.reference-photos .setup-feedback { margin: 12px 0 0 34px; }
+.reference-photos__spinner { animation: reference-photos-spin 1s linear infinite; }
+@keyframes reference-photos-spin { to { transform: rotate(360deg); } }
 .setup-actions { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; margin-top: 28px; }
 .setup-primary { display: inline-flex; justify-content: center; align-items: center; gap: 18px; padding: 14px 22px; min-height: 48px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); border-radius: 6px; cursor: pointer; font-size: 13px; }
 .setup-primary:hover { background: #36332e; }
@@ -72,6 +95,7 @@
   .setup-content h1 { font-size: 32px; }
   .setup-lead { margin-bottom: 24px; }
   .setup-actions { gap: 14px; }
+  .reference-photos__list, .reference-photos__actions, .reference-photos__confirm, .reference-photos .setup-feedback { margin-left: 0; }
   .setup-nav-button { font-size: 11px; padding-left: 0; }
   .app-shell .wardrobe-site-nav { column-gap: 16px; }
 }

@@ -43,12 +43,14 @@ async function harness(t, env = {}, beforePaidCall, options = {}) {
   const libraryReads = [];
   let failCandidateSave = false;
   let jobSavedHook;
+  let beforeRename;
   const storage = { ...fileSystem, async readFile(filename, ...args) {
     const bytes = await fileSystem.readFile(filename, ...args);
     if (/\.(?:png|jpe?g|webp)$/i.test(String(filename))) imageReads.push({ file: String(filename), bytes: Buffer.byteLength(bytes) });
     if (path.basename(String(filename)) === "library.json") libraryReads.push(String(filename));
     return bytes;
   }, async rename(source, destination) {
+    await beforeRename?.(destination);
     await fileSystem.rename(source, destination);
     if (jobSavedHook && path.basename(destination) === 'job.json') {
       await jobSavedHook(JSON.parse(await fileSystem.readFile(destination, 'utf8')));
@@ -125,7 +127,7 @@ async function harness(t, env = {}, beforePaidCall, options = {}) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, setJobSavedHook(value) { jobSavedHook = value; }, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
+  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, setJobSavedHook(value) { jobSavedHook = value; }, setBeforeRename(value) { beforeRename = value; }, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
@@ -539,6 +541,78 @@ test("reference discovery keeps the configured default and finds numbered PNGs i
   await writeFile(path.join(h.root, "data", "model-reference-6.png"), h.identity);
   const refreshed = await h.request("GET", "/api/import/config");
   assert.ok(refreshed.modelReferences.some((reference) => reference.id === "model-reference-6"), "new photos appear without a server restart");
+});
+
+const referenceUpload = async (width, height, background = "#886655", format = "jpeg") =>
+  `data:image/${format};base64,${(await sharp({ create: { width, height, channels: 3, background } }).withMetadata({ exif: { IFD0: { Copyright: "private-camera" } } })[format]().toBuffer()).toString("base64")}`;
+
+test("reference photos can be replaced and added from the app without writing through links", async (t) => {
+  const h = await harness(t, { WARDROBE_MODEL_REFERENCE: "data/model-reference.png" });
+  const data = path.join(h.root, "data");
+  await mkdir(data, { recursive: true });
+  const empty = await h.request("GET", "/api/import/config");
+  assert.equal(empty.hasModelReference, false);
+  assert.equal(empty.canSetDefaultReference, true);
+
+  // The first default is created without a previous photo to confirm.
+  const created = await h.request("PUT", "/api/import/model-references/default", { imageDataUrl: await referenceUpload(600, 800) });
+  assert.equal(created.hasModelReference, true);
+  assert.equal(created.ready, true);
+  assert.deepEqual(created.modelReferences.map(({ id, editable }) => [id, editable]), [["default", true]]);
+  const saved = await sharp(await readFile(path.join(data, "model-reference.png"))).metadata();
+  assert.deepEqual([saved.format, saved.width, saved.height, saved.exif], ["png", 600, 800, undefined]);
+
+  // Replacing requires the photo the person reviewed to still be current.
+  const next = { imageDataUrl: await referenceUpload(700, 700, "#335577", "png") };
+  await h.request("PUT", "/api/import/model-references/default", next, 409);
+  await h.request("PUT", "/api/import/model-references/default", { ...next, previousImageUrl: "/api/import/model-references/default?v=old-1" }, 409);
+  // A symlinked default is replaced by a file; the linked original is untouched.
+  const original = path.join(h.root, "my-photo.png");
+  await writeFile(original, h.identity);
+  await rm(path.join(data, "model-reference.png"));
+  await symlink(original, path.join(data, "model-reference.png"));
+  const linked = await h.request("GET", "/api/import/config");
+  const replaced = await h.request("PUT", "/api/import/model-references/default", { ...next, previousImageUrl: linked.modelReferences[0].imageUrl });
+  assert.notEqual(replaced.modelReferences[0].imageUrl, linked.modelReferences[0].imageUrl, "a replaced photo gets a new address");
+  assert.deepEqual(await readFile(original), h.identity);
+  assert.equal((await sharp(await readFile(path.join(data, "model-reference.png"))).metadata()).width, 700);
+
+  // Two confirmations of the same photo cannot both replace it.
+  const reviewed = (await h.request("GET", "/api/import/config")).modelReferences[0].imageUrl;
+  // Hold the first publish open so the second request checks while it is pending.
+  h.setBeforeRename(async (file) => { if (path.basename(file) === "model-reference.png") { h.setBeforeRename(undefined); await delay(100); } });
+  const racer = { imageDataUrl: await referenceUpload(640, 640, "#112233"), previousImageUrl: reviewed };
+  const racing = await Promise.all([racer, racer].map((payload) => h.request("PUT", "/api/import/model-references/default", payload, [200, 409])));
+  assert.equal(racing.filter((result) => result.error).length, 1, "exactly one concurrent replacement is refused");
+
+  // Additional references take the next free number and can be replaced.
+  const added = await h.request("POST", "/api/import/model-references", { imageDataUrl: await referenceUpload(512, 900) }, 201);
+  assert.equal(added.createdReferenceId, "model-reference-2");
+  await writeFile(path.join(data, "model-reference-6.png"), h.identity);
+  assert.equal((await h.request("POST", "/api/import/model-references", { imageDataUrl: await referenceUpload(512, 900) }, 201)).createdReferenceId, "model-reference-7");
+  const second = added.modelReferences.find(({ id }) => id === "model-reference-2");
+  await h.request("PUT", "/api/import/model-references/model-reference-2", { imageDataUrl: await referenceUpload(640, 640), previousImageUrl: second.imageUrl });
+  assert.equal((await sharp(await readFile(path.join(data, "model-reference-2.png"))).metadata()).width, 640);
+  await h.request("PUT", "/api/import/model-references/model-reference-9", { imageDataUrl: await referenceUpload(640, 640) }, 404);
+
+  // Invalid or low-detail photos leave every reference unchanged.
+  const before = await readFile(path.join(data, "model-reference.png"));
+  const current = (await h.request("GET", "/api/import/config")).modelReferences[0].imageUrl;
+  await h.request("PUT", "/api/import/model-references/default", { imageDataUrl: await referenceUpload(400, 900), previousImageUrl: current }, 400);
+  await h.request("PUT", "/api/import/model-references/default", { imageDataUrl: "data:image/gif;base64,R0lGOD", previousImageUrl: current }, 400);
+  await h.request("POST", "/api/import/model-references", { imageDataUrl: "data:image/png;base64,AAAA" }, 400);
+  assert.deepEqual(await readFile(path.join(data, "model-reference.png")), before);
+  assert.deepEqual((await fileSystem.readdir(data)).filter((name) => name.startsWith("model-reference")).sort(),
+    ["model-reference-2.png", "model-reference-6.png", "model-reference-7.png", "model-reference.png"]);
+});
+
+test("a local default reference outside the data folder is never overwritten", async (t) => {
+  const h = await harness(t);
+  const config = await h.request("GET", "/api/import/config");
+  assert.equal(config.canSetDefaultReference, false);
+  assert.equal(config.modelReferences[0].editable, false);
+  await h.request("PUT", "/api/import/model-references/default", { imageDataUrl: await referenceUpload(600, 800), previousImageUrl: config.modelReferences[0].imageUrl }, 409);
+  assert.deepEqual(await readFile(path.join(h.root, "identity.png")), h.identity);
 });
 
 test("selected reference persists and is used for modeling and regeneration", async (t) => {

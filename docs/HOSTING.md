@@ -41,7 +41,7 @@ Replace `data` with your configured directory. The import includes:
 - `imported/`, `jobs/`, `outfit-images/`, and `outfit-jobs/`;
 - `model-reference.png` and `model-reference-N.png`, where `N` is a positive integer.
 
-Dotfiles and transient locks are excluded. References outside the directory are not copied; place the intended hosted default at `model-reference.png` inside it. The hosted server configures its own paths, so do not copy local `WARDROBE_DATA_DIR` or `WARDROBE_MODEL_REFERENCE` overrides into Vercel.
+Dotfiles and transient locks are excluded. References outside the directory are not copied; place the intended hosted default at `model-reference.png` inside it, or add it after deployment from **Setup & guide → Reference photos**. The hosted server configures its own paths, so do not copy local `WARDROBE_DATA_DIR` or `WARDROBE_MODEL_REFERENCE` overrides into Vercel.
 
 This is an initial copy, not synchronisation. It leaves local originals unchanged, skips identical cloud files, and stops at a differing cloud file without overwriting it. Earlier files may already have copied; rerunning verifies and skips matches. It rejects active generation, symbolic links within the selected data, and a missing library.
 
@@ -91,6 +91,10 @@ Retain the original local backup and set up [encrypted cloud backups](BACKUPS.md
 Names, categories, colours, tags, hidden items, and deletion tombstones live in the shared library. The gallery refreshes on page load, on return to the tab, and every 30 seconds while visible. Stale saves are rejected; close and reopen an item to edit its latest values. Refreshes preserve unfinished text in an open editor. Hidden items are excluded from outfit and shopping inventories.
 
 Older browser-only edits and hidden items migrate on that browser's first opening of the upgraded app. Existing shared edits take precedence. The browser retains a copy under `open-wardrobe-legacy-backup-v1`; failed migrations keep the original keys and retry on refresh. Deletion tombstones prevent delayed imports or migrations from resurrecting items. Sync applies to devices using the same store; local development remains separate.
+
+### Reference photos
+
+Replace identity reference photos, or add more, from **Setup & guide → Reference photos** on any signed-in device; no redeployment, migration, or CLI step is needed. Each confirmed change takes the writer lease and writes a new private Blob for `model-reference.png` or `model-reference-N.png`; the previous Blob follows the normal seven-day cleanup grace period and remains in earlier [backups](BACKUPS.md). Image generation already in progress may use either the previous or the new photo; review its result as usual. Reference image addresses carry a version, so open pages show the new photo.
 
 ### Modelled-photo prompts
 

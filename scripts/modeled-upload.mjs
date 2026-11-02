@@ -1,9 +1,12 @@
 import sharp from "sharp";
-import { MODELED_UPLOAD_BYTES, modeledDimensionError } from "../shared/modeled-upload.mjs";
+import { MODELED_UPLOAD_BYTES, modeledDimensionError, referenceDimensionError } from "../shared/modeled-upload.mjs";
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 
-export async function normalizeModeledUpload(input, kind) {
+export const normalizeModeledUpload = (input, kind) => normalizeUpload(input, (width, height) => modeledDimensionError(width, height, kind));
+export const normalizeReferenceUpload = (input) => normalizeUpload(input, referenceDimensionError);
+
+async function normalizeUpload(input, dimensionError) {
   const match = typeof input?.imageDataUrl === "string" && input.imageDataUrl.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
   if (!match) throw fail("Choose a JPEG, PNG or WebP photo. HEIC photos must be converted before upload.");
   if (match[2].length > Math.ceil(MODELED_UPLOAD_BYTES / 3) * 4) throw fail("The prepared photo must be 2 MB or smaller.", 413);
@@ -17,7 +20,7 @@ export async function normalizeModeledUpload(input, kind) {
     const rotated = metadata.orientation >= 5 && metadata.orientation <= 8;
     const width = rotated ? metadata.height : metadata.width;
     const height = rotated ? metadata.width : metadata.height;
-    const error = modeledDimensionError(width, height, kind);
+    const error = dimensionError(width, height);
     if (error) throw fail(error);
     // Fully decode before saving; strip metadata and retain full prepared resolution.
     return await image.rotate().toColorspace("srgb").png().toBuffer();

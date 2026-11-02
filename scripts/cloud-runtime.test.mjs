@@ -408,6 +408,53 @@ test("real cloud import and outfit plugins can initialize and serve reads withou
   assert.equal(h.blobs.size, 0);
 });
 
+test("hosted reference photos can be added and replaced in cloud storage from the app", async (t) => {
+  const h = await harness(t);
+  const photo = async (width, height, background) => `data:image/jpeg;base64,${(await sharp({ create: { width, height, channels: 3, background } }).jpeg().toBuffer()).toString("base64")}`;
+  async function call(method, url, payload) {
+    const plugin = await createPlugin("import", { readOnly: method === "GET" });
+    try {
+      let handler;
+      plugin.configureServer({ middlewares: { use(value) { handler = value; } } });
+      const req = Object.assign(Readable.from(payload === undefined ? [] : [Buffer.from(JSON.stringify(payload))]), { method, url,
+        headers: { host: "wardrobe.example", "x-forwarded-proto": "https", origin: "https://wardrobe.example", "sec-fetch-site": "same-origin", ...(payload === undefined ? {} : { "content-type": "application/json" }) } });
+      let result;
+      const res = { statusCode: 200, setHeader() {}, end(value) { result = Buffer.isBuffer(value) ? value : JSON.parse(value); } };
+      await handler(req, res, () => assert.fail("Unexpected middleware fallthrough"));
+      return { status: res.statusCode, body: result };
+    } finally { await plugin.closeBundle?.(); }
+  }
+  const write = (...args) => h.write(() => call(...args));
+  const read = (...args) => h.read(() => call(...args));
+  await h.write(() => mkdir(CLOUD_ROOT, { recursive: true }));
+
+  const empty = (await read("GET", "/api/import/config")).body;
+  assert.equal(empty.hasModelReference, false);
+  assert.equal(empty.canSetDefaultReference, true, "the hosted default lives in cloud storage and can be set from the app");
+  const created = await write("PUT", "/api/import/model-references/default", { imageDataUrl: await photo(600, 800, "#886655") });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  assert.equal(created.body.hasModelReference, true);
+  const firstBlob = (await h.pg.query("SELECT blob_url FROM wardrobe_files WHERE path = $1", [`${CLOUD_ROOT}/model-reference.png`])).rows[0].blob_url;
+  assert.ok(h.blobs.has(firstBlob));
+
+  // A stale confirmation cannot replace a photo changed elsewhere.
+  assert.equal((await write("PUT", "/api/import/model-references/default", { imageDataUrl: await photo(700, 700, "#335577"), previousImageUrl: "/api/import/model-references/default?v=0-0" })).status, 409);
+  const current = created.body.modelReferences[0].imageUrl;
+  const replaced = await write("PUT", "/api/import/model-references/default", { imageDataUrl: await photo(700, 700, "#335577"), previousImageUrl: current });
+  assert.equal(replaced.status, 200, JSON.stringify(replaced.body));
+  assert.notEqual(replaced.body.modelReferences[0].imageUrl, current);
+  const secondBlob = (await h.pg.query("SELECT blob_url FROM wardrobe_files WHERE path = $1", [`${CLOUD_ROOT}/model-reference.png`])).rows[0].blob_url;
+  assert.notEqual(secondBlob, firstBlob, "replacement writes a new private blob; cleanup retires the old one after its grace period");
+  assert.equal((await sharp(h.blobs.get(secondBlob)).metadata()).width, 700);
+  const preview = await read("GET", `${replaced.body.modelReferences[0].imageUrl}&format=webp&w=320`);
+  assert.equal((await sharp(preview.body).metadata()).format, "webp");
+
+  const added = await write("POST", "/api/import/model-references", { imageDataUrl: await photo(512, 768, "#557733") });
+  assert.equal(added.status, 201, JSON.stringify(added.body));
+  assert.equal(added.body.createdReferenceId, "model-reference-2");
+  assert.deepEqual((await read("GET", "/api/import/config")).body.modelReferences.map(({ id, editable }) => [id, editable]), [["default", true], ["model-reference-2", true]]);
+});
+
 test('detached generation permits other saves, makes duplicate delivery wait, and reserves once', async t => {
   const h = await harness(t), jobId=randomUUID();
   const file=`${CLOUD_ROOT}/jobs/${jobId}/job.json`;

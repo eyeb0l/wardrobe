@@ -36,7 +36,7 @@ npm run dev
 
 Open [localhost:5173](http://localhost:5173). A short setup flow introduces Wardrobe, Outfits and Shopping; reopen it any time from **Setup & guide**.
 
-Browsing needs no API key: choose **Explore first**. To import clothes and generate images, copy `.env.example` to `.env` (keep an existing `.env`), add your `OPENAI_API_KEY`, place a PNG identity reference at `data/model-reference.png`, and restart. You never need to enter credentials into the setup page.
+Browsing needs no API key: choose **Explore first**. To import clothes and generate images, copy `.env.example` to `.env` (keep an existing `.env`), add your `OPENAI_API_KEY` and restart. Then add a photo of yourself in **Setup & guide → Reference photos** (or place a PNG at `data/model-reference.png`); replace it there any time, including on a hosted copy. You never need to enter credentials into the setup page.
 
 ## Documentation
 
