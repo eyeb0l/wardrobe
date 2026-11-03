@@ -399,6 +399,25 @@ and [mobile wearing history](screenshots/outfit-activity/wear-history-mobile.png
 The standard full validation is still required: `TMPDIR=/dev/shm npm test`,
 `npm run check`, `npm run build:vercel`, and `npm run test:browser`.
 
+## Import regeneration handoff regression
+
+The import API tests hold the final garment save open after its `review` or
+`failed` state becomes readable, including across a Vite plugin restart. A
+regeneration during that overlap must return 409 without changing the saved
+job. Retrying after the previous task releases its lock starts exactly one new
+attempt and preserves tidying and regeneration instructions.
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test --test-name-pattern='garment regeneration preserves|gentle tidying' scripts/import-job-api.test.mjs
+TMPDIR=/dev/shm node --test scripts/import-job-api.test.mjs scripts/import-serverless.test.mjs scripts/import-pending-tasks.test.mjs
+```
+
+These tests use synthetic images and mocked provider responses. The save gates
+force the race without depending on machine speed. Do not mask a queued-stage
+timeout by increasing the review polling budget: before the guard, a retry
+could reuse the finishing task and remain queued indefinitely.
+
 ## Standard checks
 
 Use Node.js 22.x and npm. Run the existing validation before submitting changes:
