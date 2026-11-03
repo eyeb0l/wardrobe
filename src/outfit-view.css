@@ -256,7 +256,8 @@
 .outfit-plan-links .outfit-text-button:not(:disabled):hover { color: var(--ink); }
 .outfit-plan-pieces { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
 .outfit-plan-pieces.compact { gap: 6px; margin: 0; }
-.outfit-plan-card > .outfit-small { grid-column: 2 / -1; }
+.outfit-plan-cutouts { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.outfit-plan-cutouts > p { max-width: 220px; }
 .outfit-plan-pieces > div { flex: 0 1 90px; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 1.4; }
 .outfit-plan-pieces img { display: block; width: 90px; max-width: 100%; aspect-ratio: 1; object-fit: contain; background: #eeeae2; }
 .outfit-plan-pieces.compact > div { flex-basis: 64px; }
@@ -270,7 +271,7 @@
   .outfit-plans { padding: 16px 0; }
   .outfit-plan-card { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 16px; }
   .outfit-plan-card > .outfit-count { padding-top: 0; }
-  .outfit-plan-empty, .outfit-plan-card > .outfit-small { grid-column: auto; }
+  .outfit-plan-empty { grid-column: auto; }
   .outfit-plan-empty > .outfit-secondary { min-height: 44px; }
   .outfit-plan-actions > .outfit-primary, .outfit-plan-actions > .outfit-secondary, .outfit-plan-links .outfit-text-button { min-height: 44px; }
   .outfit-plan-links { flex-basis: 100%; margin-left: 0; }

@@ -33,7 +33,7 @@ export function OutfitPlans({ plans, outfits, itemsById, days, busy, unavailable
     return <article className="outfit-plan-card" key={date} aria-label={pastPlan ? `Plan for ${formatWearDate(date)}` : date === days[0] ? 'Today’s plan' : 'Tomorrow’s plan'}>
       <p className="outfit-count">{pastPlan ? formatWearDate(date) : date === days[0] ? 'Today' : 'Tomorrow'}</p>
       {plan ? <>
-        {outfit ? <Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} compact /> : null}
+        {outfit ? <div className="outfit-plan-cutouts"><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} compact /></div> : null}
         <div className="outfit-plan-copy">
           <h3>{outfit?.name || 'Saved look unavailable'}</h3>
           {outfit ? <p className="outfit-small outfit-plan-meta"><span className="outfit-plan-occasion">{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</span><span>{pieceNames}</span></p> : null}
