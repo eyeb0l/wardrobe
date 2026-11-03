@@ -99,9 +99,11 @@ Rediscovery uses existing records and makes no AI calls or new storage writes.
 
 ## Plan today or tomorrow
 
-**Your plans** sits above the shortlist. Choose one saved look for today and one
-for tomorrow, or use **Plan for today/tomorrow** from a saved look's details.
-Each plan shows the existing garment cutouts, occasion and current availability.
+**Your plans** sits above the shortlist, one strip per day. Choose one saved look
+for today and one for tomorrow, or use **Plan for today/tomorrow** from a saved
+look's details. A day without a plan is a single row with **Choose look**. Each
+plan shows the existing garment cutouts, its piece names, occasion and current
+availability.
 Laundry pieces are named in a warning; they can be planned ahead while awaiting
 washing. Missing, hidden or deleted pieces prevent saving that look as a new plan.
 Plans do not reserve garments, generate photos or record wears.
@@ -172,7 +174,9 @@ the plan chooser and a look's details show the fit and its reason.
 
 ## What to wear
 
-The shortlist at the top of Outfits offers up to three saved looks for your day.
+The shortlist under **Your plans** offers up to three saved looks for your day.
+Once today has a plan, it folds to one line naming that look; **Other ideas for
+today** opens the full shortlist again, and clearing today's plan reopens it.
 Choose a **Shortlist occasion**, then **Not worn lately** or **Favourites**.
 Favourites only includes starred looks; it does not silently fill empty results
 with other outfits. Both modes put the oldest recorded garment wear first.
@@ -195,8 +199,8 @@ the shortlist makes no claim about style suitability.
 With a weather location, **Match weather** chooses **Today** (the default),
 **Tomorrow** or **Off**. Looks that are a good fit come first, then workable
 ones, then looks without weather details; wear history orders each group. Looks
-that are **Not ideal** for that day are left out, with a count and a reminder
-that **Off** includes them. Each choice shows its fit, and a count of looks
+that are **Not ideal** for that day are left out, with a count and an
+**Include them** link that switches Match weather off. Each choice shows its fit, and a count of looks
 without weather details links to **Add weather details**.
 
 Variations with the same main top/bottom or dress share one choice so shoe or
@@ -213,7 +217,8 @@ favourite it or log a wear. The shortlist updates after logging, undoing or
 changing a favourite. It uses your current collection locally, requires no API
 key and makes no AI calls. A failed collection or wardrobe refresh hides the choices until
 recovery. A legacy browser-edit migration warning does not hide a successfully
-loaded wardrobe. **How choices are made** explains the rules in the app.
+loaded wardrobe. The status line ends with **How choices are made**, which shows
+the rules in place.
 
 ## Garment availability and laundry
 

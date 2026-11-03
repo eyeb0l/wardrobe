@@ -12,12 +12,12 @@ function Availability({ outfit, itemsById, unavailable }) {
   return <p className={`outfit-small ${missing.length || laundry.length ? 'outfit-plan-warning' : ''}`} role="status">{unavailable || (missing.length ? `Unavailable: ${missing.join(' · ')}. Choose another look or change a piece.` : laundry.length ? `In laundry: ${laundry.join(' · ')}. Mark these ready when they are available.` : 'All pieces are ready.')}</p>;
 }
 
-function Pieces({ outfit, itemsById }) {
+function Pieces({ outfit, itemsById, compact = false }) {
   const [failed, setFailed] = useState(new Set());
   const [attempt, setAttempt] = useState(0);
-  return <><div className="outfit-plan-pieces">{outfit.garmentIds.map(id => {
+  return <><div className={`outfit-plan-pieces${compact ? ' compact' : ''}`}>{outfit.garmentIds.map(id => {
     const item = itemsById.get(id);
-    return <div key={id}>{item?.image && !failed.has(item.image) ? <OptimizedImage key={`${item.image}-${attempt}`} src={item.image} alt={item.name} sizes="100px" loading="eager" onError={() => setFailed(current => new Set([...current, item.image]))} /> : <span className="outfit-small">Image unavailable</span>}<span>{item?.name || 'Unavailable piece'}</span></div>;
+    return <div key={id}>{item?.image && !failed.has(item.image) ? <OptimizedImage key={`${item.image}-${attempt}`} src={item.image} alt={item.name} sizes="100px" loading="eager" onError={() => setFailed(current => new Set([...current, item.image]))} /> : <span className="outfit-small">Image unavailable</span>}{compact ? null : <span>{item?.name || 'Unavailable piece'}</span>}</div>;
   })}</div>{failed.size ? <p className="outfit-small">Some cutouts could not load. <button type="button" className="outfit-text-button" onClick={() => { setFailed(new Set()); setAttempt(value => value + 1); }}>Retry cutouts</button></p> : null}</>;
 }
 
@@ -29,31 +29,35 @@ export function OutfitPlans({ plans, outfits, itemsById, days, busy, unavailable
     const plan = plans.find(plan => plan.date === date), outfit = byId.get(plan?.outfitId);
     const wore = outfit?.wearHistory?.some(entry => entry.date === date);
     const forecast = !pastPlan && weather?.ready ? weather.days[days.indexOf(date)] : null;
+    const pieceNames = outfit ? outfit.garmentIds.map(id => itemsById.get(id)?.name || 'Unavailable piece').join(' · ') : '';
     return <article className="outfit-plan-card" key={date} aria-label={pastPlan ? `Plan for ${formatWearDate(date)}` : date === days[0] ? 'Today’s plan' : 'Tomorrow’s plan'}>
       <p className="outfit-count">{pastPlan ? formatWearDate(date) : date === days[0] ? 'Today' : 'Tomorrow'}</p>
       {plan ? <>
-        <h3>{outfit?.name || 'Saved look unavailable'}</h3>
-        {outfit ? <><p className="outfit-small outfit-plan-occasion">{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</p><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} /></> : null}
-        {outfit && forecast ? <WeatherFitLine fit={weatherFit(outfit.weather, forecast)} /> : null}
-        <div className="outfit-plan-status">
-          <Availability outfit={outfit} itemsById={itemsById} unavailable={unavailable} />
-          <p className="outfit-small">{wore ? 'Wear logged for this date.' : pastPlan ? 'Past plan · No wear confirmed.' : 'Planned only · No wear confirmed.'}</p>
-        </div>
-        <div className="outfit-plan-actions">
-          {outfit && date <= days[0] ? <button type="button" className="outfit-primary" disabled={busy || !!unavailable || wore} onClick={() => onWear(outfit, date)}>{wore ? 'Wear confirmed' : 'Wore this'}</button> : null}
-          {!pastPlan ? <button type="button" className="outfit-secondary" disabled={busy || !!unavailable} onClick={() => onChoose(date)}>Change look</button> : null}
-          <div className="outfit-plan-links">
-            {outfit ? <button type="button" className="outfit-text-button" onClick={() => onOpen(outfit.id)}>View look</button> : null}
-            {outfit && !pastPlan ? <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onVariation(outfit, date)}>Change one piece</button> : null}
-            {outfit ? <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onChoose(date === days[1] ? days[0] : days[1], outfit.id, date)}>{date === days[1] ? 'Move to today' : 'Move to tomorrow'}</button> : null}
-            <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onClear(date)}>Clear plan</button>
+        {outfit ? <div className="outfit-plan-cutouts"><Pieces key={outfit.id} outfit={outfit} itemsById={itemsById} compact /></div> : null}
+        <div className="outfit-plan-copy">
+          <h3>{outfit?.name || 'Saved look unavailable'}</h3>
+          {outfit ? <p className="outfit-small outfit-plan-meta"><span className="outfit-plan-occasion">{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</span><span>{pieceNames}</span></p> : null}
+          <div className="outfit-plan-status">
+            {outfit && forecast ? <WeatherFitLine fit={weatherFit(outfit.weather, forecast)} /> : null}
+            <Availability outfit={outfit} itemsById={itemsById} unavailable={unavailable} />
+            <p className="outfit-small">{wore ? 'Wear logged for this date.' : pastPlan ? 'Past plan · No wear confirmed.' : 'Planned only · No wear confirmed.'}</p>
+          </div>
+          <div className="outfit-plan-actions">
+            {outfit && date <= days[0] ? <button type="button" className="outfit-primary" disabled={busy || !!unavailable || wore} onClick={() => onWear(outfit, date)}>{wore ? 'Wear confirmed' : 'Wore this'}</button> : null}
+            {!pastPlan ? <button type="button" className="outfit-secondary" disabled={busy || !!unavailable} onClick={() => onChoose(date)}>Change look</button> : null}
+            <div className="outfit-plan-links">
+              {outfit ? <button type="button" className="outfit-text-button" onClick={() => onOpen(outfit.id)}>View look</button> : null}
+              {outfit && !pastPlan ? <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onVariation(outfit, date)}>Change one piece</button> : null}
+              {outfit ? <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onChoose(date === days[1] ? days[0] : days[1], outfit.id, date)}>{date === days[1] ? 'Move to today' : 'Move to tomorrow'}</button> : null}
+              <button type="button" className="outfit-text-button" disabled={busy || !!unavailable} onClick={() => onClear(date)}>Clear plan</button>
+            </div>
           </div>
         </div>
-      </> : <><h3>Leave one less decision for later.</h3><p className="outfit-small">Choose a saved look. You can change it any time.</p><button type="button" className="outfit-secondary" disabled={busy || !!unavailable || !outfits.length} onClick={() => onChoose(date)}>Choose look</button></>}
+      </> : <div className="outfit-plan-copy outfit-plan-empty"><p className="outfit-small">Nothing planned yet. Choose a saved look; you can change it any time.</p><button type="button" className="outfit-secondary" disabled={busy || !!unavailable || !outfits.length} onClick={() => onChoose(date)}>Choose look</button></div>}
     </article>;
   };
   return <section className="outfit-plans" aria-labelledby={`${id}-title`}>
-    <div className="outfit-shortlist-heading outfit-plans-heading"><div><h2 id={`${id}-title`}>Your plans</h2><p>One saved look for each day. Confirm after you wear it.</p></div>{weatherPanel}</div>
+    <div className="outfit-shortlist-heading outfit-plans-heading"><h2 id={`${id}-title`}>Your plans</h2>{weatherPanel}</div>
     {unavailable ? <p className="outfit-small" role="status">{unavailable} <button type="button" className="outfit-text-button" onClick={onRefresh}>Refresh plans and wardrobe</button></p> : null}
     <div className="outfit-plan-grid">{days.map(date => card(date))}</div>
     {past.length ? <details className="outfit-shortlist-history"><summary>Unconfirmed past plans ({past.length})</summary><div className="outfit-plan-grid">{past.map(plan => card(plan.date, true))}</div></details> : null}

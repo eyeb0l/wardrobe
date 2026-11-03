@@ -49,8 +49,8 @@ find /dev/shm/wardrobe-polish-browser -name '*.png'
 ```
 
 Good screenshots to check: `wardrobe-collapsed.png`, `laundry-bulk.png`,
-`wardrobe-rearrange.png`, `garment-wear-bulk.png`, `daily-plans.png`, `shortlist-recent.png` and
-`weather-plans.png`. For views without a saved screenshot, write a temporary
+`wardrobe-rearrange.png`, `garment-wear-bulk.png`, `daily-plans.png`, `shortlist-other-ideas.png`,
+`shortlist-recent.png` and `weather-plans.png`. For views without a saved screenshot, write a temporary
 spec under `tests/browser/` that routes `**/api/**` to synthetic fixtures (copy
 the fixture from `wardrobe-rediscovery.spec.mjs`), screenshot `/`, `/outfits`
 and `/shopping`, and delete it before committing.
