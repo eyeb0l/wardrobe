@@ -200,6 +200,7 @@ test('outfit and direct logs count once per garment per day and direct Undo pres
   await nav(page,'Outfits').click();
   await expect(page.getByRole('article',{name:'Today’s plan'}).getByRole('button',{name:'Wear confirmed',exact:true})).toBeDisabled();
   const shortlist=page.getByRole('region',{name:'What to wear',exact:true});
+  await shortlist.getByRole('button',{name:'Other ideas for today',exact:true}).click();
   await shortlist.getByText('Piece history',{exact:true}).first().click();
   await expect(shortlist.getByText('2 days logged · Last worn 23 Oct 2026',{exact:true}).first()).toBeVisible();
 });

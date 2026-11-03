@@ -104,6 +104,17 @@ test('plan from a saved look, persist, move over another plan, confirm wear and 
   await expect(day(page,true).getByText('All pieces are ready.',{exact:true})).toBeVisible();
   await choose(page,'olive-look');
   await plans(page).screenshot({path:info.outputPath('daily-plans.png')});
+  // With today planned, What to wear folds to one line until other ideas are asked for.
+  const shortlist=page.getByRole('region',{name:'What to wear'});
+  await expect(shortlist.getByText('Olive afternoon is planned for today.',{exact:true})).toBeVisible();
+  await expect(shortlist.getByRole('combobox',{name:'Shortlist occasion'})).toHaveCount(0);
+  await shortlist.getByRole('button',{name:'Other ideas for today',exact:true}).click();
+  await expect(shortlist.getByRole('combobox',{name:'Shortlist occasion'})).toBeVisible();
+  await shortlist.getByRole('button',{name:'How choices are made',exact:true}).click();
+  await expect(shortlist.getByText(/We compare the latest logged wear/)).toBeVisible();
+  await shortlist.screenshot({path:info.outputPath('shortlist-other-ideas.png')});
+  await shortlist.getByRole('button',{name:'Hide other ideas',exact:true}).click();
+  await expect(shortlist.getByRole('combobox',{name:'Shortlist occasion'})).toHaveCount(0);
   await page.evaluate(()=>window.scrollTo(0,0));
   await page.screenshot({path:info.outputPath('plans-first-viewport.png')});
   await day(page,true).getByRole('button',{name:'Move to today',exact:true}).click();
@@ -125,6 +136,7 @@ test('plan from a saved look, persist, move over another plan, confirm wear and 
   await expect(day(page).getByRole('button',{name:'Wore this',exact:true})).toBeEnabled();
   await day(page).getByRole('button',{name:'Clear plan',exact:true}).click();
   await expect(day(page).getByRole('button',{name:'Choose look',exact:true})).toBeEnabled();
+  await expect(shortlist.getByRole('combobox',{name:'Shortlist occasion'})).toBeVisible();
   expect(wardrobe.plans).toEqual([]);
 });
 

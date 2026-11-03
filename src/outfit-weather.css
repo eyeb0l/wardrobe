@@ -1,5 +1,5 @@
 .outfit-plans-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px 32px; }
-.outfit-plans-heading > div:first-child { min-width: 0; }
+.outfit-plans-heading > h2 { flex: 1 1 auto; }
 /* Compact forecast strip: location row, then today and tomorrow side by side. */
 .outfit-weather { flex: 0 1 560px; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; padding: 10px 16px 12px; border: 1px solid var(--line); background: rgba(255, 255, 255, .2); }
 .outfit-weather p { margin: 0; }
