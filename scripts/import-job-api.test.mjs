@@ -127,7 +127,16 @@ async function harness(t, env = {}, beforePaidCall, options = {}) {
     }
     assert.fail(`Timed out waiting for ${stage}`);
   }
-  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, setJobSavedHook(value) { jobSavedHook = value; }, setBeforeRename(value) { beforeRename = value; }, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
+  async function regenerateGarment(id, payload) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const result = await request("POST", `/api/import/jobs/${id}/stages/garment/regenerate`, payload, [202, 409]);
+      if (!result.error) return result;
+      assert.equal(result.error, "Garment generation is already running");
+      await delay(25);
+    }
+    assert.fail("The previous garment generation did not release its lock");
+  }
+  return { root, source, identity, requests, imageReads, libraryReads, request, waitForStage, regenerateGarment, setJobSavedHook(value) { jobSavedHook = value; }, setBeforeRename(value) { beforeRename = value; }, setDecisions(value) { decisionResponse = value; }, failNextCandidateSave() { failCandidateSave = true; }, setAnalysis(value, clean = false) { analysisResult = value; isCleanProductShot = clean; }, async restart() { await plugin.configResolved({ root }); } };
 }
 
 const dress = { name: "Blue dress", part: "dresses", color: "#123456", secondaryColor: null, tags: ["sleeveless"], boundingBox: { x: 250, y: 200, width: 500, height: 600 } };
@@ -322,7 +331,7 @@ test("gentle tidying survives restart and regeneration without bypassing garment
   assert.match(first.form.get("prompt"), /Garment fidelity takes priority/);
   await h.restart();
   assert.equal((await h.request("GET", base)).tidyGarment, true);
-  await h.request("POST", `${base}/stages/garment/regenerate`, { prompt: "Keep the sleeve seam" });
+  await h.regenerateGarment(job.id, { prompt: "Keep the sleeve seam" });
   await h.waitForStage(job.id, "garment");
   const edits = h.requests.filter(entry => entry.type === "edit");
   assert.equal(edits.length, 2);
@@ -331,6 +340,45 @@ test("gentle tidying survives restart and regeneration without bypassing garment
   assert.match(edits[1].form.get("prompt"), /User regeneration direction: Keep the sleeve seam/);
   assert.equal((await h.request("GET", base)).stages.garment.status, "review");
 });
+
+for (const status of ["review", "failed"]) {
+  test(`garment regeneration preserves ${status} while the previous task finishes saving`, { timeout: 10_000 }, async t => {
+    const h = await harness(t);
+    const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: h.source.toString("base64") });
+    const base = `/api/import/jobs/${job.id}`;
+    let releaseSave, saved;
+    const arrived = new Promise(resolve => { saved = resolve; });
+    h.setJobSavedHook(record => {
+      if (record.stages.garment.status !== status) return;
+      h.setJobSavedHook(undefined);
+      return new Promise(resolve => { releaseSave = resolve; saved(); });
+    });
+    t.after(() => releaseSave?.());
+    const workingFetch = globalThis.fetch;
+    if (status === "failed") {
+      t.mock.method(globalThis, "fetch", async (url, options) => url.endsWith("/images/edits")
+        ? Response.json({ error: { code: "moderation_blocked" } }, { status: 400 })
+        : workingFetch(url, options));
+    }
+    await h.request("POST", `${base}/stages/crop/approve`, { tidyGarment: true });
+    await arrived;
+    await h.restart();
+    const before = await h.request("GET", base);
+    assert.equal(before.stages.garment.status, status);
+    const conflict = await h.request("POST", `${base}/stages/garment/regenerate`, { prompt: "Keep the seam" }, 409);
+    assert.equal(conflict.error, "Garment generation is already running");
+    assert.deepEqual(await h.request("GET", base), before, "a rejected retry must not strand the stage in queued");
+    releaseSave();
+    t.mock.method(globalThis, "fetch", workingFetch);
+    await h.regenerateGarment(job.id, { prompt: "Keep the seam" });
+    const retried = await h.waitForStage(job.id, "garment");
+    assert.equal(retried.stages.garment.attempts, 2);
+    assert.equal(retried.tidyGarment, true);
+    assert.equal(retried.stages.garment.prompt, "Keep the seam");
+    assert.equal(retried.stages.modeled.status, "pending");
+    assert.equal(h.requests.filter(entry => entry.type === "edit").length, status === "failed" ? 1 : 2);
+  });
+}
 
 test("modeled generation reads only its garment and reference inputs, without downloading the unused source", async (t) => {
   const h = await harness(t);

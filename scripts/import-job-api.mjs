@@ -1192,6 +1192,12 @@ export function wardrobeImportApi(options = {}) {
           if (options.serverless && ["queued", "processing"].includes(job.stages[stageName].status)) {
             throw Object.assign(new Error("Generation is already running"), { status: 409 });
           }
+          // Review/failure becomes readable before the task's final save has
+          // released its lock. Requeuing now would reuse that finishing task
+          // instead of starting a new generation, leaving the job queued.
+          if (stageName === "garment" && (running.has(`${job.id}:garment`) || ["queued", "processing"].includes(job.stages.garment.status))) {
+            throw Object.assign(new Error("Garment generation is already running"), { status: 409 });
+          }
           const input = await requestBody(req);
           if (stageName === "modeled") {
             if (running.has(`${job.id}:modeled`) || ["queued", "processing"].includes(job.stages.modeled.status)) throw Object.assign(new Error("Modeled generation is already running"), { status: 409 });
