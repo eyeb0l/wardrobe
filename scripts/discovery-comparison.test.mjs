@@ -111,30 +111,44 @@ test("review page hides model results, restricts image paths and rejects foreign
   assert.doesNotThrow(() => validateComparisonManifest(reviewed, { reviewed: true }));
 });
 
-test("fresh continuation skips both completed and failed trials and keeps the combined call cap", async t => {
-  const h = await setup(t, true), firstDir = path.join(h.root, "first-run"), nextDir = path.join(h.root, "remaining-run");
-  const env = { WARDROBE_DECISIONS_ENABLED: "1", OPENAI_API_KEY: "comparison-fake-key" };
-  let calls = 0, failOnce = true;
-  const fetch = async (_, init) => {
-    const body = JSON.parse(init.body); calls++;
-    if (decisionMetadata(body).context.comparisonStage === "screening" && failOnce) {
-      failOnce = false; return new Response("", { status: 504 });
-    }
-    return Response.json(decisionsResponse(body));
-  };
-  const first = await runApproachComparison({ manifestPath: h.manifestPath, outDir: firstDir, run: true, maxCalls: 94, env, fetch });
-  assert.equal(first.succeededTrials, 2); assert.equal(first.failedTrials, 1); assert.equal(first.reservedCalls, 50);
-  const previousRunPath = path.join(firstDir, "run.json"), originalLedger = await readFile(previousRunPath, "utf8");
-  const plan = await runApproachComparison({ manifestPath: h.manifestPath, previousRunPath, env });
-  assert.equal(plan.remainingTrials, 9); assert.equal(plan.previousReservedCalls, 50);
-  const result = await runApproachComparison({ manifestPath: h.manifestPath, previousRunPath, outDir: nextDir, run: true, maxCalls: 94, env, fetch });
-  assert.equal(result.succeededTrials, 11); assert.equal(result.failedTrials, 1); assert.equal(result.unattemptedTrials, 0);
-  assert.equal(result.reservedCalls, 93); assert.equal(result.newProviderReservations, 43); assert.equal(calls, 93);
-  assert.equal(await readFile(previousRunPath, "utf8"), originalLedger);
-  assert.equal(result.methods.find(method => method.method === "absolute").usage.providerCalls, 48);
-  await assert.rejects(runApproachComparison({ manifestPath: h.manifestPath, previousRunPath, env: { ...env, OPENAI_DECISIONS_MODEL: "different-model" } }), /identical frozen/);
-  assert.equal(calls, 93);
-});
+for (const failurePhase of ["screening", "final"]) {
+  test(`fresh continuation skips completed and failed trials after a ${failurePhase} failure and keeps the combined call cap`, { timeout: 15_000 }, async t => {
+    const h = await setup(t, true), firstDir = path.join(h.root, "first-run"), nextDir = path.join(h.root, "remaining-run");
+    const env = { WARDROBE_DECISIONS_ENABLED: "1", OPENAI_API_KEY: "comparison-fake-key" };
+    let calls = 0, screeningCalls = 0, failOnce = true, screeningDispatched;
+    const bothScreeningDispatched = new Promise(resolve => { screeningDispatched = resolve; });
+    const fetch = async (_, init) => {
+      const body = JSON.parse(init.body); calls++;
+      const phase = decisionMetadata(body).context.comparisonStage;
+      if (phase === "screening" && ++screeningCalls === 2) screeningDispatched();
+      if (phase === failurePhase && failOnce) {
+        failOnce = false;
+        // Screening is concurrent: an immediate failure may legitimately stop
+        // its sibling before reservation (49 calls). Require both dispatches
+        // before failing so the exact 50-call assertion tests a known schedule.
+        if (phase === "screening") await bothScreeningDispatched;
+        return new Response("", { status: 504 });
+      }
+      return Response.json(decisionsResponse(body));
+    };
+    const first = await runApproachComparison({ manifestPath: h.manifestPath, outDir: firstDir, run: true, maxCalls: 94, env, fetch });
+    const firstCalls = failurePhase === "screening" ? 50 : 51;
+    assert.equal(first.succeededTrials, 2); assert.equal(first.failedTrials, 1); assert.equal(first.reservedCalls, firstCalls);
+    assert.equal(calls, firstCalls); assert.equal(first.usage.providerCalls, firstCalls);
+    const previousRunPath = path.join(firstDir, "run.json"), originalLedger = await readFile(previousRunPath, "utf8");
+    const plan = await runApproachComparison({ manifestPath: h.manifestPath, previousRunPath, env });
+    assert.equal(plan.remainingTrials, 9); assert.equal(plan.previousReservedCalls, firstCalls);
+    const result = await runApproachComparison({ manifestPath: h.manifestPath, previousRunPath, outDir: nextDir, run: true, maxCalls: 94, env, fetch });
+    assert.equal(result.succeededTrials, 11); assert.equal(result.failedTrials, 1); assert.equal(result.unattemptedTrials, 0);
+    assert.equal(result.reservedCalls, firstCalls + 43); assert.equal(result.newProviderReservations, 43); assert.equal(calls, firstCalls + 43);
+    assert.equal(await readFile(previousRunPath, "utf8"), originalLedger);
+    const continuedLedger = JSON.parse(await readFile(path.join(nextDir, "run.json"), "utf8"));
+    assert.deepEqual(continuedLedger.trials.slice(0, 3), JSON.parse(originalLedger).trials, "continuation preserves every previously attempted trial");
+    assert.equal(result.methods.find(method => method.method === "absolute").usage.providerCalls, 48);
+    await assert.rejects(runApproachComparison({ manifestPath: h.manifestPath, previousRunPath, env: { ...env, OPENAI_DECISIONS_MODEL: "different-model" } }), /identical frozen/);
+    assert.equal(calls, firstCalls + 43);
+  });
+}
 
 test("CLI defaults to offline and disallows initialization with paid options", () => {
   assert.equal(parseComparisonArgs(["--manifest", "private.json"]).run, undefined);

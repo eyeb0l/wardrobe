@@ -399,6 +399,25 @@ and [mobile wearing history](screenshots/outfit-activity/wear-history-mobile.png
 The standard full validation is still required: `TMPDIR=/dev/shm npm test`,
 `npm run check`, `npm run build:vercel`, and `npm run test:browser`.
 
+## Discovery comparison continuation regression
+
+The continuation tests cover failures during concurrent screening and the single
+final comparison. The screening mock waits until both requests have dispatched
+before returning its failure, so the expected 50 reservations cannot depend on
+filesystem speed. The final-comparison failure has 51 reservations. Both cases
+verify that continuation preserves completed and failed trials, makes exactly
+43 new reservations, leaves the previous ledger unchanged, and stays within
+the combined 94-call cap. All provider responses and images are synthetic.
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/discovery-comparison.test.mjs scripts/discovery-ranking.test.mjs scripts/discovery-sensitivity.test.mjs scripts/decisions.test.mjs
+```
+
+An immediate concurrent screening failure can legitimately stop its sibling
+before reservation. Do not assert a fixed two-call count for that schedule;
+use an explicit dispatch gate when a test needs both calls to have happened.
+
 ## Import regeneration handoff regression
 
 The import API tests hold the final garment save open after its `review` or
