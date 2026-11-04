@@ -14,7 +14,7 @@ const DISPLAY_ORDER = ['casual', 'smart-casual', 'work', 'evening'];
 // wear it. Weather has its own control. "Day" alone says nothing about formality.
 const DESCRIPTOR_WORDS = new Set(['spring', 'summer', 'autumn', 'fall', 'winter', 'season', 'seasonal', 'transitional', 'cool', 'cold', 'warm', 'hot', 'mild', 'rain', 'rainy', 'weather', 'day', 'daytime', 'dark', 'light', 'tonal', 'monochrome', 'neutral', 'layered', 'layers', 'layering', 'statement', 'and']);
 
-const words = tag => String(tag ?? '').toLowerCase().match(/[a-z0-9]+/g) || [];
+const words = tag => String(tag ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
 const labelOf = value => {
   const group = OCCASION_GROUPS.find(candidate => candidate.value === value);
   if (group) return group.label;

@@ -35,6 +35,13 @@ test('specific occasions stay selectable, in one spelling, after the standard gr
   assert.ok(matchesOccasion(outfits[1], 'beach-trip'));
 });
 
+test('non-English occasions stay selectable', () => {
+  assert.equal(occasionValue('Réunion de famille'), 'réunion-de-famille');
+  assert.equal(occasionValue('旅行'), '旅行');
+  assert.deepEqual(occasionOptions([look('旅行')]), [{ value: '旅行', label: '旅行' }]);
+  assert.ok(matchesOccasion(look('旅行'), '旅行'));
+});
+
 test('only groups in use are listed, and the current selection is kept', () => {
   assert.deepEqual(occasionOptions([look('layered'), look('office')]).map(option => option.value), ['work']);
   assert.deepEqual(occasionOptions([look('office')], 'evening').map(option => option.value), ['work', 'evening']);
