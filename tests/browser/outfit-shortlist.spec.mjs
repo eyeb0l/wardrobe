@@ -93,6 +93,34 @@ test('occasion and mode give three distinct saved choices with accurate cross-ou
   expect(wardrobe.posts).toHaveLength(0);
 });
 
+test('messy saved tags become one short occasion list in the shortlist and collection filters',async({page,wardrobe},info)=>{
+  wardrobe.outfits=[
+    look(0,'Striped knit',{occasion:['statement','smart-casual']}),
+    look(1,'City stroll',{occasion:['city-daytime','autumn-winter-daytime']}),
+    look(2,'Everyday knit',{occasion:['everyday','travel','cool-weather']}),
+    look(3,'Floral midi',{occasion:['dressy','evening','autumn-winter']}),
+    look(4,'Date night',{occasion:['date-night','dark-tonal']}),
+    look(5,'Desk day',{occasion:['office','nicer']}),
+  ];
+  await page.reload();
+  const expected=['All occasions','Casual','Smart casual','Work','Evening out','Travel'];
+  const shortlistOccasion=panel(page).getByRole('combobox',{name:'Shortlist occasion'});
+  const browseOccasion=page.getByRole('combobox',{name:'Occasion',exact:true});
+  await expect(shortlistOccasion.locator('option')).toHaveText(expected);
+  await expect(browseOccasion.locator('option')).toHaveText(expected);
+  await shortlistOccasion.selectOption({label:'Evening out'});
+  await expect(names(page)).toHaveText(['Date night','Floral midi']);
+  await expect(panel(page).getByText('dressy · evening · autumn winter')).toBeVisible();
+  await panel(page).scrollIntoViewIfNeeded();
+  await panel(page).screenshot({path:info.outputPath('occasion-groups.png')});
+  await browseOccasion.selectOption({label:'Smart casual'});
+  await expect(page.getByText('2 of 6 saved outfits')).toBeVisible();
+  await browseOccasion.selectOption({label:'Travel'});
+  await expect(page.getByText('1 of 6 saved outfits')).toBeVisible();
+  await expect(names(page)).toHaveText(['Date night','Floral midi']);
+  expect(wardrobe.posts).toHaveLength(0);
+});
+
 test('choosing, logging, undoing and favouriting refresh the shortlist and survive reload',async({page,wardrobe})=>{
   await panel(page).getByRole('combobox',{name:'Shortlist occasion'}).selectOption('casual');
   await panel(page).getByRole('button',{name:'Choose A walk in the park'}).click();

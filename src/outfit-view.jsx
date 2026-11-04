@@ -16,6 +16,7 @@ import { OutfitVariation } from "./outfit-variation.jsx";
 import { OutfitWeather, WeatherBackfill, WeatherLocationForm, WeatherPanel } from "./outfit-weather.jsx";
 import { useWeather } from "./weather.mjs";
 import { weatherRangeText } from "../shared/outfit-weather.mjs";
+import { matchesOccasion, occasionOptions } from "../shared/outfit-occasions.mjs";
 import "./outfit-view.css";
 
 const API = "/api/outfits";
@@ -339,7 +340,7 @@ export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = 
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const fingerprint = useMemo(() => discoveryFingerprint(outfits, items), [outfits, items]);
   const currentDiscovery = discoveryConfig?.ready && discoveryResult?.fingerprint === fingerprint ? discoveryResult : null;
-  const occasions = [...new Set(outfits.flatMap((outfit) => outfit.occasion || []))].sort((a, b) => a.localeCompare(b));
+  const occasions = occasionOptions(outfits, occasionFilter);
   const garmentIds = new Set(outfits.flatMap((outfit) => outfit.garmentIds));
   if (garmentFilter) garmentIds.add(garmentFilter);
   const filterGarments = [...garmentIds].map((id) => ({ id, name: itemsById.get(id)?.name || "Piece no longer in your wardrobe" })).sort((a, b) => a.name.localeCompare(b.name));
@@ -348,7 +349,7 @@ export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = 
   const displayedOutfits = useMemo(() => {
     const outfitsById = new Map(outfits.map((outfit) => [outfit.id, outfit]));
     const ranked = currentDiscovery ? orderDiscovery(currentDiscovery.rankings, currentDiscovery).map(({ id }) => outfitsById.get(id)).filter(Boolean) : outfits;
-    return ranked.filter((outfit) => (!favouritesOnly || outfit.favourite) && (!garmentFilter || outfit.garmentIds.includes(garmentFilter)) && (!occasionFilter || outfit.occasion.includes(occasionFilter)));
+    return ranked.filter((outfit) => (!favouritesOnly || outfit.favourite) && (!garmentFilter || outfit.garmentIds.includes(garmentFilter)) && matchesOccasion(outfit, occasionFilter));
   }, [currentDiscovery, outfits, favouritesOnly, garmentFilter, occasionFilter]);
 
   if (!resources.current) resources.current = {
@@ -551,7 +552,7 @@ export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = 
       <div className="outfit-collection-heading">{outfits.length ? <h2>Browse your collection</h2> : null}<p className="outfit-small" role="status">{displayedOutfits.length} of {outfits.length} saved outfits{currentDiscovery ? " · Within your search results" : ""}</p></div>
       <div className="outfit-filter-fields">
         <button type="button" className="outfit-secondary" aria-pressed={favouritesOnly} onClick={() => setFavouritesOnly((value) => !value)}>Favourites</button>
-        <label className="outfit-field" htmlFor={`${filterId}-occasion`}><span>Occasion</span><select id={`${filterId}-occasion`} value={occasionFilter} onChange={(event) => setOccasionFilter(event.target.value)}><option value="">All occasions</option>{occasions.map((occasion) => <option key={occasion} value={occasion}>{occasion.replaceAll("-", " ")}</option>)}</select></label>
+        <label className="outfit-field" htmlFor={`${filterId}-occasion`}><span>Occasion</span><select id={`${filterId}-occasion`} value={occasionFilter} onChange={(event) => setOccasionFilter(event.target.value)}><option value="">All occasions</option>{occasions.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label className="outfit-field" htmlFor={`${filterId}-garment`}><span>Garment</span><select id={`${filterId}-garment`} value={garmentFilter} onChange={(event) => setGarmentFilter(event.target.value)}><option value="">All pieces</option>{filterGarments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         {hasFilters ? <button type="button" className="outfit-text-button" onClick={clearFilters}>Clear filters</button> : null}
       </div>

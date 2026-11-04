@@ -3,6 +3,7 @@ import { OptimizedImage } from './OptimizedImage.jsx';
 import { matchingSavedLook, wornLookIssue, WORN_LOOK_PARTS } from '../shared/worn-look.mjs';
 import { formatWearDate } from '../shared/outfit-activity.mjs';
 import { inLaundry } from '../shared/garment-availability.mjs';
+import { occasionSuggestions } from '../shared/outfit-occasions.mjs';
 import { uiErrorMessage } from './ui-error.mjs';
 import './worn-look.css';
 
@@ -30,7 +31,7 @@ export function WornLook({ source, entry, itemsById, outfits, busy, unavailable,
   const blocked = !entry ? 'This wear entry was removed. Close this preview and refresh your wear history.' : unavailable;
   const ready = !issue && pieces.every(piece => loaded.has(piece.image) && !failed.has(piece.image));
   const matching = matchingSavedLook(outfits, selected);
-  const occasions = [...new Set(['casual', 'work', 'dinner', 'smart-casual', ...outfits.flatMap(outfit => outfit.occasion || [])])].sort();
+  const occasions = occasionSuggestions(outfits);
   const changed = () => { setRequestId(crypto.randomUUID()); setError(''); setResult(null); };
   const show = result?.outfit || matching;
   return <dialog ref={dialog} className="worn-look-modal" aria-labelledby={`${id}-title`} onCancel={event => { event.preventDefault(); if (!saving.current) close.current(); }}>

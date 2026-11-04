@@ -296,7 +296,7 @@ distinct main combinations and stable ordering.
 
 ```bash
 export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
-node --test scripts/outfit-shortlist.test.mjs
+node --test scripts/outfit-shortlist.test.mjs scripts/outfit-occasions.test.mjs
 WARDROBE_BROWSER_PORT=5281 \
   WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-shortlist-browser \
   npm run test:browser -- tests/browser/outfit-shortlist.spec.mjs
@@ -310,7 +310,8 @@ history, cutout looks, empty favourites, logging, undo, favourite changes,
 variation navigation, reloads, failed collection/wardrobe read recovery, malformed
 legacy browser edits, and missing/corrupt images with retry. The fixture uses a fixed
 local day and an explicit `en-GB` locale for date assertions. Inspect
-`shortlist-recent.png`, `shortlist-favourites.png`, `shortlist-empty.png` and each
+`shortlist-recent.png`, `shortlist-favourites.png`, `shortlist-empty.png`,
+`occasion-groups.png` and each
 `browser-health.json`. Unexpected console/network errors, framework overlays and
 horizontal overflow fail the tests; intentional 503 responses and one specific
 404 image response check recovery. The
@@ -327,6 +328,9 @@ and [mobile](screenshots/outfit-shortlist/image-recovery-mobile.png).
 For the full browser suite on a runner that terminates long shell commands,
 run `npm run test:browser -- --project=desktop` and then
 `npm run test:browser -- --project=mobile`, each with a fresh port/artifact path.
+
+Reviewed synthetic occasion screenshots: [desktop](screenshots/outfit-occasions/evening-out-desktop.png)
+and [mobile](screenshots/outfit-occasions/evening-out-mobile.png).
 
 ## Saved outfit variations
 

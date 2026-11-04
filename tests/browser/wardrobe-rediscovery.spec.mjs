@@ -159,6 +159,21 @@ test('matching Ready looks filter by occasion and directly open today or tomorro
   await expect(page.getByRole('article',{name:'Today’s plan'}).getByRole('heading',{name:'An easy morning'})).toBeVisible();
 });
 
+test('the look occasion filter appears only when it can narrow the looks',async({page,wardrobe})=>{
+  const occasionFilter=()=>history(page).getByRole('combobox',{name:'Look occasion',exact:true});
+  wardrobe.outfits=[{...saved[0],occasion:['casual']},{...saved[2],occasion:['winter']}];
+  await page.reload();
+  await openNavy(page);
+  await expect(occasionFilter().locator('option')).toHaveText(['All occasions','Casual']);
+  await occasionFilter().selectOption({label:'Casual'});
+  await expect(history(page).getByRole('article')).toHaveCount(1);
+  wardrobe.outfits=[{...saved[0],occasion:['casual']},{...saved[2],occasion:['everyday']}];
+  await page.reload();
+  await openNavy(page);
+  await expect(history(page).getByRole('article')).toHaveCount(2);
+  await expect(occasionFilter()).toHaveCount(0);
+});
+
 test('logging and undo update garment history immediately; laundry excludes matching looks and can be restored',async({page,wardrobe})=>{
   await openNavy(page);
   await history(page).getByRole('article',{name:'An easy morning',exact:true}).getByRole('button',{name:'View look',exact:true}).click();
