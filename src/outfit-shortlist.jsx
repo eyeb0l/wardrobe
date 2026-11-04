@@ -3,6 +3,7 @@ import { ArrowRight } from '@phosphor-icons/react';
 import { OptimizedImage } from './OptimizedImage.jsx';
 import { formatWearDate, localDate } from '../shared/outfit-activity.mjs';
 import { outfitShortlist } from '../shared/outfit-shortlist.mjs';
+import { occasionOptions } from '../shared/outfit-occasions.mjs';
 import { WEATHER_DAY_LABELS, WeatherFitLine } from './outfit-weather.jsx';
 
 // Check only the current candidates, not the entire wardrobe. Failed sources
@@ -44,12 +45,11 @@ export function OutfitShortlist({ garmentWears, outfits, itemsById, onOpen, unav
   const [imageAttempt, setImageAttempt] = useState(0);
   const currentFailures = useMemo(() => new Set([...outfits.map(outfit => outfit.image), ...[...itemsById.values()].map(item => item.image)].filter(source => failedImages.has(source))), [outfits, itemsById, failedImages]);
   const today = localDate();
-  const occasions = [...new Set(outfits.flatMap(outfit => outfit.occasion || []))].sort();
-  if (occasion && !occasions.includes(occasion)) occasions.push(occasion);
+  const occasions = occasionOptions(outfits, occasion);
   const result = useMemo(() => outfitShortlist(outfits, itemsById, { occasion, mode, today, garmentWears, failedImages: currentFailures, weatherDay }), [outfits, garmentWears, itemsById, occasion, mode, today, currentFailures, weatherDay]);
 
   const controls = <div className="outfit-shortlist-controls">
-      <label className="outfit-field" htmlFor={`${id}-occasion`}><span>Shortlist occasion</span><select id={`${id}-occasion`} value={occasion} onChange={event => setOccasion(event.target.value)}><option value="">All occasions</option>{occasions.map(value => <option key={value} value={value}>{value.replaceAll('-', ' ')}</option>)}</select></label>
+      <label className="outfit-field" htmlFor={`${id}-occasion`}><span>Shortlist occasion</span><select id={`${id}-occasion`} value={occasion} onChange={event => setOccasion(event.target.value)}><option value="">All occasions</option>{occasions.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select></label>
       <fieldset className="outfit-shortlist-modes"><legend>Choose from</legend>{[['recent', 'Not worn lately'], ['favourites', 'Favourites']].map(([value, label]) => <label key={value} className={mode === value ? 'selected' : ''}><input type="radio" name={`${id}-mode`} value={value} checked={mode === value} onChange={() => setMode(value)} />{label}</label>)}</fieldset>
       {weather?.ready ? <fieldset className="outfit-shortlist-modes"><legend>Match weather</legend>{[[0, WEATHER_DAY_LABELS[0]], [1, WEATHER_DAY_LABELS[1]], [-1, 'Off']].map(([value, label]) => <label key={value} className={weatherDayIndex === value ? 'selected' : ''}><input type="radio" name={`${id}-weather`} value={value} checked={weatherDayIndex === value} disabled={value >= 0 && !weather.days[value]} onChange={() => setWeatherDayIndex(value)} />{label}</label>)}</fieldset> : null}
     </div>;

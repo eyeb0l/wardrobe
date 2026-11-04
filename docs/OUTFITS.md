@@ -182,6 +182,15 @@ Favourites only includes starred looks; it does not silently fill empty results
 with other outfits. Both modes put the oldest recorded garment wear first.
 These controls are independent of the collection filters below.
 
+Occasion menus group the tags saved on your looks into **Casual**, **Smart
+casual**, **Work** and **Evening out**, so `office` and `work` are one choice and
+`date-night`, `dressy` and `dinner` are another. A more specific occasion such as
+`travel` keeps its own entry after those four. Season, weather and styling notes
+such as `autumn-winter`, `cool-weather` and `layered` are not offered, though those
+looks still appear under **All occasions** and under any occasion they also carry.
+Grouping happens when the menu is read, in `shared/outfit-occasions.mjs`: saved
+tags are never rewritten, and look cards and AI search still use them as saved.
+
 Each choice explains the most recent logged wear of any piece in that look.
 Expand **Piece history** to see each garment's last-worn date and number of logged
 days, including Wardrobe entries and wears in other outfits and variations. Only

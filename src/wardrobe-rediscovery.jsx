@@ -3,6 +3,7 @@ import { CaretDown } from '@phosphor-icons/react';
 import { OptimizedImage } from './OptimizedImage.jsx';
 import { garmentWearDates, readySavedLooks } from '../shared/outfit-shortlist.mjs';
 import { wardrobeRediscovery } from '../shared/wardrobe-rediscovery.mjs';
+import { matchesOccasion, occasionOptions } from '../shared/outfit-occasions.mjs';
 import { formatWearDate } from '../shared/outfit-activity.mjs';
 import './wardrobe-rediscovery.css';
 
@@ -60,10 +61,9 @@ export function GarmentRediscovery({ item, itemsById, outfits, garmentWears, day
   const [attempt, setAttempt] = useState(0);
   const dates = useMemo(() => garmentWearDates(outfits, days[0], garmentWears).get(item.id) || [], [outfits, garmentWears, days, item.id]);
   const matching = outfits.filter(outfit => outfit.status === 'accepted' && outfit.garmentIds.includes(item.id));
-  const occasions = [...new Set(matching.flatMap(outfit => outfit.occasion))].sort();
-  if (occasion && !occasions.includes(occasion)) occasions.push(occasion);
+  const occasions = occasionOptions(matching, occasion);
   const ready = readySavedLooks(outfits, itemsById, { garmentId: item.id, occasion, failedImages: failed });
-  const matchingCount = matching.filter(outfit => !occasion || outfit.occasion.includes(occasion)).length;
+  const matchingCount = matching.filter(outfit => matchesOccasion(outfit, occasion)).length;
   const hasFailures = [...matching.map(outfit => outfit.image), ...[...itemsById.values()].map(item => item.image)].some(source => failed.has(source));
   return <section className="garment-rediscovery" aria-label="Wear history and ready looks">
     <h3>Wear history</h3>
@@ -71,7 +71,7 @@ export function GarmentRediscovery({ item, itemsById, outfits, garmentWears, day
       <p><HistorySummary count={dates.length} lastWorn={dates[0]} /></p>
       {dates.length ? <details><summary>Logged dates</summary><ul className="garment-wear-dates">{dates.map(date => <li key={date}><time dateTime={date}>{formatWearDate(date)}</time></li>)}</ul><p>Includes Wardrobe entries, saved looks and variations; each calendar day counts once.</p></details> : <p>Only logged wears are counted, so this piece may still have been worn.</p>}
       <h3>Ready saved looks with this piece</h3>
-      {occasions.length > 1 || occasion ? <label className="field" htmlFor={`${id}-occasion`}><span>Look occasion</span><select id={`${id}-occasion`} value={occasion} onChange={event => setOccasion(event.target.value)}><option value="">All occasions</option>{occasions.map(value => <option key={value} value={value}>{value.replaceAll('-', ' ')}</option>)}</select></label> : null}
+      {occasions.length > 1 || occasion ? <label className="field" htmlFor={`${id}-occasion`}><span>Look occasion</span><select id={`${id}-occasion`} value={occasion} onChange={event => setOccasion(event.target.value)}><option value="">All occasions</option>{occasions.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select></label> : null}
       {disabled ? <p role="status">Save or discard your garment changes before choosing a look.</p> : null}
       <p role="status">{ready.length} ready {ready.length === 1 ? 'look' : 'looks'}{matchingCount > ready.length ? ` · ${matchingCount - ready.length} left out for laundry, unavailable pieces or images` : ''}.</p>
       {!ready.length ? <p>{!matching.length ? 'No saved looks contain this piece yet. Save a look with this piece to find it here.' : 'Try another occasion or mark laundry pieces Ready when they are available.'}</p> : null}
