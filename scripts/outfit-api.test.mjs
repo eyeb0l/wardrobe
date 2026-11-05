@@ -15,7 +15,7 @@ test("configuration uses current model precedence, custom data root and numbered
   const h = await harness(t);
   const config = await h.request("GET", `${API}/config`);
   assert.equal(config.ready, true);
-  assert.deepEqual(config.models, { vision: "gpt-6-luna", image: "gpt-image-2.5-sunburst" });
+  assert.deepEqual(config.models, { vision: "gpt-6-luna", image: "gpt-image-2.6-sunburst" });
   assert.deepEqual(config.counts, { upperbody: 6, lowerbody: 4, wholebody_up: 1, shoes: 1, accessories_up: 1 });
   assert.equal(config.availableCombinations, 18);
   assert.equal(config.maxCount, 12);
@@ -642,6 +642,9 @@ test("every outfit image request sets low moderation and leaves complexity to th
   const h = await harness(t);
   await h.settled((await h.create()).id);
   const edit = h.requests.find((item) => item.kind === "edit");
+  assert.equal(edit.form.get("model"), "gpt-image-2.6-sunburst");
+  assert.match(edit.form.get("prompt"), /natural, unposed stance/);
+  assert.doesNotMatch(edit.form.get("prompt"), /mostly front-facing/);
   assert.equal(edit.form.get("moderation"), "low");
   assert.equal(edit.form.has("complexity"), false);
   assert.equal(edit.form.has("markup"), false);

@@ -2,6 +2,11 @@
 // import and outfit pipelines cannot drift apart.
 export const IMAGE_MODERATION = "low";
 
+// Cutouts stay on 2.5: in the November 2026 comparison 2.6 kept garments from
+// under the item, while it followed framing instructions better on modelled photos.
+export const DEFAULT_GARMENT_MODEL = "gpt-image-2.5-sunburst";
+export const DEFAULT_MODELED_MODEL = "gpt-image-2.6-sunburst";
+
 const COMPLEXITIES = new Set(["low", "medium", "high"]);
 const MODERATION_STAGES = new Set(["input", "output", "unknown"]);
 const LABEL = /^[a-zA-Z0-9_.:-]{1,100}$/;
@@ -32,9 +37,11 @@ export function moderationDetails(result) {
 // moderation refusal is identified by its error code, never its message text.
 export function providerAdvice(status, result) {
   if (result?.error?.code === "moderation_blocked") {
-    const blocked = { input: "the prompt or reference images", output: "the generated image" }[moderationDetails(result).stage];
-    return blocked ? `The provider's safety checks blocked ${blocked}. Adjust the direction or upload a photo instead.`
-      : "The request was refused by the provider's safety checks. Adjust the direction or upload a photo instead.";
+    const stage = moderationDetails(result).stage;
+    // An output block varies between attempts. An input block repeats until the request changes.
+    if (stage === "output") return "The provider's safety checks blocked the generated image. Try again, or adjust the direction or upload a photo instead.";
+    if (stage === "input") return "The provider's safety checks blocked the prompt or reference images, so trying again unchanged is unlikely to help. Change the direction or reference, or upload a photo instead.";
+    return "The request was refused by the provider's safety checks. Adjust the direction or upload a photo instead.";
   }
   return [401, 403].includes(status) ? "Check the configured API key and model access."
     : status === 429 ? "Check the API quota or rate limit, then retry."

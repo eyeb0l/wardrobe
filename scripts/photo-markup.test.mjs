@@ -65,8 +65,8 @@ test("moderation details are bounded and read from either documented location", 
 
 test("refusal advice names the blocked stage and never reflects provider text", () => {
   const blocked = stage => ({ error: { code: "moderation_blocked", message: "PRIVATE PROMPT", moderation_details: stage && { moderation_stage: stage } } });
-  assert.match(providerAdvice(400, blocked("input")), /blocked the prompt or reference images/);
-  assert.match(providerAdvice(400, blocked("output")), /blocked the generated image/);
+  assert.match(providerAdvice(400, blocked("input")), /blocked the prompt or reference images, so trying again unchanged is unlikely to help/);
+  assert.match(providerAdvice(400, blocked("output")), /blocked the generated image\. Try again/);
   for (const result of [blocked("unknown"), blocked()]) assert.match(providerAdvice(400, result), /refused by the provider's safety checks/);
   assert.doesNotMatch(providerAdvice(400, blocked("input")), /PRIVATE/);
   assert.match(providerAdvice(429, {}), /quota or rate limit/);
