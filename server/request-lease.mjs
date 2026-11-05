@@ -8,7 +8,7 @@ export const independentDecisionLeases = pathname => [
 // Shopping only reads the wardrobe; its quota reservation takes its own short
 // lease. Never hold the shared writer through a provider or retailer request.
 export const leaseFreeRequests = pathname => independentDecisionLeases(pathname)
-  || ["/api/shopping/gaps", "/api/shopping/import-website"].includes(pathname);
+  || ["/api/shopping/gaps", "/api/shopping/import-website", "/api/shopping/try-on"].includes(pathname);
 
 export async function outsideRequestLease(store, pathname, callback, validate) {
   // Parallel discovery decisions need independent owners, not concurrent

@@ -86,6 +86,11 @@
 .shopping-page h2:focus { outline: none; }
 .shopping-error { margin: 14px 0; color: var(--accent); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .shopping-upload-prompt { margin: 9px 0 0; font-size: 11px; }
+.shopping-try-on { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.shopping-try-on .shopping-disclosure { margin: 12px 0 0; }
+.shopping-try-on-result { width: min(340px, 100%); margin: 20px 0 0; }
+.shopping-try-on-result img { display: block; width: 100%; height: auto; background: #e9e3d9; }
+.shopping-try-on-result figcaption { margin-top: 10px; font-size: 12px; line-height: 1.6; color: var(--muted); }
 .shopping-analysis-progress { margin-top: 24px; }
 .shopping-analysis-progress p { max-width: 380px; margin: 12px 0 0; font-size: 12px; line-height: 1.65; color: var(--muted); }
 .shopping-progress-line { position: relative; width: 140px; height: 2px; background: var(--line); overflow: hidden; }

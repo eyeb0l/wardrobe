@@ -15,6 +15,9 @@
 | `OPENAI_GARMENT_COMPLEXITY` | Overrides `OPENAI_IMAGE_COMPLEXITY` for cutouts |
 | `OPENAI_MODELED_COMPLEXITY` | Overrides `OPENAI_IMAGE_COMPLEXITY` for modelled pieces and outfits |
 | `OPENAI_MARKUP_COMPLEXITY` | `low`; marked edits. Does not inherit `OPENAI_IMAGE_COMPLEXITY` |
+| `OPENAI_TRYON_MODEL` | `gpt-image-2.6-flare`; Shopping's **Try it on** preview. Separate from the other image models |
+| `OPENAI_TRYON_QUALITY` | `medium`; **Try it on** |
+| `OPENAI_TRYON_COMPLEXITY` | `low`; **Try it on**. GPT Image 2.6 only |
 | `OPENAI_API_BASE_URL` | `https://api.openai.com/v1` |
 | `WARDROBE_DECISIONS_ENABLED` | `0`; set to `1` for image-aware saved-look search, owned-piece swaps and optional image checks |
 | `OPENAI_DECISIONS_MODEL` | `gpt-6-luna`; uses the existing server-only `OPENAI_API_KEY` |

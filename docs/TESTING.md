@@ -643,3 +643,17 @@ rg --files /tmp/wardrobe-markup-browser
 ```
 
 Choose an unused port and unique artifact directory. The desktop/mobile suite draws on synthetic outfit and modelled photos, with real touch input on mobile. It covers undo and clear, Escape leaving only the marking layer, the required description, the PNG sent with each retry, and marks not carrying over to a replacement photo. Provider requests are intercepted. Inspect `outfit-marking.png`, `outfit-ready.png`, `import-marking.png`, `import-marked.png` and `browser-health.json` in each viewport's directory. Node tests cover mark validation and scaling, image order, prompts, kept scenes, complexity gating, moderation, stale photos, hosted tasks and telemetry. These mocked tests do not establish real AI image quality; follow the visual comparison recipe in [model-migration.md](model-migration.md) for that.
+
+## Shopping try-on
+
+Use the same Node 22 installation, pinned Playwright and cached Chromium above:
+
+```bash
+TMPDIR=/dev/shm node --test scripts/shopping-api.test.mjs scripts/shopping-try-on.test.mjs
+WARDROBE_BROWSER_PORT=5421 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-try-on-browser \
+  npm run test:browser -- tests/browser/shopping-website.spec.mjs
+rg --files /tmp/wardrobe-try-on-browser
+```
+
+Choose an unused port and unique artifact directory. The desktop/mobile suite adds a synthetic product, requests a preview with intercepted API calls, checks the request and caption, and checks that changing the reference or photo removes the preview. It also covers a failed request and retry. Inspect `shopping-try-on.png` and `browser-health.json` in each viewport's directory. Node tests cover the request format, validation, refusal advice, timeouts and invalid output. These mocked tests do not establish real AI image quality.

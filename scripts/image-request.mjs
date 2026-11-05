@@ -10,10 +10,11 @@ const LABEL = /^[a-zA-Z0-9_.:-]{1,100}$/;
 // complexity configured while switching the model back to its baseline.
 const supportsComplexity = model => /^gpt-image-2\.6(?:-|$)/.test(model);
 
-// Marked edits are focused by definition, so they default to low complexity
-// and do not inherit the setting used for whole new images.
+// Marked edits are focused by definition, and try-on previews favour speed, so
+// both default to low complexity rather than inheriting the setting for new images.
 export function imageComplexity(setting, stage, model, { markup = false } = {}) {
   const value = markup ? setting("OPENAI_MARKUP_COMPLEXITY", "low")
+    : stage === "try-on" ? setting("OPENAI_TRYON_COMPLEXITY", "low")
     : setting(stage === "garment" ? "OPENAI_GARMENT_COMPLEXITY" : "OPENAI_MODELED_COMPLEXITY", setting("OPENAI_IMAGE_COMPLEXITY"));
   if (!value) return null;
   if (!COMPLEXITIES.has(value)) throw Object.assign(new Error("Image complexity must be low, medium or high. Check the OPENAI_*_COMPLEXITY settings."), { status: 503 });

@@ -47,7 +47,7 @@ const test = base.extend({
   shopping: async ({ page }, use, testInfo) => {
     const health = { pageErrors: [], consoleErrors: [], failedRequests: [], httpErrors: [], unexpectedApi: [] };
     const allowedErrors = new Set();
-    const state = { imports: [], analyses: [], importHandler: null };
+    const state = { imports: [], analyses: [], tryOns: [], importHandler: null, tryOnHandler: null };
     page.on('pageerror', error => health.pageErrors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') health.consoleErrors.push(message.text()); });
     page.on('requestfailed', request => {
@@ -64,12 +64,17 @@ const test = base.extend({
       if (path === '/api/import/wardrobe') return route.fulfill({ json: wardrobe });
       if (path === '/api/import/jobs' && route.request().method() === 'GET') return route.fulfill({ json: [] });
       if (path === '/api/shopping/config' || path === '/api/import/config') return route.fulfill({ json: {
-        ready: true, hasApiKey: true, hasModelReference: true, modelReferences: [reference],
+        ready: true, hasApiKey: true, hasModelReference: true, modelReferences: [state.reference || reference],
       } });
       if (path === '/api/shopping/import-website') {
         state.imports.push(route.request().postDataJSON());
         if (state.importHandler) return state.importHandler(route);
         return route.fulfill({ json: { imageDataUrl, name: `${source.name}.jpg`, websiteSource: source } });
+      }
+      if (path === '/api/shopping/try-on') {
+        state.tryOns.push(route.request().postDataJSON());
+        if (state.tryOnHandler) return state.tryOnHandler(route);
+        return route.fulfill({ json: { imageDataUrl } });
       }
       if (path === '/api/shopping/analyze') {
         state.analyses.push(route.request().postDataJSON());
@@ -267,3 +272,68 @@ for (const mode of ['paste', 'drop']) {
     expect(shopping.analyses[0].image).toMatch(/^data:image\/jpeg;base64,/);
   });
 }
+
+test('Try it on requests a preview only when asked, labels it and drops it with its photo', async ({ page, shopping }, testInfo) => {
+  const tryOnButton = page.getByRole('button', { name: 'Try it on', exact: true });
+  await expect(tryOnButton).toHaveCount(0);
+  await importProduct(page);
+  await expect(tryOnButton).toBeEnabled();
+  expect(shopping.tryOns).toEqual([]);
+
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  shopping.state.tryOnHandler = async route => { await gate; shopping.state.tryOnHandler = null; return route.fulfill({ json: { imageDataUrl } }); };
+  await tryOnButton.click();
+  await expect(page.getByRole('button', { name: 'Creating your preview…', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Check this piece', exact: false })).toBeDisabled();
+  await expect(page.getByRole('status').filter({ hasText: 'usually takes a few seconds' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Import link', exact: true })).toBeDisabled();
+  // Enter in the URL field must respect the same rule as the disabled button.
+  const urlField = page.getByRole('textbox', { name: 'Product URL', exact: true });
+  await urlField.fill(productUrl);
+  await urlField.press('Enter');
+  release();
+
+  const preview = page.getByRole('img', { name: 'AI preview of you wearing this piece', exact: true });
+  await expect(preview).toBeVisible();
+  await expect(page.getByText("It can't show size or fit", { exact: false })).toBeVisible();
+  expect(shopping.tryOns).toHaveLength(1);
+  expect(shopping.tryOns[0]).toEqual({ image: imageDataUrl, modelReferenceId: reference.id, websiteSource: source });
+  expect(shopping.imports).toEqual([{ websiteUrl: productUrl }]);
+  expect(shopping.analyses).toEqual([]);
+  await preview.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('shopping-try-on.png') });
+
+  // A preview is independent of the assessment.
+  await page.getByRole('button', { name: 'Check this piece', exact: false }).click();
+  await expect(page.locator('.shopping-assessment')).toBeVisible();
+  await expect(preview).toBeVisible();
+
+  await page.getByRole('button', { name: 'Remove shopping image', exact: true }).click();
+  await expect(preview).toHaveCount(0);
+  await expect(tryOnButton).toHaveCount(0);
+});
+
+test('a failed preview shows its reason and can be retried', async ({ page, shopping }) => {
+  shopping.allowedErrors.add('/api/shopping/try-on:422');
+  await importProduct(page);
+  shopping.state.tryOnHandler = route => { shopping.state.tryOnHandler = null; return route.fulfill({ status: 422, json: { error: "The image API returned HTTP 400. The provider's safety checks blocked the generated image. Adjust the direction or upload a photo instead." } }); };
+  await page.getByRole('button', { name: 'Try it on', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'safety checks blocked the generated image' })).toBeVisible();
+  await page.getByRole('button', { name: 'Try it on', exact: true }).click();
+  await expect(page.getByRole('img', { name: 'AI preview of you wearing this piece', exact: true })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'safety checks' })).toHaveCount(0);
+  expect(shopping.tryOns).toHaveLength(2);
+});
+
+test('replacing the selected reference photo removes its preview', async ({ page, shopping }) => {
+  await importProduct(page);
+  await page.getByRole('button', { name: 'Try it on', exact: true }).click();
+  const preview = page.getByRole('img', { name: 'AI preview of you wearing this piece', exact: true });
+  await expect(preview).toBeVisible();
+  // A replacement keeps the reference's ID and changes its versioned image URL.
+  shopping.state.reference = { ...reference, imageUrl: `${imageDataUrl}#replaced` };
+  await page.getByRole('button', { name: 'Refresh photos', exact: true }).click();
+  await expect(preview).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Try it on', exact: true })).toBeEnabled();
+});

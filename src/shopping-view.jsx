@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowRight, CaretDown, Plus, X } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, Plus, TShirt, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { prepareShoppingImage } from "./shopping-image.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
@@ -201,6 +201,10 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   const [findingGaps, setFindingGaps] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
   const [result, setResult] = useState(null);
+  const [tryOn, setTryOn] = useState(null);
+  const [tryingOn, setTryingOn] = useState(false);
+  const [tryOnError, setTryOnError] = useState("");
+  const tryOnController = useRef(null);
   const fileInput = useRef(null);
   const resultHeading = useRef(null);
   const mounted = useRef(false);
@@ -234,7 +238,12 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   latestWardrobe.current = wardrobeFingerprint;
   const setupProblem = configLoading ? "" : configError ? uiErrorMessage(configError) : setupMessage(config);
   const wardrobeProblem = wardrobeError ? "Your wardrobe couldn't be loaded. Reload the page to try again." : !loading && !items.length ? "Add a few pieces in the Wardrobe tab first so this check can compare with what you own." : "";
-  const canAnalyze = !findingGaps && !!prepared && !preparing && !importing && !analyzing && !configLoading && !setupProblem && !loading && !wardrobeProblem && !!selectedReference;
+  // A preview belongs to one exact photo and reference, and is never saved.
+  // Replacing a reference keeps its ID, so identify it by its versioned image as well.
+  const referenceVersion = selectedReference ? `${selectedReference.id}:${selectedReference.imageUrl}` : "";
+  const activeTryOn = tryOn && prepared && tryOn.image === prepared.dataUrl && tryOn.referenceVersion === referenceVersion ? tryOn : null;
+  const canTryOn = !findingGaps && !!prepared && !preparing && !importing && !analyzing && !tryingOn && !configLoading && !!config?.hasApiKey && !!selectedReference;
+  const canAnalyze = !findingGaps && !tryingOn && !!prepared && !preparing && !importing && !analyzing && !configLoading && !setupProblem && !loading && !wardrobeProblem && !!selectedReference;
 
   const refreshConfig = useCallback(async () => {
     configController.current?.abort();
@@ -307,7 +316,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   };
 
   const importWebsite = async () => {
-    if (submitting.current || findingGaps || importController.current || !websiteUrl.trim()) return;
+    if (submitting.current || findingGaps || tryingOn || importController.current || !websiteUrl.trim()) return;
     let url;
     try {
       url = new URL(websiteUrl.trim());
@@ -407,6 +416,38 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     }
   }, [wardrobeFingerprint]);
 
+  useEffect(() => {
+    // A new photo or reference makes an in-flight preview meaningless.
+    tryOnController.current?.abort();
+    tryOnController.current = null;
+    setTryingOn(false);
+    setTryOnError("");
+  }, [prepared?.dataUrl, referenceVersion]);
+  useEffect(() => () => tryOnController.current?.abort(), []);
+
+  const runTryOn = async () => {
+    if (!canTryOn) return;
+    const controller = new AbortController();
+    tryOnController.current = controller;
+    const image = prepared.dataUrl;
+    const submittedReference = referenceVersion;
+    setTryingOn(true);
+    setTryOnError("");
+    try {
+      const value = await request("/api/shopping/try-on", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({ image, modelReferenceId, ...(prepared.websiteSource ? { websiteSource: prepared.websiteSource } : {}) }),
+      });
+      if (typeof value.imageDataUrl !== "string" || !value.imageDataUrl.startsWith("data:image/jpeg;base64,")) throw new Error("The preview was incomplete. Please try again.");
+      if (mounted.current && !controller.signal.aborted) setTryOn({ dataUrl: value.imageDataUrl, image, referenceVersion: submittedReference });
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted) setTryOnError(error.message || "The preview couldn't be created. Please try again.");
+    } finally {
+      if (mounted.current && tryOnController.current === controller) { tryOnController.current = null; setTryingOn(false); }
+    }
+  };
+
   const analyze = async (event) => {
     event.preventDefault();
     if (submitting.current || !canAnalyze) return;
@@ -465,7 +506,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     </header>
 
     <WardrobeGaps wardrobeItems={wardrobeItems} fingerprint={wardrobeFingerprint} itemsById={itemsById} loading={loading} wardrobeError={wardrobeError}
-      config={config} configLoading={configLoading} configError={configError} analyzing={analyzing || importing || preparing} onBusyChange={setFindingGaps} />
+      config={config} configLoading={configLoading} configError={configError} analyzing={analyzing || importing || preparing || tryingOn} onBusyChange={setFindingGaps} />
 
     <form className="shopping-form" onSubmit={analyze} noValidate>
       <div className="shopping-workspace">
@@ -476,7 +517,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             <div className="shopping-link-controls">
               <input id={`${id}-website-url`} type="url" name="websiteUrl" inputMode="url" autoComplete="url" placeholder="https://shop.example/product" value={websiteUrl} disabled={analyzing || importing} aria-describedby={`${id}-link-hint`}
                 onChange={(event) => setWebsiteUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void importWebsite(); } }} />
-              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || !websiteUrl.trim()}>{importing ? "Importing…" : "Import link"}<ArrowRight size={16} aria-hidden="true" /></button>
+              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || tryingOn || !websiteUrl.trim()}>{importing ? "Importing…" : "Import link"}<ArrowRight size={16} aria-hidden="true" /></button>
             </div>
             <p id={`${id}-link-hint`} className="shopping-small">Import the product photo and details, then check the piece when you're ready.</p>
             {importing ? <div className="shopping-link-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-small">Finding the product photo and details…</p><button type="button" className="shopping-text-button" onClick={cancelImport}>Cancel import</button></div> : null}
@@ -544,6 +585,16 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             {analysisError ? <p className="shopping-error" role="alert">{uiErrorMessage(analysisError)}</p> : null}
             <button className="shopping-primary" type="submit" disabled={!canAnalyze}>{analyzing ? "Checking your wardrobe…" : analysisError ? "Try again" : result ? "Check again" : "Check this piece"}<ArrowRight size={17} aria-hidden="true" /></button>
             {analyzing ? <div className="shopping-analysis-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p>Looking at the piece, your reference and possible combinations. This can take a minute.</p></div> : null}
+            {prepared ? <div className="shopping-try-on">
+              <button type="button" className="shopping-secondary" disabled={!canTryOn} onClick={() => void runTryOn()}><TShirt size={17} aria-hidden="true" />{tryingOn ? "Creating your preview…" : activeTryOn ? "Try on again" : "Try it on"}</button>
+              <p className="shopping-disclosure">Sends this image and your selected model reference to the AI service as a paid image request. Nothing is saved.</p>
+              {tryingOn ? <div className="shopping-analysis-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p>Dressing your reference in this piece. This usually takes a few seconds.</p></div> : null}
+              {tryOnError ? <p className="shopping-error" role="alert">{uiErrorMessage(tryOnError)}</p> : null}
+              {activeTryOn && !tryingOn ? <figure className="shopping-try-on-result">
+                <img src={activeTryOn.dataUrl} alt="AI preview of you wearing this piece" />
+                <figcaption>A rough AI preview for colour and styling. It can't show size or fit, and details may differ from the real piece.</figcaption>
+              </figure> : null}
+            </div> : null}
             {!prepared && !preparing && !importing && !setupProblem && !wardrobeProblem ? <p className="shopping-small shopping-upload-prompt">Import a product link or add an image to get started.</p> : null}
           </div>
         </div>
