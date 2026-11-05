@@ -629,3 +629,17 @@ extraction. Inspect `garment-tidying-option.png`, `garment-tidying-review.png` a
 validation, saved prompts, restart/regeneration and durable hosted tasks. These
 mocked tests do not establish real AI image quality; follow the authorised visual
 comparison recipe in [model-migration.md](model-migration.md) for that.
+
+## Marked photo edits
+
+Use the same Node 22 installation, pinned Playwright and cached Chromium above:
+
+```bash
+TMPDIR=/dev/shm node --test scripts/photo-markup.test.mjs scripts/generation-telemetry.test.mjs scripts/outfit-api.test.mjs scripts/import-job-api.test.mjs scripts/outfit-serverless.test.mjs scripts/modeled-photo-prompts.test.mjs
+WARDROBE_BROWSER_PORT=5417 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-markup-browser \
+  npm run test:browser -- tests/browser/photo-markup.spec.mjs
+rg --files /tmp/wardrobe-markup-browser
+```
+
+Choose an unused port and unique artifact directory. The desktop/mobile suite draws on synthetic outfit and modelled photos, with real touch input on mobile. It covers undo and clear, Escape leaving only the marking layer, the required description, the PNG sent with each retry, and marks not carrying over to a replacement photo. Provider requests are intercepted. Inspect `outfit-marking.png`, `outfit-ready.png`, `import-marking.png`, `import-marked.png` and `browser-health.json` in each viewport's directory. Node tests cover mark validation and scaling, image order, prompts, kept scenes, complexity gating, moderation, stale photos, hosted tasks and telemetry. These mocked tests do not establish real AI image quality; follow the visual comparison recipe in [model-migration.md](model-migration.md) for that.

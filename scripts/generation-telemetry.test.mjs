@@ -102,3 +102,37 @@ test('missing telemetry cannot masquerade as first-attempt success or a second-a
   assert.equal(report.overall.secondAttemptRecovery.denominator, 0);
   assert.equal(report.overall.eventualRetryRecovery.rate, 1);
 });
+
+test('attempts record request settings, moderation details and token usage for the report', async t => {
+  const dir = await fixture(t);
+  const attempt = generationAttempt(dir, context);
+  await attempt.start({ model: 'gpt-image-2.6-sunburst', baseUrl: 'https://provider.invalid', prompt: 'prompt', settings: { complexity: 'low', moderation: 'low', markup: true } });
+  attempt.observe({ status: 400 }, { error: { code: 'moderation_blocked', moderation_details: { moderation_stage: 'output', categories: ['sexual', 'https://secret.invalid'] } } });
+  await attempt.finish(false, new Error('PRIVATE ERROR'));
+  const [record] = await readTelemetry(dir);
+  assert.deepEqual([record.complexity, record.moderation, record.markup, record.moderationStage, record.moderationCategories], ['low', 'low', true, 'output', ['sexual']]);
+  const report = summarizeTelemetry([
+    record,
+    attempt2('episode-a', { complexity: 'high', usage: { inputImageTokens: 100, inputTextTokens: 10, outputImageTokens: 800 } }, 4),
+    attempt2('episode-b', { complexity: 'high', usage: { inputImageTokens: 300, inputTextTokens: 30, outputImageTokens: 1000 } }, 8),
+    attempt2('episode-c', { complexity: 'low', usage: null }, 2),
+  ]);
+  assert.deepEqual(report.moderationCategories.map(row => [row.moderationStage, row.category, row.count]), [['output', 'sexual', 1]]);
+  assert.equal(report.apiOutcomes.find(row => row.outcome === 'refused').moderationStage, 'output');
+  const high = report.imageUsage.find(row => row.complexity === 'high');
+  assert.deepEqual([high.candidates, high.medianSeconds, high.meanInputImageTokens, high.meanInputTextTokens, high.meanOutputImageTokens], [2, 6, 200, 20, 900]);
+  const low = report.imageUsage.find(row => row.complexity === 'low');
+  assert.deepEqual([low.candidates, low.medianSeconds, low.meanOutputImageTokens], [1, 2, null]);
+  assert.ok(report.cohorts.some(row => row.complexity === 'high' && row.moderation === null && row.markup === false && row.category === 'all'));
+  assert.ok(report.cohorts.some(row => row.complexity === 'low' && row.moderation === 'low' && row.markup === true));
+});
+
+test('records from before these settings still load and report as unset', () => {
+  const report = summarizeTelemetry([attempt('old', 1, 'succeeded')]);
+  assert.deepEqual([report.cohorts[0].complexity, report.cohorts[0].moderation, report.cohorts[0].markup], [null, null, false]);
+  assert.equal(report.imageUsage[0].meanOutputImageTokens, null);
+});
+
+function attempt2(episodeId, extra, seconds) {
+  return attempt(episodeId, 1, 'succeeded', { ...extra, finishedAt: new Date(Date.parse('2026-09-21T00:00:01.000Z') + seconds * 1000).toISOString() });
+}

@@ -12,13 +12,15 @@ import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile, containedFiles
 import { decisionsConfig, hashEvidence } from "./decisions.mjs";
 import { checkDecisionImages } from "./decision-checks.mjs";
 import { decisionUsageLog } from "./decision-usage.mjs";
+import { IMAGE_MODERATION, imageComplexity, providerAdvice } from "./image-request.mjs";
+import { prepareMarkup } from "./photo-markup.mjs";
 import path from "node:path";
 import sharp from "sharp";
 import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
 import { normalizeModeledUpload, normalizeReferenceUpload } from "./modeled-upload.mjs";
 import { modelReferenceImageUrl, publicModelReferences } from "./model-reference-url.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
-import { buildModeledPhotoPrompt, buildModeledSettingPrompt, normalizeModeledSetting } from "./modeled-photo-prompts.mjs";
+import { buildModeledMarkupPrompt, buildModeledPhotoPrompt, buildModeledSettingPrompt, normalizeModeledSetting } from "./modeled-photo-prompts.mjs";
 import { importWebsiteProduct } from "./website-import.mjs";
 import { isDetectionRetryRunning } from "../shared/detection-retry.mjs";
 import { atomicJson as sharedAtomicJson, atomicFile, publishImage } from "./outfit-storage.mjs";
@@ -202,31 +204,27 @@ function stageState() {
   return { status: "pending", decision: null, attempts: 0, assetUrl: null, failedAssetUrl: null, cleanupPreviewUrl: null, cleanupTolerance: 46, cleanupDiagnostics: null, error: null, prompt: null, updatedAt: null };
 }
 
-// Never reflect provider messages, which can include credentials or URLs. A
-// moderation refusal is identified by its error code, never its message text.
 function providerFailure(label, response, result) {
-  const status = response.status;
-  const advice = result?.error?.code === "moderation_blocked" ? "The request was refused by the provider's safety checks. Adjust the direction or upload a photo instead."
-    : [401, 403].includes(status) ? "Check the configured API key and model access."
-      : status === 429 ? "Check the API quota or rate limit, then retry."
-        : status === 400 || status === 404 ? "Check the configured model and API base URL support this request." : "The API could not complete the request. Retry when it is available.";
-  return Object.assign(new Error(`${label} returned HTTP ${status}. ${advice}`), { status: 502 });
+  return Object.assign(new Error(`${label} returned HTTP ${response.status}. ${providerAdvice(response.status, result)}`), { status: 502 });
 }
 
-async function openAIEdit({ outsideLease = fn => fn(), telemetry, beforePaidCall, key, baseUrl, model, prompt, images, size, background, quality, timeoutMs }) {
+async function openAIEdit({ outsideLease = fn => fn(), telemetry, beforePaidCall, key, baseUrl, model, prompt, images, size, background, quality, complexity, markup, timeoutMs }) {
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", prompt);
   form.set("size", size);
   form.set("quality", quality || "high");
   form.set("output_format", "png");
+  form.set("moderation", IMAGE_MODERATION);
+  if (complexity) form.set("complexity", complexity);
   if (background) form.set("background", background);
+  if (markup) form.set("markup", new Blob([markup], { type: "image/png" }), "markup.png");
   for (const [index, image] of images.entries()) {
     const normalized = await normalizeImage(image.data);
     form.append("image[]", new Blob([normalized], { type: "image/png" }), image.name?.replace(/\.[^.]+$/, ".png") || `image-${index + 1}.png`);
   }
   await beforePaidCall?.("image");
-  await telemetry?.start({ model, baseUrl, prompt, images: images.map(image => image.data) });
+  await telemetry?.start({ model, baseUrl, prompt, images: [...images.map(image => image.data), ...(markup ? [markup] : [])], settings: { complexity: complexity || null, moderation: IMAGE_MODERATION, markup: Boolean(markup) } });
   const { response, result } = await outsideLease(async () => {
   const response = await fetch(`${baseUrl}/images/edits`, {
     method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form,
@@ -609,7 +607,8 @@ export function wardrobeImportApi(options = {}) {
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, { tidyGarment: current.tidyGarment === true });
           stage.generationPrompt = current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt;
           await saveJob(current);
-          bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", background: "transparent", images: [original], prompt: stage.generationPrompt });
+          const garmentModel = setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL));
+          bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: garmentModel, complexity: imageComplexity(setting, "garment", garmentModel), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", background: "transparent", images: [original], prompt: stage.generationPrompt });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
           failedAssetUrl = `${ASSET_ROOT}/${current.id}/${rawName}`;
@@ -635,27 +634,40 @@ export function wardrobeImportApi(options = {}) {
             throw error;
           }
           const model = { data: modelData, mime: "image/png", name: "model.png" };
-          const otherJobs = await Promise.all((await readdir(jobsDir)).filter(id => /^[a-f0-9-]{36}$/i.test(id) && id !== current.id).map(id => loadJob(id)));
-          const recentSettings = [
-            ...(await loadImported()).filter(item => !item.hidden).map(item => item.modeledSetting),
-            ...otherJobs.filter(Boolean).sort((a, b) => (a.updatedAt || "").localeCompare(b.updatedAt || "")).map(job => job.stages?.modeled?.setting),
-            ...(stage.settingHistory || []),
-          ];
-          stage.settingPrompt = buildModeledSettingPrompt({ metadata: current.metadata, previousSetting: stage.setting || null, recentSettings, direction: stage.prompt });
-          // Clear the previous attempt's image prompt while planning. Persist
-          // the new scene before the image request so it survives failures.
-          stage.generationPrompt = null;
-          await saveJob(current);
-          stage.setting = await openAIPlanModeledSetting({ outsideLease: options.outsideLease, beforePaidCall: options.beforePaidCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: garment.data, prompt: stage.settingPrompt });
-          stage.settingHistory = [...(stage.settingHistory || []), stage.setting].slice(-12);
-          stage.generationPrompt = buildModeledPhotoPrompt({ setting: stage.setting, direction: stage.prompt });
-          await saveJob(current);
-          bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: stage.generationPrompt });
+          const modeledModel = setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL));
+          const marked = current.internal?.modeledMarkup;
+          if (marked) {
+            // The marks refer to this exact photo, so its scene is kept rather than replanned.
+            let photo, markup;
+            try { [photo, markup] = await Promise.all([marked.base, marked.file].map(name => readFile(path.join(dir, name)))); }
+            catch { throw new Error("The marked photo is no longer available. Mark it again or create a new photo."); }
+            stage.generationPrompt = buildModeledMarkupPrompt({ direction: stage.prompt });
+            await saveJob(current);
+            bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: modeledModel, complexity: imageComplexity(setting, "modeled", modeledModel, { markup: true }), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [{ data: photo, mime: "image/png", name: "marked-photo.png" }, model, garment], markup, prompt: stage.generationPrompt });
+          } else {
+            const otherJobs = await Promise.all((await readdir(jobsDir)).filter(id => /^[a-f0-9-]{36}$/i.test(id) && id !== current.id).map(id => loadJob(id)));
+            const recentSettings = [
+              ...(await loadImported()).filter(item => !item.hidden).map(item => item.modeledSetting),
+              ...otherJobs.filter(Boolean).sort((a, b) => (a.updatedAt || "").localeCompare(b.updatedAt || "")).map(job => job.stages?.modeled?.setting),
+              ...(stage.settingHistory || []),
+            ];
+            stage.settingPrompt = buildModeledSettingPrompt({ metadata: current.metadata, previousSetting: stage.setting || null, recentSettings, direction: stage.prompt });
+            // Clear the previous attempt's image prompt while planning. Persist
+            // the new scene before the image request so it survives failures.
+            stage.generationPrompt = null;
+            await saveJob(current);
+            stage.setting = await openAIPlanModeledSetting({ outsideLease: options.outsideLease, beforePaidCall: options.beforePaidCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", DEFAULT_VISION_MODEL), image: garment.data, prompt: stage.settingPrompt });
+            stage.settingHistory = [...(stage.settingHistory || []), stage.setting].slice(-12);
+            stage.generationPrompt = buildModeledPhotoPrompt({ setting: stage.setting, direction: stage.prompt });
+            await saveJob(current);
+            bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: modeledModel, complexity: imageComplexity(setting, "modeled", modeledModel), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: stage.generationPrompt });
+          }
         }
         await writeFile(output, bytes);
         const fresh = await loadJob(current.id);
         fresh.stages[stageName].status = "review";
         fresh.stages[stageName].source = "generated";
+        if (stageName === "modeled") delete fresh.internal?.modeledMarkup;
         fresh.stages[stageName].assetUrl = `${ASSET_ROOT}/${fresh.id}/${path.basename(output)}`;
         fresh.stages[stageName].failedAssetUrl = null;
         fresh.stages[stageName].cleanupPreviewUrl = null;
@@ -725,6 +737,18 @@ export function wardrobeImportApi(options = {}) {
   async function finishCompletedJob(job) {
     await persistImported(job, true);
     await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
+  }
+
+  async function saveModeledMarkup(job, input) {
+    const stage = job.stages.modeled;
+    if (!["review", "failed"].includes(stage.status) || !stage.assetUrl?.startsWith(`${ASSET_ROOT}/${job.id}/`)) throw Object.assign(new Error("This photo can't be marked at its current stage."), { status: 409 });
+    if (input.baseImage !== stage.assetUrl) throw Object.assign(new Error("The photo changed. Review the latest image before marking it."), { status: 409 });
+    if (typeof input.prompt !== "string" || !input.prompt.trim()) throw Object.assign(new Error("Describe the change you want in the marked area."), { status: 400 });
+    const base = path.basename(stage.assetUrl);
+    const bytes = await prepareMarkup(input.markup, await readFile(path.join(jobsDir, job.id, base)));
+    const file = `modeled-markup-${randomUUID()}.png`;
+    await writeFile(path.join(jobsDir, job.id, file), bytes, { flag: "wx" });
+    return { file, base };
   }
 
   function prepareGeneration(job, stageName) {
@@ -1176,6 +1200,7 @@ export function wardrobeImportApi(options = {}) {
         await writeFile(path.join(jobsDir, job.id, filename), bytes, { flag: "wx" });
         if (stage.status === "review" && stage.source === "generated") { stage.telemetryEpisodeId = randomUUID(); stage.telemetryAttempts = 0; }
         stage.telemetryEpisodeId ||= randomUUID();
+        if (job.internal) delete job.internal.modeledMarkup;
         Object.assign(stage, { status: "review", decision: null, source: "uploaded", assetUrl: `${ASSET_ROOT}/${job.id}/${filename}`,
           error: null, failedAssetUrl: null, taskId: null, setting: null, attempts: stage.attempts + 1, updatedAt: new Date().toISOString() });
         await saveJob(job);
@@ -1204,6 +1229,11 @@ export function wardrobeImportApi(options = {}) {
             const reference = await resolveModelReference(input.modelReferenceId ?? job.modelReferenceId ?? "default");
             job.modelReferenceId = reference.id;
           }
+          if (input.markup !== undefined && stageName !== "modeled") throw Object.assign(new Error("Only modelled photos can be marked."), { status: 400 });
+          job.internal ||= {};
+          // A plain regeneration must not inherit marks left by a failed marked edit.
+          if (stageName === "modeled") delete job.internal.modeledMarkup;
+          if (input.markup !== undefined) job.internal.modeledMarkup = await saveModeledMarkup(job, input);
           job.stages[stageName].prompt = typeof input.prompt === "string" ? input.prompt.trim().slice(0, 1200) || null : null;
           prepareGeneration(job, stageName);
           await saveJob(job);

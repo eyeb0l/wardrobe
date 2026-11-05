@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
-import { buildModeledPhotoPrompt, buildModeledSettingPrompt } from "./modeled-photo-prompts.mjs";
+import { buildModeledMarkupPrompt, buildModeledPhotoPrompt, buildModeledSettingPrompt } from "./modeled-photo-prompts.mjs";
 
 const run = promisify(execFile);
 const cli = new URL("./modeled-photo-prompt.mjs", import.meta.url);
@@ -35,4 +35,15 @@ test("arbitrary invented settings are accepted and scene history is bounded with
   const recentSettings = Array.from({ length: 50 }, (_, index) => `Previously planned place ${index}`);
   const prompt = buildModeledSettingPrompt({ recentSettings: [...recentSettings, null, ""] });
   assert.deepEqual(JSON.parse(prompt.split("Context (JSON):\n")[1]).recentSettings, recentSettings.slice(-24));
+});
+
+test("marked edits keep the photo first and hold the framing", () => {
+  const prompt = buildModeledMarkupPrompt({ direction: "  Remove the invented zip. " });
+  assert.match(prompt, /^Edit Image 1,/);
+  assert.match(prompt, /Image 2 supplies only the person's identity/);
+  assert.match(prompt, /Image 3 supplies the exact featured garment/);
+  assert.match(prompt, /Requested change in the marked area: Remove the invented zip\.\n/);
+  assert.match(prompt, /Do not reframe, crop, zoom or recompose/);
+  assert.match(prompt, /Remove every annotation mark/);
+  for (const direction of [undefined, "", "  "]) assert.throws(() => buildModeledMarkupPrompt({ direction }), /description of the change/);
 });

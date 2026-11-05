@@ -9,7 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import sharp from "sharp";
 import { buildGarmentPrompt, chooseChromaKey, hasCleanProductBackground, wardrobeImportApi } from "./import-job-api.mjs";
-import { buildModeledPhotoPrompt, buildModeledSettingPrompt } from "./modeled-photo-prompts.mjs";
+import { buildModeledMarkupPrompt, buildModeledPhotoPrompt, buildModeledSettingPrompt } from "./modeled-photo-prompts.mjs";
 import { withStorage } from "./storage-fs.mjs";
 import { decisionsResponse } from "./test-helpers/decisions-response.mjs";
 
@@ -1335,4 +1335,82 @@ test("a detection retry cannot start while another detached Sol check is still r
   await writeFile(file, JSON.stringify(saved));
   await h.request("POST", `/api/import/jobs/${job.id}/detection/retry`, { requestId: "00000000-0000-4000-8000-000000000043" });
   assert.equal(h.requests.length, 2, "an interrupted older marker does not block a fresh retry");
+});
+
+async function modeledReview(h) {
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await productImage(true)).toString("base64") });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/use-original`);
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`, { modelReferenceId: "default" });
+  await h.waitForStage(job.id, "modeled");
+  return h.request("GET", `/api/import/jobs/${job.id}`);
+}
+// The mocked image API returns the harness source, so the marks take its shape.
+async function importMarks(h) {
+  const { width, height } = await sharp(h.source).metadata();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><circle cx="50%" cy="50%" r="20%" fill="none" stroke="#ff0000" stroke-width="4"/></svg>`;
+  return `data:image/png;base64,${(await sharp(Buffer.from(svg)).png().toBuffer()).toString("base64")}`;
+}
+
+test("cutouts and modelled photos set moderation and per-stage complexity on 2.6 models", async (t) => {
+  const h = await harness(t, { OPENAI_IMAGE_MODEL: "gpt-image-2.6-sunburst", OPENAI_GARMENT_COMPLEXITY: "low", OPENAI_MODELED_COMPLEXITY: "high" });
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await sharp(h.source).toBuffer()).toString("base64") });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  await h.waitForStage(job.id, "garment");
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/approve`);
+  await h.waitForStage(job.id, "modeled");
+  const [garment, modeled] = h.requests.filter((entry) => entry.type === "edit");
+  assert.deepEqual([garment.form.get("moderation"), garment.form.get("complexity"), garment.form.get("background")], ["low", "low", "transparent"]);
+  assert.deepEqual([modeled.form.get("moderation"), modeled.form.get("complexity")], ["low", "high"]);
+});
+
+test("the default 2.5 model never receives complexity, which it rejects", async (t) => {
+  const h = await harness(t, { OPENAI_IMAGE_COMPLEXITY: "low" });
+  const job = await modeledReview(h);
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/modeled/regenerate`, { prompt: "Remove the zip.", markup: await importMarks(h), baseImage: job.stages.modeled.assetUrl }, 202);
+  await h.waitForStage(job.id, "modeled");
+  for (const { form } of h.requests.filter((entry) => entry.type === "edit")) {
+    assert.equal(form.get("model"), "gpt-image-2.5-sunburst");
+    assert.equal(form.has("complexity"), false);
+    assert.equal(form.get("moderation"), "low");
+  }
+});
+
+test("a marked modelled edit keeps the scene, sends the photo first and clears its marks", async (t) => {
+  const h = await harness(t, { OPENAI_IMAGE_MODEL: "gpt-image-2.6-sunburst" });
+  const job = await modeledReview(h);
+  const stage = job.stages.modeled;
+  const regenerate = `/api/import/jobs/${job.id}/stages/modeled/regenerate`;
+  const body = { prompt: "Remove the invented zip.", markup: await importMarks(h), baseImage: stage.assetUrl };
+  await h.request("POST", regenerate, { ...body, baseImage: "/api/import/assets/other/old.png" }, 409);
+  await h.request("POST", regenerate, { ...body, prompt: " " }, 400);
+  await h.request("POST", regenerate, { ...body, markup: "not-an-image" }, 400);
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/garment/regenerate`, body, [400, 409]);
+  const plans = h.requests.filter((entry) => entry.type === "setting").length;
+  const editsBefore = h.requests.filter((entry) => entry.type === "edit").length;
+
+  await h.request("POST", regenerate, body, 202);
+  await h.waitForStage(job.id, "modeled");
+  assert.equal(h.requests.filter((entry) => entry.type === "setting").length, plans, "no scene is replanned");
+  const edits = h.requests.filter((entry) => entry.type === "edit");
+  assert.equal(edits.length, editsBefore + 1);
+  const edit = edits.at(-1);
+  assert.deepEqual(edit.images.map((image) => image.name), ["marked-photo.png", "model.png", "garment.png"]);
+  assert.equal(edit.form.get("complexity"), "low");
+  assert.equal(edit.form.get("size"), "1536x1024");
+  assert.equal(edit.form.get("prompt"), buildModeledMarkupPrompt({ direction: "Remove the invented zip." }));
+  const photo = await sharp(edit.images[0].data).metadata();
+  const sent = await sharp(Buffer.from(await edit.form.get("markup").arrayBuffer())).metadata();
+  assert.deepEqual([sent.format, sent.width, sent.height], ["png", photo.width, photo.height]);
+  const after = await h.request("GET", `/api/import/jobs/${job.id}`);
+  assert.equal(after.stages.modeled.setting, stage.setting);
+  assert.notEqual(after.stages.modeled.assetUrl, stage.assetUrl);
+  assert.equal(after.internal, undefined);
+
+  // A later plain regeneration replans and sends no marks.
+  await h.request("POST", regenerate, { prompt: "Use morning light" }, 202);
+  await h.waitForStage(job.id, "modeled");
+  const plain = h.requests.filter((entry) => entry.type === "edit").at(-1);
+  assert.equal(plain.form.has("markup"), false);
+  assert.deepEqual(plain.images.map((image) => image.name), ["model.png", "garment.png"]);
+  assert.equal(h.requests.filter((entry) => entry.type === "setting").length, plans + 1);
 });
