@@ -239,7 +239,9 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   const setupProblem = configLoading ? "" : configError ? uiErrorMessage(configError) : setupMessage(config);
   const wardrobeProblem = wardrobeError ? "Your wardrobe couldn't be loaded. Reload the page to try again." : !loading && !items.length ? "Add a few pieces in the Wardrobe tab first so this check can compare with what you own." : "";
   // A preview belongs to one exact photo and reference, and is never saved.
-  const activeTryOn = tryOn && prepared && tryOn.image === prepared.dataUrl && tryOn.referenceId === modelReferenceId ? tryOn : null;
+  // Replacing a reference keeps its ID, so identify it by its versioned image as well.
+  const referenceVersion = selectedReference ? `${selectedReference.id}:${selectedReference.imageUrl}` : "";
+  const activeTryOn = tryOn && prepared && tryOn.image === prepared.dataUrl && tryOn.referenceVersion === referenceVersion ? tryOn : null;
   const canTryOn = !findingGaps && !!prepared && !preparing && !importing && !analyzing && !tryingOn && !configLoading && !!config?.hasApiKey && !!selectedReference;
   const canAnalyze = !findingGaps && !tryingOn && !!prepared && !preparing && !importing && !analyzing && !configLoading && !setupProblem && !loading && !wardrobeProblem && !!selectedReference;
 
@@ -420,7 +422,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     tryOnController.current = null;
     setTryingOn(false);
     setTryOnError("");
-  }, [prepared?.dataUrl, modelReferenceId]);
+  }, [prepared?.dataUrl, referenceVersion]);
   useEffect(() => () => tryOnController.current?.abort(), []);
 
   const runTryOn = async () => {
@@ -428,17 +430,17 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     const controller = new AbortController();
     tryOnController.current = controller;
     const image = prepared.dataUrl;
-    const referenceId = modelReferenceId;
+    const submittedReference = referenceVersion;
     setTryingOn(true);
     setTryOnError("");
     try {
       const value = await request("/api/shopping/try-on", {
         method: "POST",
         signal: controller.signal,
-        body: JSON.stringify({ image, modelReferenceId: referenceId, ...(prepared.websiteSource ? { websiteSource: prepared.websiteSource } : {}) }),
+        body: JSON.stringify({ image, modelReferenceId, ...(prepared.websiteSource ? { websiteSource: prepared.websiteSource } : {}) }),
       });
       if (typeof value.imageDataUrl !== "string" || !value.imageDataUrl.startsWith("data:image/jpeg;base64,")) throw new Error("The preview was incomplete. Please try again.");
-      if (mounted.current && !controller.signal.aborted) setTryOn({ dataUrl: value.imageDataUrl, image, referenceId });
+      if (mounted.current && !controller.signal.aborted) setTryOn({ dataUrl: value.imageDataUrl, image, referenceVersion: submittedReference });
     } catch (error) {
       if (mounted.current && !controller.signal.aborted) setTryOnError(error.message || "The preview couldn't be created. Please try again.");
     } finally {
@@ -515,7 +517,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             <div className="shopping-link-controls">
               <input id={`${id}-website-url`} type="url" name="websiteUrl" inputMode="url" autoComplete="url" placeholder="https://shop.example/product" value={websiteUrl} disabled={analyzing || importing} aria-describedby={`${id}-link-hint`}
                 onChange={(event) => setWebsiteUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void importWebsite(); } }} />
-              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || !websiteUrl.trim()}>{importing ? "Importing…" : "Import link"}<ArrowRight size={16} aria-hidden="true" /></button>
+              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || tryingOn || !websiteUrl.trim()}>{importing ? "Importing…" : "Import link"}<ArrowRight size={16} aria-hidden="true" /></button>
             </div>
             <p id={`${id}-link-hint`} className="shopping-small">Import the product photo and details, then check the piece when you're ready.</p>
             {importing ? <div className="shopping-link-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-small">Finding the product photo and details…</p><button type="button" className="shopping-text-button" onClick={cancelImport}>Cancel import</button></div> : null}

@@ -64,7 +64,7 @@ const test = base.extend({
       if (path === '/api/import/wardrobe') return route.fulfill({ json: wardrobe });
       if (path === '/api/import/jobs' && route.request().method() === 'GET') return route.fulfill({ json: [] });
       if (path === '/api/shopping/config' || path === '/api/import/config') return route.fulfill({ json: {
-        ready: true, hasApiKey: true, hasModelReference: true, modelReferences: [reference],
+        ready: true, hasApiKey: true, hasModelReference: true, modelReferences: [state.reference || reference],
       } });
       if (path === '/api/shopping/import-website') {
         state.imports.push(route.request().postDataJSON());
@@ -287,6 +287,7 @@ test('Try it on requests a preview only when asked, labels it and drops it with 
   await expect(page.getByRole('button', { name: 'Creating your preview…', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Check this piece', exact: false })).toBeDisabled();
   await expect(page.getByRole('status').filter({ hasText: 'usually takes a few seconds' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Import link', exact: true })).toBeDisabled();
   release();
 
   const preview = page.getByRole('img', { name: 'AI preview of you wearing this piece', exact: true });
@@ -318,4 +319,16 @@ test('a failed preview shows its reason and can be retried', async ({ page, shop
   await expect(page.getByRole('img', { name: 'AI preview of you wearing this piece', exact: true })).toBeVisible();
   await expect(page.getByRole('alert').filter({ hasText: 'safety checks' })).toHaveCount(0);
   expect(shopping.tryOns).toHaveLength(2);
+});
+
+test('replacing the selected reference photo removes its preview', async ({ page, shopping }) => {
+  await importProduct(page);
+  await page.getByRole('button', { name: 'Try it on', exact: true }).click();
+  const preview = page.getByRole('img', { name: 'AI preview of you wearing this piece', exact: true });
+  await expect(preview).toBeVisible();
+  // A replacement keeps the reference's ID and changes its versioned image URL.
+  shopping.state.reference = { ...reference, imageUrl: `${imageDataUrl}#replaced` };
+  await page.getByRole('button', { name: 'Refresh photos', exact: true }).click();
+  await expect(preview).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Try it on', exact: true })).toBeEnabled();
 });
