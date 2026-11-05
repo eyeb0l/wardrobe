@@ -40,9 +40,27 @@ Each modelled attempt first makes a separate `/responses` scene-planning request
 | 2.6 Sunburst with `markup` and an extra reference image | Worked; the mark was removed from the output |
 | 2.5 Sunburst with `markup` | Worked; the mark was removed from the output |
 | 2.6 Sunburst with `markup` and `background=transparent` | Worked; the output was transparent |
-| Billed output image tokens at 1024×1024 | 2.6: 824. 2.5: 196 |
+| Billed output image tokens at 1024×1024, `quality=low` | 2.6: 824. 2.5: 196 |
 
-These are single calls on a simple image. They establish that the requests are accepted, not comparative quality. 2.5 and 2.6 list the same token rates, but the token counts above differ, so compare measured cost rather than assuming the same price per image. OpenAI also says higher complexity can introduce unwanted changes, which matters for garment fidelity, so compare it per stage. Marked edits moved and resized the garment in these checks even though the request asked to keep everything else, which is why the marked-edit prompt also tells the model not to reframe.
+These are single calls on a simple image. They establish that the requests are accepted, not comparative quality. The token gap above applies only at `quality=low`; at `high`, which the app uses, both models billed the same tokens. Marked edits moved and resized the garment in these checks even though the request asked to keep everything else, which is why the marked-edit prompt also tells the model not to reframe. With that wording, framing held in 12 marked edits on real photos, whose changes outside the marks averaged 5–7 levels out of 255 per colour channel. The requested changes themselves were subtle.
+
+### GPT Image 2.5 and 2.6 comparison, 5 November 2026
+
+The default stays on 2.5 until this comparison leads to a decision. 228 calls compared 2.5 Sunburst with 2.6 Sunburst at its default complexity and at `medium` and `low`. They covered 19 cases across the three stages with three repeats each, at `quality=high` and `moderation=low`, using the same prompts, references and sizes per case. It cost US$16.64 at the listed rates. Images and contact sheets remain private in `data/image-2.6-comparison-2026-11-05/`.
+
+| Stage | Billed output tokens, all configurations | Mean cost | Median seconds: 2.5 / 2.6 default / medium / low |
+| --- | ---: | ---: | --- |
+| Cutouts (7 cases) | 1,756 | US$0.066 | 36 / 42 / 35 / 35 |
+| Modelled photos (6 cases) | 1,372 | US$0.064 | 39 / 46 / 43 / 42 |
+| Outfits (6 cases) | 1,756 | US$0.095 | 50 / 58 / 53 / 51 |
+
+- **Cutouts:** all 84 passed the transparency check, and print, plaid, mesh and pale fabric were similar across models. In the one source with a white shirt cuff showing inside a jacket sleeve, 2.6 kept that cuff in 8 of 9 cutouts and 2.5 in none of 3, despite the prompt asking to remove other garments.
+- **Instruction following:** 2.6 kept the layered look's coat closed as asked in all 9 attempts, where 2.5 left it open in all 3. In the repeat reviewed across all modelled and outfit cases, 2.5 often put hands in pockets over the garment and 2.6 kept them clear, at the cost of a stiffer pose.
+- **Refusals:** the four failures were all on 2.6, on the denim-shorts outfit: the API blocked 4 of 9 outputs as `sexual` at the `output` stage, against none of 3 on 2.5. This is one case, but `moderation=low` didn't prevent it.
+- **Complexity:** cost was identical and latency differences were small. The reviewer saw no clear fidelity gain or harm between levels.
+- **Likeness and printed text:** no clear winner, and likeness is best judged by the person in the photo.
+
+One non-blind reviewer judged these from contact sheets and selected close-ups, so treat them as directional. Prompts weren't tuned for 2.6, and each case has few repeats. Hosted behaviour and approval rates weren't measured.
 
 ### Marked edits
 
