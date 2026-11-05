@@ -692,7 +692,11 @@ test("selected reference persists and is used for modeling and regeneration", as
   await h.request("POST", regenerate, { prompt: "Use neutral daylight" });
   await h.waitForStage(job.id, "modeled");
   edits = h.requests.filter((entry) => entry.type === "edit");
-  const retryScene = (await h.request("GET", `/api/import/jobs/${job.id}`)).stages.modeled.setting;
+  const regenerated = (await h.request("GET", `/api/import/jobs/${job.id}`)).stages.modeled;
+  assert.notEqual(regenerated.assetUrl, regenerated.previousAssetUrl);
+  assert.ok(regenerated.previousAssetUrl, "review can compare the replaced photo");
+  await h.request("GET", regenerated.previousAssetUrl);
+  const retryScene = regenerated.setting;
   assert.notEqual(retryScene, initialScene, "regeneration changes the scene after restart");
   assert.match(edits[1].form.get("prompt"), /User regeneration direction: Use neutral daylight/);
   const retryPlan = h.requests.filter(entry => entry.type === "setting").at(-1).request;

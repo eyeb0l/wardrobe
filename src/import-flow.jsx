@@ -10,6 +10,7 @@ import { isDetectionRetryRunning } from "../shared/detection-retry.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
 import { ImageCheck } from "./image-check.jsx";
 import { marksFor, PhotoMarkup } from "./photo-markup.jsx";
+import { ImageCompare } from "./image-compare.jsx";
 import "./import-flow.css";
 
 const API = "/api/import/jobs";
@@ -124,14 +125,17 @@ function DetectionRetryReview({ job, busy, checking, onAction }) {
   </div>;
 }
 
-function CutoutPreview({ asset, diagnostics, highlight, onLoaded }) {
+function CutoutPreview({ asset, previousAsset, diagnostics, highlight, onLoaded }) {
   const [background, setBackground] = useState("checker");
   const [zoom, setZoom] = useState(false);
   return <div>
     <div className="import-cleanup-toolbar"><label>Preview background <select value={background} onChange={e => setBackground(e.target.value)}><option value="checker">Checkerboard</option><option value="light">Light</option><option value="dark">Dark</option></select></label><button className="import-button" onClick={() => setZoom(!zoom)}>{zoom ? "Fit image" : "Zoom in"}</button></div>
     <div className={`import-cleanup-viewport is-${background}`}>
       <div className={`import-cutout-frame${zoom ? " is-zoomed" : ""}`}>
-        <img src={asset} alt="Garment ready for review" onLoad={() => onLoaded(asset)} onError={() => onLoaded(null)} />
+        {/* Zooming pans the viewport, so it shows the new image alone. */}
+        <ImageCompare key={asset} before={zoom ? null : previousAsset} after={asset} alt="Garment ready for review" unoptimized onLoad={() => onLoaded(asset)}>
+          <img src={asset} alt="Garment ready for review" onLoad={() => onLoaded(asset)} onError={() => onLoaded(null)} />
+        </ImageCompare>
         {highlight && diagnostics?.regions?.length > 0 && <svg viewBox={`0 0 ${diagnostics.width} ${diagnostics.height}`} aria-label="Edges to check">{diagnostics.regions.map((r, i) => <rect key={i} x={Math.max(0, r.x-5)} y={Math.max(0, r.y-5)} width={r.width+10} height={r.height+10} fill="none" stroke="#b84b33" strokeWidth="2" />)}</svg>}
       </div>
     </div>
@@ -156,15 +160,16 @@ function ReviewEditor({ cleanupEditor, job, stage, draft, setDraft, regenPrompt,
   const referenceChanged = stage === "modeled" && job.stages.modeled.source !== "uploaded" && selectedReference !== (job.modelReferenceId || "default");
   const referenceAvailable = references.some((reference) => reference.id === selectedReference);
   const asset = useOriginal ? job.originalAssetUrl : job.stages[stage]?.assetUrl || job.stages.garment.assetUrl;
+  const previousAsset = !isCrop && job.stages[stage]?.status === "review" ? job.stages[stage].previousAssetUrl : null;
   const primaryValid = HEX_COLOR.test(draft.color);
   const secondaryValid = !draft.secondaryColor || HEX_COLOR.test(draft.secondaryColor);
   return (
     <div className="import-editor">
       {isGarment ? <div className="import-garment-review">
-        <CutoutPreview onLoaded={setLoadedGarment} asset={asset} diagnostics={job.stages.garment.cleanupAssetDiagnostics || job.stages.garment.cleanupDiagnostics} highlight={job.stages.garment.cleanupNeedsReview} />
+        <CutoutPreview onLoaded={setLoadedGarment} asset={asset} previousAsset={previousAsset} diagnostics={job.stages.garment.cleanupAssetDiagnostics || job.stages.garment.cleanupDiagnostics} highlight={job.stages.garment.cleanupNeedsReview} />
         {job.stages.garment.cleanupNeedsReview && <p className="import-field-error" role="status">Some edges need a closer look. Check the marked areas or adjust the cleanup before approving.</p>}
         {cleanupEditor && <details className="import-edge-options"><summary>Adjust edges</summary>{cleanupEditor}</details>}
-      </div> : <OptimizedImage className={`import-editor__preview${useOriginal || originalGarment ? " has-transparency" : ""}`} src={asset} alt={useOriginal || originalGarment ? "Original product image" : isCrop ? "Detected item crop" : isGarment ? "Extracted garment" : isFailed && !job.stages[stage]?.assetUrl ? "Garment awaiting modelled photo" : "Generated modelled look"} />}
+      </div> : <ImageCompare key={asset} className="import-editor__preview" before={previousAsset} after={asset} alt="Generated modelled look"><OptimizedImage className={`import-editor__preview${useOriginal || originalGarment ? " has-transparency" : ""}`} src={asset} alt={useOriginal || originalGarment ? "Original product image" : isCrop ? "Detected item crop" : isGarment ? "Extracted garment" : isFailed && !job.stages[stage]?.assetUrl ? "Garment awaiting modelled photo" : "Generated modelled look"} /></ImageCompare>}
       <div className="import-fields">
         {isCrop ? <ImageCheck kind="preflight" endpoint={`${API}/${job.id}/preflight`} fingerprint={JSON.stringify([job.updatedAt, job.metadata, job.stages.crop])} enabled={imageChecksReady} active={active} disabled={decisionBusy || cropping} /> : null}
         <p className="import-editor__stage">{isCrop ? "Detected item" : isGarment ? "Garment image" : "Modelled photo"}</p>

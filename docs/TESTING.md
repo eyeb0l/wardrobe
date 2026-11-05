@@ -644,6 +644,20 @@ rg --files /tmp/wardrobe-markup-browser
 
 Choose an unused port and unique artifact directory. The desktop/mobile suite draws on synthetic outfit and modelled photos, with real touch input on mobile. It covers undo and clear, Escape leaving only the marking layer, the required description, the PNG sent with each retry, and marks not carrying over to a replacement photo. Provider requests are intercepted. Inspect `outfit-marking.png`, `outfit-ready.png`, `import-marking.png`, `import-marked.png` and `browser-health.json` in each viewport's directory. Node tests cover mark validation and scaling, image order, prompts, kept scenes, complexity gating, moderation, stale photos, hosted tasks and telemetry. These mocked tests do not establish real AI image quality; follow the visual comparison recipe in [model-migration.md](model-migration.md) for that.
 
+## Regenerated image comparison
+
+Use the same Node 22 installation, pinned Playwright and cached Chromium above:
+
+```bash
+TMPDIR=/dev/shm node --test scripts/outfit-api.test.mjs scripts/import-job-api.test.mjs
+WARDROBE_BROWSER_PORT=5471 \
+  WARDROBE_BROWSER_ARTIFACTS=/tmp/wardrobe-compare-browser \
+  npm run test:browser -- tests/browser/image-compare.spec.mjs
+rg --files /tmp/wardrobe-compare-browser
+```
+
+Choose an unused port and unique artifact directory. The desktop/mobile suite regenerates synthetic outfit photos, transparent cutouts and modelled photos, then reads painted pixels to check that dragging (real touch input on mobile) and the keyboard reveal each image. It also covers a saved photo of a different shape, zooming a cutout, and a previous image that fails to load. Provider requests are intercepted. Inspect `outfit-compare.png`, `outfit-compare-moved.png`, `import-cutout-compare.png`, `import-modelled-compare.png` and `browser-health.json` in each viewport's directory. Node tests cover which image each regeneration records and that an upload records none.
+
 ## Shopping try-on
 
 Use the same Node 22 installation, pinned Playwright and cached Chromium above:
