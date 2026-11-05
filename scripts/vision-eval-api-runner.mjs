@@ -12,7 +12,7 @@
  * https://developers.openai.com/api/reference/typescript/resources/responses/subresources/input_tokens/methods/count
  */
 import { createHash } from 'node:crypto';
-import { readFile, writeFile, rename, mkdir, chmod, open, rm } from 'node:fs/promises';
+import { readFile, rename, mkdir, chmod, open, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 

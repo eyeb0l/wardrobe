@@ -1,4 +1,4 @@
-import { cleanupTolerance, processChromaBackground, frameTransparentGarment } from "./chroma-processing.mjs";
+import { cleanupTolerance, processChromaBackground } from "./chroma-processing.mjs";
 export { processChromaBackground, removeChromaBackground, frameTransparentGarment } from "./chroma-processing.mjs";
 import { automaticChromaCleanup, inspectFinishedCutout } from "./automatic-chroma-cleanup.mjs";
 import { normalizeGeneratedTransparency, NATIVE_TRANSPARENCY_RECIPE } from "./native-transparent-cutout.mjs";
@@ -82,10 +82,6 @@ function publicJob(job) {
   const copy = structuredClone(job);
   delete copy.internal;
   return copy;
-}
-
-function extension(mime = "image/png") {
-  return ({ "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" })[mime] || "png";
 }
 
 function decodeImage(input) {
