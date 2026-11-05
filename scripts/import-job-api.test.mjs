@@ -431,8 +431,8 @@ test("default models complete the import and review flow with ordered PNG refere
   await h.waitForStage(id, "modeled");
   const edits = h.requests.filter((entry) => entry.type === "edit");
   assert.equal(edits.length, 2);
+  assert.deepEqual(edits.map(({ form }) => form.get("model")), ["gpt-image-2.5-sunburst", "gpt-image-2.6-sunburst"]);
   for (const { form } of edits) {
-    assert.equal(form.get("model"), "gpt-image-2.5-sunburst");
     assert.equal(form.get("quality"), "high");
     assert.equal(form.get("output_format"), "png");
     assert.equal(form.has("input_fidelity"), false);
@@ -1363,8 +1363,21 @@ test("cutouts and modelled photos set moderation and per-stage complexity on 2.6
   assert.deepEqual([modeled.form.get("moderation"), modeled.form.get("complexity")], ["low", "high"]);
 });
 
-test("the default 2.5 model never receives complexity, which it rejects", async (t) => {
+test("a default cutout on 2.5 gets no complexity, while a default modelled photo on 2.6 does", async (t) => {
   const h = await harness(t, { OPENAI_IMAGE_COMPLEXITY: "low" });
+  await modeledReview(h);
+  const edits = h.requests.filter((entry) => entry.type === "edit");
+  // This source can use its original cutout, so its only image request is the modelled photo.
+  assert.deepEqual(edits.map(({ form }) => [form.get("model"), form.get("complexity")]), [["gpt-image-2.6-sunburst", "low"]]);
+  const { jobs: [job] } = await h.request("POST", "/api/import/jobs", { imageBase64: (await sharp(h.source).toBuffer()).toString("base64") });
+  await h.request("POST", `/api/import/jobs/${job.id}/stages/crop/approve`);
+  await h.waitForStage(job.id, "garment");
+  const cutout = h.requests.filter((entry) => entry.type === "edit").at(-1);
+  assert.deepEqual([cutout.form.get("model"), cutout.form.has("complexity")], ["gpt-image-2.5-sunburst", false]);
+});
+
+test("a 2.5 model configured for every stage never receives complexity, which it rejects", async (t) => {
+  const h = await harness(t, { OPENAI_IMAGE_MODEL: "gpt-image-2.5-sunburst", OPENAI_IMAGE_COMPLEXITY: "low" });
   const job = await modeledReview(h);
   await h.request("POST", `/api/import/jobs/${job.id}/stages/modeled/regenerate`, { prompt: "Remove the zip.", markup: await importMarks(h), baseImage: job.stages.modeled.assetUrl }, 202);
   await h.waitForStage(job.id, "modeled");

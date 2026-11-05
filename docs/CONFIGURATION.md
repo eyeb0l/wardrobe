@@ -7,9 +7,9 @@
 | `OPENAI_API_KEY` | Required for web API generation and analysis |
 | `OPENAI_DETECTION_MODEL` | `gpt-6.1-terra`; import clothing detection |
 | `OPENAI_VISION_MODEL` | `gpt-6-luna`; scene planning, outfit curation, Shopping and accessory advice. Does not affect detection |
-| `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst`; default image model |
-| `OPENAI_GARMENT_MODEL` | Overrides the image model for cutouts |
-| `OPENAI_MODELED_MODEL` | Overrides the image model for modelled pieces and outfits |
+| `OPENAI_IMAGE_MODEL` | Unset; when set, replaces both defaults below |
+| `OPENAI_GARMENT_MODEL` | `gpt-image-2.5-sunburst`; cutouts. Overrides `OPENAI_IMAGE_MODEL` |
+| `OPENAI_MODELED_MODEL` | `gpt-image-2.6-sunburst`; modelled pieces and outfits. Overrides `OPENAI_IMAGE_MODEL` |
 | `OPENAI_IMAGE_QUALITY` | `high` |
 | `OPENAI_IMAGE_COMPLEXITY` | Unset, so the model default applies. GPT Image 2.6 only; `low`, `medium` or `high` for new cutouts and modelled images |
 | `OPENAI_GARMENT_COMPLEXITY` | Overrides `OPENAI_IMAGE_COMPLEXITY` for cutouts |

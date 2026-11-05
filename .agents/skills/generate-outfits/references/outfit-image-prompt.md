@@ -22,7 +22,7 @@ Subject: Preserve the same person's recognizable face, hair, age, build, skin te
 
 Style/medium: Photorealistic natural editorial fashion campaign with authentic skin and fabric texture and no synthetic AI polish.
 
-Composition/framing: Square 1:1 image. Show the complete person and outfit from head through shoes. Keep the person centered and occupying most of the frame with modest breathing room. Use a relaxed, mostly front-facing pose with arms away from the torso so every item remains readable.
+Composition/framing: Square 1:1 image. Show the complete person and outfit from head through shoes. Keep the person centered and occupying most of the frame with modest breathing room. Use a natural, unposed stance: weight shifted onto one leg, shoulders and hips turned slightly from the camera, and arms hanging loosely with a soft bend at the elbow, not straight or symmetrical. Keep hands relaxed and off the clothing so every item stays readable.
 
 Lighting/mood: Warm professional natural light, realistic shadows, and restrained editorial color grading.
 

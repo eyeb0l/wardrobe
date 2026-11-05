@@ -47,3 +47,11 @@ test("marked edits keep the photo first and hold the framing", () => {
   assert.match(prompt, /Remove every annotation mark/);
   for (const direction of [undefined, "", "  "]) assert.throws(() => buildModeledMarkupPrompt({ direction }), /description of the change/);
 });
+
+test("modelled photos ask for a natural pose and don't carry over the reference's clothes", () => {
+  const prompt = buildModeledPhotoPrompt({ setting: "A quiet ferry terminal." });
+  assert.match(prompt, /natural, unposed stance: weight shifted onto one leg/);
+  assert.match(prompt, /Keep hands relaxed and off the clothing/);
+  assert.doesNotMatch(prompt, /mostly front-facing/);
+  assert.match(prompt, /Replace everything the person wears in Image 1; do not copy any of its clothes/);
+});

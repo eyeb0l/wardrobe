@@ -6,9 +6,9 @@ import sharp from "sharp";
 import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
 import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
-import { IMAGE_MODERATION, imageComplexity, providerAdvice } from "./image-request.mjs";
+import { DEFAULT_MODELED_MODEL, IMAGE_MODERATION, imageComplexity, providerAdvice } from "./image-request.mjs";
 import { prepareMarkup } from "./photo-markup.mjs";
-import { buildMarkupEditPrompt } from "./modeled-photo-prompts.mjs";
+import { buildMarkupEditPrompt, NATURAL_POSE } from "./modeled-photo-prompts.mjs";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishCandidateImage, publishImage } from "./outfit-storage.mjs";
 import { outfitCutoutPreview } from "./outfit-cutouts.mjs";
 import { readLibrary, publicLibraryItem, withLibraryLock } from "./wardrobe-library.mjs";
@@ -157,7 +157,7 @@ Scene/backdrop: ${outfit.setting}.
 Subject: Preserve the same person's recognizable face, hair, age, build, skin texture, and body proportions. Dress them in the exact referenced top and bottom${outer ? " plus the exact outer layer" : ""}${items.some((item) => ["shoes", "accessories_up"].includes(item.part)) ? " and all selected shoes/accessories" : ""}. Invisible basics such as socks are allowed where needed.${shoes ? " Use only the referenced shoes." : " Plain understated shoes are allowed because no shoe reference is provided."} You may add simple unpatterned black or brown tights, sheer or opaque, when seasonally or stylistically appropriate, even if they are not represented as a wardrobe item. Do not add, replace, or invent any other visible garment or accessory.
 
 Style/medium: Photorealistic natural editorial fashion campaign with authentic skin and fabric texture and no synthetic AI polish.
-Composition/framing: Square 1:1 image. Show the complete person and outfit from head through shoes. Keep the person centered and occupying most of the frame with modest breathing room. Use a relaxed, mostly front-facing pose with arms away from the torso so every item remains readable.
+Composition/framing: Square 1:1 image. Show the complete person and outfit from head through shoes. Keep the person centered and occupying most of the frame with modest breathing room. ${NATURAL_POSE}
 Lighting/mood: Warm professional natural light, realistic shadows, and restrained editorial color grading.
 Garment fidelity: Preserve every referenced garment precisely: color, material, fit, construction, pattern, graphics, logos, text, proportions, distinctive details, and real closure construction. Keep the top and bottom recognizable without changing their natural length, tuck, or construction. Do not guess illegible graphics or invent branding. The references take precedence over descriptive metadata.
 ${layered}
@@ -190,7 +190,7 @@ export function wardrobeOutfitApi(options = {}) {
   let drainPromise = Promise.resolve();
   let serial = Promise.resolve();
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
-  const models = () => ({ vision: setting("OPENAI_VISION_MODEL", "gpt-6-luna"), image: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst")) });
+  const models = () => ({ vision: setting("OPENAI_VISION_MODEL", "gpt-6-luna"), image: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_MODELED_MODEL)) });
   const ensureActive = () => { if (disposed) throw fail("The server is restarting. Refresh after it is ready.", 503); };
   const ensureWritable = () => { ensureActive(); if (options.readOnly) throw fail("This outfit request is read-only.", 409); };
   const exclusive = (task) => { const result = serial.then(() => { ensureActive(); return task(); }); serial = result.catch(() => {}); return result; };

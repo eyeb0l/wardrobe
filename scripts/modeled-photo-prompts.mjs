@@ -13,6 +13,8 @@ export function normalizeModeledSetting(setting) {
   return setting.trim();
 }
 
+export const NATURAL_POSE = "Use a natural, unposed stance: weight shifted onto one leg, shoulders and hips turned slightly from the camera, and arms hanging loosely with a soft bend at the elbow, not straight or symmetrical. Keep hands relaxed and off the clothing so every item stays readable.";
+
 const directionText = direction => typeof direction === "string" ? direction.trim().slice(0, 1200) : "";
 
 export function buildModeledSettingPrompt({ metadata = {}, previousSetting = null, recentSettings = [], direction = "" } = {}) {
@@ -61,7 +63,7 @@ References: Image 1 supplies only the person's identity and body proportions, no
 
 Dress the person from Image 1 in the garment from Image 2. Preserve their recognizable face, hair, age, build, skin tone, and natural skin texture. Adapt only the garment's drape and pose to the body; preserve its design, proportions, length, neckline, sleeves, pockets, and actual fastenings. Do not invent an opening or closure. Preserve asymmetry and readable graphics or lettering without inventing uncertain details.
 
-Use plain neutral supporting clothes only where needed to complete the outfit. Invisible basics such as socks are allowed where needed. You may add simple unpatterned black or brown tights, sheer or opaque, when seasonally or stylistically appropriate, even if they are not represented as a wardrobe item. Beyond these basics and the necessary neutral supporting clothes, do not invent other visible garments or accessories. Keep the complete featured item visible with all extremities inside the frame; include both feet for footwear. Use a relaxed mostly front-facing pose with arms away from the featured item. Do not cover it with other clothes or accessories.
+Replace everything the person wears in Image 1; do not copy any of its clothes. Use plain neutral supporting clothes only where needed to complete the outfit, such as a modest plain white or grey top, plain straight trousers in a quiet neutral, and simple shoes. Invisible basics such as socks are allowed where needed. You may add simple unpatterned black or brown tights, sheer or opaque, when seasonally or stylistically appropriate, even if they are not represented as a wardrobe item. Beyond these basics and the necessary neutral supporting clothes, do not invent other visible garments or accessories. Keep the complete featured item visible with all extremities inside the frame; include both feet for footwear. ${NATURAL_POSE} Do not cover it with other clothes or accessories.
 
 Scene/backdrop: ${scene}
 Style/medium: Photorealistic natural editorial fashion photograph with authentic skin and fabric texture and no synthetic AI polish.

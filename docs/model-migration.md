@@ -1,6 +1,6 @@
 # Image and vision model migration
 
-The importer defaults to `gpt-image-2.5-sunburst` for cutouts and modelled photos, `gpt-6.1-terra` for garment detection, and `gpt-6-luna` for modelled-scene planning. Existing library images are never regenerated automatically.
+The importer defaults to `gpt-image-2.5-sunburst` for cutouts, `gpt-image-2.6-sunburst` for modelled photos and outfits, `gpt-6.1-terra` for garment detection, and `gpt-6-luna` for modelled-scene planning. Existing library images are never regenerated automatically.
 
 The manual difficult-detection retry uses `gpt-6.1-sol` at medium reasoning effort. The default vision requests omit `reasoning.effort`, which OpenAI documents as medium for [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) and [GPT-6.1 Terra](https://developers.openai.com/api/docs/models/gpt-6.1-terra). Detection moved from Luna to Terra after the [GPT-6 detection evaluation](vision-gpt6-detection-evaluation.md). Sol is used only when the user chooses **Retry with Sol**; it is not an automatic fallback. The private Preview deployment was checked with a copied wardrobe before the original GPT-6 production release. Historical GPT-5.6 evaluations remain linked below as baselines, not claims about GPT-6 quality.
 
@@ -12,9 +12,9 @@ Set overrides in local `.env` and restart Vite. Hosted configuration uses produc
 | --- | --- |
 | `OPENAI_DETECTION_MODEL` | `gpt-6.1-terra`; import clothing detection |
 | `OPENAI_VISION_MODEL` | `gpt-6-luna`; scene planning, outfit curation, accessories and shopping assessment. Does not affect detection |
-| `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst`; fallback for both image stages |
-| `OPENAI_GARMENT_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for cutouts |
-| `OPENAI_MODELED_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for modelled photos |
+| `OPENAI_IMAGE_MODEL` | Unset; when set, replaces both defaults below. A deployment that sets it stays on that model until it also sets the stage overrides |
+| `OPENAI_GARMENT_MODEL` | `gpt-image-2.5-sunburst`; cutouts. Overrides `OPENAI_IMAGE_MODEL` |
+| `OPENAI_MODELED_MODEL` | `gpt-image-2.6-sunburst`; modelled photos and outfits. Overrides `OPENAI_IMAGE_MODEL` |
 | `OPENAI_IMAGE_QUALITY` | `high` for both image stages |
 | `OPENAI_IMAGE_COMPLEXITY` | Unset (model default). Sent only to GPT Image 2.6 models, because 2.5 rejects the field |
 | `OPENAI_GARMENT_COMPLEXITY` | Overrides `OPENAI_IMAGE_COMPLEXITY` for cutouts |
@@ -31,7 +31,7 @@ Each modelled attempt first makes a separate `/responses` scene-planning request
 
 ### GPT Image 2.6
 
-`gpt-image-2.6-sunburst` and `gpt-image-2.6-flare` work with the importer's existing request shape, but the default stays on 2.5 until a visual comparison supports a change. Checks on 5 November 2026, using one synthetic garment at `quality=low` on `/images/edits`, found:
+`gpt-image-2.6-sunburst` and `gpt-image-2.6-flare` work with the importer's existing request shape. Checks on 5 November 2026, using one synthetic garment at `quality=low` on `/images/edits`, found:
 
 | Request | Result |
 | --- | --- |
@@ -46,7 +46,7 @@ These are single calls on a simple image. They establish that the requests are a
 
 ### GPT Image 2.5 and 2.6 comparison, 5 November 2026
 
-The default stays on 2.5 until this comparison leads to a decision. 228 calls compared 2.5 Sunburst with 2.6 Sunburst at its default complexity and at `medium` and `low`. They covered 19 cases across the three stages with three repeats each, at `quality=high` and `moderation=low`, using the same prompts, references and sizes per case. It cost US$16.64 at the listed rates. Images and contact sheets remain private in `data/image-2.6-comparison-2026-11-05/`.
+Modelled photos and outfits moved to 2.6 after this comparison and the follow-up below, while cutouts stayed on 2.5. 228 calls compared 2.5 Sunburst with 2.6 Sunburst at its default complexity and at `medium` and `low`. They covered 19 cases across the three stages with three repeats each, at `quality=high` and `moderation=low`, using the same prompts, references and sizes per case. It cost US$16.64 at the listed rates. Images and contact sheets remain private in `data/image-2.6-comparison-2026-11-05/`.
 
 | Stage | Billed output tokens, all configurations | Mean cost | Median seconds: 2.5 / 2.6 default / medium / low |
 | --- | ---: | ---: | --- |
@@ -61,6 +61,22 @@ The default stays on 2.5 until this comparison leads to a decision. 228 calls co
 - **Likeness and printed text:** no clear winner, and likeness is best judged by the person in the photo.
 
 One non-blind reviewer judged these from contact sheets and selected close-ups, so treat them as directional. Prompts weren't tuned for 2.6, and each case has few repeats. Hosted behaviour and approval rates weren't measured.
+
+### Pose and revealing pieces, 5 November 2026
+
+The same request shape tested two rewrites of the pose sentence on 2.6, at two repeats across six everyday cases, all of which succeeded. The weight-on-one-leg wording, now `NATURAL_POSE`, looked more natural than the old front-facing wording, and the layered coat stayed closed. A mid-step alternative often crossed the legs.
+
+Four revealing pieces supplied for the test, plus the earlier outfit, gave these results, as successful images out of attempts. All blocks were `sexual`. This testing cost US$4.84, one reference photo was used and samples are small.
+
+| Piece | 2.5 | 2.6, old pose | 2.6, `NATURAL_POSE` | 2.6, conservative styling |
+| --- | ---: | ---: | ---: | ---: |
+| Denim shorts, mini skirt and skort, combined | 5 of 9 | 9 of 9 | 9 of 9 | 9 of 9 |
+| Lace bodysuit, blocked at `input` | 0 of 3 | 0 of 3 | Not run | 0 of 3 |
+| Floral blouse and denim shorts outfit | 3 of 3 | 5 of 9 | 5 of 6 | 4 of 6 |
+
+So a fallback to 2.5 wasn't added: it wouldn't rescue the bodysuit, and it did worse on the other three. A block at the `output` stage varies between attempts, so the error suggests trying again. A block at `input` repeated on all nine attempts, so the error suggests changing the request or uploading a photo. Conservative styling wasn't made a default because it hides more of the look; it can still be requested in a photo's change note.
+
+The reference photo's clothes also carried over as supporting clothes with shorts and skirts, so the modelled prompt now names plain alternatives. In 13 further images using the final prompts, across three of the revealing pieces and five everyday or outfit cases, none was blocked, white or grey tops replaced the camisole, and the coat stayed closed. That check cost US$0.93.
 
 ### Marked edits
 

@@ -12,7 +12,7 @@ import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile, containedFiles
 import { decisionsConfig, hashEvidence } from "./decisions.mjs";
 import { checkDecisionImages } from "./decision-checks.mjs";
 import { decisionUsageLog } from "./decision-usage.mjs";
-import { IMAGE_MODERATION, imageComplexity, providerAdvice } from "./image-request.mjs";
+import { DEFAULT_GARMENT_MODEL, DEFAULT_MODELED_MODEL, IMAGE_MODERATION, imageComplexity, providerAdvice } from "./image-request.mjs";
 import { prepareMarkup } from "./photo-markup.mjs";
 import path from "node:path";
 import sharp from "sharp";
@@ -33,7 +33,6 @@ const STAGES = new Set(["crop", "garment", "modeled"]);
 const DECISIONS = new Set(["approve", "reject"]);
 const PARTS = new Set(["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-const DEFAULT_IMAGE_MODEL = "gpt-image-2.5-sunburst";
 const DEFAULT_VISION_MODEL = "gpt-6-luna";
 // Detection has its own setting: GPT-6.1 Terra measured clearly better than Luna on
 // import detection, while other vision tasks stay on OPENAI_VISION_MODEL.
@@ -607,7 +606,7 @@ export function wardrobeImportApi(options = {}) {
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, { tidyGarment: current.tidyGarment === true });
           stage.generationPrompt = current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt;
           await saveJob(current);
-          const garmentModel = setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL));
+          const garmentModel = setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_GARMENT_MODEL));
           bytes = await openAIEdit({ outsideLease: options.outsideLease, telemetry, beforePaidCall: beforeImageCall, timeoutMs, key, baseUrl: apiBaseUrl(), model: garmentModel, complexity: imageComplexity(setting, "garment", garmentModel), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", background: "transparent", images: [original], prompt: stage.generationPrompt });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
@@ -634,7 +633,7 @@ export function wardrobeImportApi(options = {}) {
             throw error;
           }
           const model = { data: modelData, mime: "image/png", name: "model.png" };
-          const modeledModel = setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL));
+          const modeledModel = setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", DEFAULT_MODELED_MODEL));
           const marked = current.internal?.modeledMarkup;
           if (marked) {
             // The marks refer to this exact photo, so its scene is kept rather than replanned.
