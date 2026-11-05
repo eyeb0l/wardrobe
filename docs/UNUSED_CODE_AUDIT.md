@@ -1,7 +1,8 @@
 # Unused code audit — 5 November 2026
 
 Baseline: `b5b555f` (full SHA in the accompanying validation artifacts).
-Local branch: `cleanup/proven-unused-code-2026-11-05`. No push or merge.
+Branch: `cleanup/proven-unused-code-2026-11-05`. The audit and deletion batch
+were completed locally before PR publication; no merge was performed.
 
 ## Method and entry points
 
