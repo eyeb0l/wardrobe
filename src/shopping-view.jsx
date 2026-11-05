@@ -316,7 +316,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
   };
 
   const importWebsite = async () => {
-    if (submitting.current || findingGaps || importController.current || !websiteUrl.trim()) return;
+    if (submitting.current || findingGaps || tryingOn || importController.current || !websiteUrl.trim()) return;
     let url;
     try {
       url = new URL(websiteUrl.trim());

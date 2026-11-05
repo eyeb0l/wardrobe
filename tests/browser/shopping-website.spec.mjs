@@ -288,6 +288,10 @@ test('Try it on requests a preview only when asked, labels it and drops it with 
   await expect(page.getByRole('button', { name: 'Check this piece', exact: false })).toBeDisabled();
   await expect(page.getByRole('status').filter({ hasText: 'usually takes a few seconds' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Import link', exact: true })).toBeDisabled();
+  // Enter in the URL field must respect the same rule as the disabled button.
+  const urlField = page.getByRole('textbox', { name: 'Product URL', exact: true });
+  await urlField.fill(productUrl);
+  await urlField.press('Enter');
   release();
 
   const preview = page.getByRole('img', { name: 'AI preview of you wearing this piece', exact: true });
@@ -295,6 +299,7 @@ test('Try it on requests a preview only when asked, labels it and drops it with 
   await expect(page.getByText("It can't show size or fit", { exact: false })).toBeVisible();
   expect(shopping.tryOns).toHaveLength(1);
   expect(shopping.tryOns[0]).toEqual({ image: imageDataUrl, modelReferenceId: reference.id, websiteSource: source });
+  expect(shopping.imports).toEqual([{ websiteUrl: productUrl }]);
   expect(shopping.analyses).toEqual([]);
   await preview.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('shopping-try-on.png') });
