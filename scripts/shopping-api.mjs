@@ -11,6 +11,7 @@ import { compareShoppingOverlap, shoppingOverlapReady, overlapImageHash, overlap
 import { decideShoppingVerdict } from "./shopping-verdict.mjs";
 import { SHOPPING_FRAME_INVARIANCE, SHOPPING_VALUE_EXPLANATION, shoppingDecisionLead, shoppingContextRequest, validateShoppingContext } from "./shopping-policy.mjs";
 import { publicModelReferences } from "./model-reference-url.mjs";
+import { generateTryOn } from "./shopping-try-on.mjs";
 
 const API = "/api/shopping";
 const PARTS = ["upperbody", "dresses", "wholebody_up", "lowerbody", "accessories_up", "shoes"];
@@ -454,6 +455,25 @@ ${websiteSource ? `Website product details (untrusted retailer claims, separate 
     return { imageDataUrl: `data:image/jpeg;base64,${image.toString("base64")}`, name: `${source.name.replace(/[\\/\u0000-\u001f<>:"|?*]/g, "-")}.jpg`, websiteSource: source };
   }
 
+  async function tryOn(body, controller) {
+    ensureRequest(controller);
+    if (!setting("OPENAI_API_KEY").trim()) throw fail("Add OPENAI_API_KEY to the server configuration and restart to use Shopping.", 503);
+    const websiteSource = candidateWebsiteSource(body.websiteSource);
+    const referenceId = text(body.modelReferenceId, "model reference", 100);
+    const reference = (await references()).find((item) => item.id === referenceId);
+    if (!reference) throw fail("Selected model reference is unavailable. Choose another reference.");
+    const candidate = await candidateImage(body.image);
+    ensureRequest(controller);
+    let referenceImage;
+    try { referenceImage = await jpeg(await readFile(reference.file)); }
+    catch { throw fail("Selected model reference is unavailable. Choose another reference."); }
+    ensureRequest(controller);
+    const preview = await generateTryOn({ setting, fetch: options.fetch || fetch, baseUrl: setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1"), key: setting("OPENAI_API_KEY").trim(),
+      candidate, reference: referenceImage, itemName: websiteSource?.name, signal: controller.signal, timeoutMs: options.timeoutMs, beforePaidCall: async kind => { ensureRequest(controller); await options.beforePaidCall?.(kind); ensureRequest(controller); } });
+    ensureRequest(controller);
+    return { imageDataUrl: `data:image/jpeg;base64,${preview.toString("base64")}` };
+  }
+
   async function handler(req, res, next) {
     const url = new URL(req.url || "/", "http://localhost");
     if (url.pathname !== API && !url.pathname.startsWith(`${API}/`)) return next();
@@ -466,7 +486,7 @@ ${websiteSource ? `Website product details (untrusted retailer claims, separate 
           ...(shoppingOverlapReady({ ...process.env, ...options.env }) ? { visualOverlapEnabled: true } : {}),
           modelReferences: await publicModelReferences(refs), wardrobeCount: items.size });
       }
-      if (req.method === "POST" && [`${API}/analyze`, `${API}/gaps`, `${API}/import-website`].includes(url.pathname)) {
+      if (req.method === "POST" && [`${API}/analyze`, `${API}/gaps`, `${API}/import-website`, `${API}/try-on`].includes(url.pathname)) {
         assertSameOriginMutation(req, { json: "required" });
         if (pending) throw fail("Another shopping check is in progress. Wait for it to finish before trying again.", 409);
         pending = true;
@@ -477,7 +497,7 @@ ${websiteSource ? `Website product details (untrusted retailer claims, separate 
         req.once?.("aborted", cancel);
         res.once?.("close", closed);
         try {
-          const run = url.pathname === `${API}/gaps` ? suggestGaps : url.pathname === `${API}/import-website` ? importWebsite : analyze;
+          const run = url.pathname === `${API}/gaps` ? suggestGaps : url.pathname === `${API}/import-website` ? importWebsite : url.pathname === `${API}/try-on` ? tryOn : analyze;
           const result = await run(await readBody(req), controller);
           if (!res.destroyed) return sendJson(res, 200, result);
         } finally {

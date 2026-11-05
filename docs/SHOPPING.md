@@ -12,6 +12,12 @@ Expand **What’s missing?** (collapsed by default). **Find my gaps** suggests u
 
 To assess a particular piece, import a product link or choose/drop/paste a listing screenshot or garment photo, select a model reference, and optionally add the occasion, price or fit you have in mind. **Check this piece** returns a recommendation, styling considerations, overlap and combinations with owned pieces. Unclear evidence may produce **A closer look is needed**; photographs alone cannot establish exact sizing, fabric quality or value.
 
+### Try it on
+
+Once a piece is added, **Try it on** creates a quick picture of your selected model reference wearing it. It's separate from **Check this piece**: it runs only when you choose it, makes one paid image request and works before or after a check. The preview stays in the browser, is never saved and has no effect on the recommendation. Changing the photo or reference removes it.
+
+It's a rough preview for colour and styling. It can't show size or fit, and details may differ from the real piece. It uses a faster image model than the rest of the app; see [Configuration](CONFIGURATION.md). Previews count towards the hosted daily image limit, but aren't included in [generation telemetry](GENERATION_TELEMETRY.md).
+
 ### Import a product link
 
 Paste an individual retailer product link into **Product URL** and choose **Import link**. Shopping previews the product photo, available details and source link. Check that the photo shows the intended garment and colour, especially on pages with several variants or a model wearing multiple pieces. Add your own questions separately in the notes, then choose **Check this piece** when ready.

@@ -23,7 +23,7 @@ const assessment = (overrides = {}) => ({
   watchOuts: ["Check the shoulder fit in person."], pairings: [{ itemIds: ["bottom-1"], reason: "The lighter trousers balance the darker top." }], ...overrides,
 });
 
-async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decisionResponse, contextResponse, overlapTimeoutMs, verdictTimeoutMs, fetchWebsiteResource } = {}) {
+async function harness(t, { env = {}, timeoutMs, response, imageResponse, beforePaidCall, decisionResponse, contextResponse, overlapTimeoutMs, verdictTimeoutMs, fetchWebsiteResource } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wardrobe-shopping-test-"));
   const dataDir = path.join(root, "custom-data");
   await mkdir(path.join(dataDir, "imported"), { recursive: true });
@@ -44,6 +44,7 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
   await writeFile(path.join(dataDir, "library.json"), JSON.stringify(items));
   const candidate = await sharp(await image("#667755", 120, 180)).jpeg().toBuffer();
   const requests = [];
+  const imageRequests = [];
   const contextRequests = [];
   const decisionRequests = [];
   const imageReads = [];
@@ -64,6 +65,12 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
       decisionRequests.push({ request, options });
       if (decisionResponse) return decisionResponse(request, options);
       return decisionAnswers(request);
+    }
+    if (url === "https://shopping-test.invalid/v1/images/edits") {
+      const images = await Promise.all(options.body.getAll("image[]").map(async file => ({ name: file.name, type: file.type, bytes: Buffer.from(await file.arrayBuffer()) })));
+      imageRequests.push({ form: options.body, images, options });
+      if (imageResponse) return imageResponse(options);
+      return Response.json({ data: [{ b64_json: (await sharp(await image("#445566", 64, 96)).jpeg().toBuffer()).toString("base64") }] });
     }
     assert.equal(url, "https://shopping-test.invalid/v1/responses", "tests never call a real provider");
     assert.equal(options.headers.Authorization, "Bearer shopping-test-key");
@@ -106,7 +113,7 @@ async function harness(t, { env = {}, timeoutMs, response, beforePaidCall, decis
     t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
     return `http://127.0.0.1:${server.address().port}`;
   }
-  return { root, dataDir, identity, numberedIdentity, items, candidate, settings, requests, contextRequests, decisionRequests, imageReads, request, body,
+  return { root, dataDir, identity, numberedIdentity, items, candidate, settings, requests, imageRequests, contextRequests, decisionRequests, imageReads, request, body,
     serve,
     analyze: (overrides, expected = 200, headers) => request("POST", `${API}/analyze`, body(overrides), expected, headers),
     setResponse(value) { providerResponse = value; }, close() { plugin.closeBundle(); },
@@ -1046,4 +1053,61 @@ test("restarting Shopping aborts website downloads and never publishes a late pr
   assert.match(result.error, /server is restarting/);
   assert.equal(result.imageDataUrl, undefined);
   assert.equal(h.requests.length + h.decisionRequests.length, 0);
+});
+
+const tryOnBody = h => ({ image: `data:image/jpeg;base64,${h.candidate.toString("base64")}`, modelReferenceId: "default" });
+
+test("Try it on sends the person first with Flare defaults and returns one unsaved JPEG", async (t) => {
+  const charges = [];
+  const h = await harness(t, { beforePaidCall: kind => { charges.push(kind); } });
+  const before = await readdir(h.dataDir);
+  const { imageDataUrl } = await h.request("POST", "/api/shopping/try-on", { ...tryOnBody(h), websiteSource: { type: "website", url: "https://shop.example/p/1", imageUrl: "https://shop.example/p/1.jpg", name: "Blue linen jacket" } });
+  const [{ form, images }] = h.imageRequests;
+  assert.deepEqual(images.map(file => [file.name, file.type]), [["person.jpg", "image/jpeg"], ["item.jpg", "image/jpeg"]]);
+  assert.deepEqual(["model", "quality", "complexity", "moderation", "size", "output_format", "n"].map(name => form.get(name)), ["gpt-image-2.6-flare", "medium", "low", "low", "1024x1536", "jpeg", "1"]);
+  assert.equal(form.has("background"), false);
+  assert.match(form.get("prompt"), /The listing names it: "Blue linen jacket"/);
+  assert.match(form.get("prompt"), /Do not copy any of its clothes/);
+  assert.deepEqual(charges, ["image"]);
+  assert.equal(h.requests.length, 0, "a preview makes no assessment request");
+  assert.match(imageDataUrl, /^data:image\/jpeg;base64,/);
+  assert.equal((await sharp(Buffer.from(imageDataUrl.split(",")[1], "base64")).metadata()).format, "jpeg");
+  assert.deepEqual(await readdir(h.dataDir), before, "nothing is saved");
+});
+
+test("Try it on model settings can be overridden, and complexity reaches only 2.6", async (t) => {
+  const h = await harness(t, { env: { OPENAI_TRYON_MODEL: "gpt-image-2.5-flare", OPENAI_TRYON_QUALITY: "low" } });
+  await h.request("POST", "/api/shopping/try-on", tryOnBody(h));
+  const { form } = h.imageRequests[0];
+  assert.deepEqual([form.get("model"), form.get("quality"), form.has("complexity")], ["gpt-image-2.5-flare", "low", false]);
+});
+
+test("Try it on validates its inputs before any paid call", async (t) => {
+  const charges = [];
+  const h = await harness(t, { beforePaidCall: kind => { charges.push(kind); } });
+  await h.request("POST", "/api/shopping/try-on", { ...tryOnBody(h), image: "data:image/png;base64,AAAA" }, 400);
+  await h.request("POST", "/api/shopping/try-on", { ...tryOnBody(h), modelReferenceId: "model-reference-99" }, 400);
+  await h.request("POST", "/api/shopping/try-on", { ...tryOnBody(h), websiteSource: { type: "other" } }, 400);
+  await h.request("POST", "/api/shopping/try-on", tryOnBody(h), 403, { "sec-fetch-site": "cross-site" });
+  assert.deepEqual(charges, []);
+  assert.equal(h.imageRequests.length, 0);
+});
+
+test("a spent image limit stops Try it on before the provider call", async (t) => {
+  const h = await harness(t, { beforePaidCall: () => { throw Object.assign(new Error("Daily image limit reached"), { status: 429 }); } });
+  const { error } = await h.request("POST", "/api/shopping/try-on", tryOnBody(h), 429);
+  assert.match(error, /Daily image limit/);
+  assert.equal(h.imageRequests.length, 0);
+});
+
+test("Try it on names a blocked stage without reflecting provider text, and rejects unusable output", async (t) => {
+  let output = () => Response.json({ error: { code: "moderation_blocked", message: "PRIVATE PROMPT", moderation_details: { moderation_stage: "output", categories: ["sexual"] } } }, { status: 400 });
+  const h = await harness(t, { imageResponse: () => output() });
+  const { error } = await h.request("POST", "/api/shopping/try-on", tryOnBody(h), 502);
+  assert.match(error, /blocked the generated image/);
+  assert.doesNotMatch(error, /PRIVATE|sexual/);
+  output = () => Response.json({ data: [{ b64_json: Buffer.from("not an image").toString("base64") }] });
+  assert.match((await h.request("POST", "/api/shopping/try-on", tryOnBody(h), 502)).error, /unreadable preview/);
+  output = () => Response.json({ data: [] });
+  assert.match((await h.request("POST", "/api/shopping/try-on", tryOnBody(h), 502)).error, /usable preview/);
 });
