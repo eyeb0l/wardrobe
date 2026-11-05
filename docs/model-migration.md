@@ -16,14 +16,55 @@ Set overrides in local `.env` and restart Vite. Hosted configuration uses produc
 | `OPENAI_GARMENT_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for cutouts |
 | `OPENAI_MODELED_MODEL` | Overrides `OPENAI_IMAGE_MODEL` for modelled photos |
 | `OPENAI_IMAGE_QUALITY` | `high` for both image stages |
+| `OPENAI_IMAGE_COMPLEXITY` | Unset (model default). Sent only to GPT Image 2.6 models, because 2.5 rejects the field |
+| `OPENAI_GARMENT_COMPLEXITY` | Overrides `OPENAI_IMAGE_COMPLEXITY` for cutouts |
+| `OPENAI_MODELED_COMPLEXITY` | Overrides `OPENAI_IMAGE_COMPLEXITY` for modelled photos |
+| `OPENAI_MARKUP_COMPLEXITY` | `low`; marked edits on GPT Image 2.6. Does not inherit `OPENAI_IMAGE_COMPLEXITY` |
 
 ## API compatibility
 
-The [importer](../scripts/import-job-api.mjs) sends multipart `/images/edits` requests with PNG references and output, 1024×1024 cutouts, and 1536×1024 modelled photos. It uses direct `fetch`, with no SDK or `input_fidelity` parameter. New cutouts request `background=transparent`; the saved API PNG is passed through a local near-opaque interior correction before review. Older chroma-key jobs retain their original cleanup stage. A garment-model override must support transparent PNG output.
+The [importer](../scripts/import-job-api.mjs) sends multipart `/images/edits` requests with PNG references and output, 1024×1024 cutouts, and 1536×1024 modelled photos. It uses direct `fetch`, with no SDK or `input_fidelity` parameter. Every image request sets `moderation=low`. New cutouts request `background=transparent`; the saved API PNG is passed through a local near-opaque interior correction before review. Older chroma-key jobs retain their original cleanup stage. A garment-model override must support transparent PNG output.
 
 Detection sends image input to `/responses` with a strict clothing JSON schema, including Dresses and `isCleanProductShot`. Original-image import requires one detected item, this classification and the app's background checks to pass.
 
 Each modelled attempt first makes a separate `/responses` scene-planning request using the approved cutout, garment metadata, recent settings and user direction. Planning must return a nonempty `setting` of at most 600 characters; invalid planning stops before the image request. The planned setting and exact image prompt are saved with the job, and the accepted setting is saved with the garment. Account for this text request when measuring latency and cost.
+
+### GPT Image 2.6
+
+`gpt-image-2.6-sunburst` and `gpt-image-2.6-flare` work with the importer's existing request shape, but the default stays on 2.5 until a visual comparison supports a change. Checks on 5 November 2026, using one synthetic garment at `quality=low` on `/images/edits`, found:
+
+| Request | Result |
+| --- | --- |
+| 2.6 Sunburst with `background=transparent` | Worked, with and without `complexity=low` |
+| 2.5 Sunburst with `complexity=low` | HTTP 400 `invalid_value` on `complexity` |
+| 2.6 Sunburst with `markup` and an extra reference image | Worked; the mark was removed from the output |
+| 2.5 Sunburst with `markup` | Worked; the mark was removed from the output |
+| 2.6 Sunburst with `markup` and `background=transparent` | Worked; the output was transparent |
+| Billed output image tokens at 1024×1024, `quality=low` | 2.6: 824. 2.5: 196 |
+
+These are single calls on a simple image. They establish that the requests are accepted, not comparative quality. The token gap above applies only at `quality=low`; at `high`, which the app uses, both models billed the same tokens. Marked edits moved and resized the garment in these checks even though the request asked to keep everything else, which is why the marked-edit prompt also tells the model not to reframe. With that wording, framing held in 12 marked edits on real photos, whose changes outside the marks averaged 5–7 levels out of 255 per colour channel. The requested changes themselves were subtle.
+
+### GPT Image 2.5 and 2.6 comparison, 5 November 2026
+
+The default stays on 2.5 until this comparison leads to a decision. 228 calls compared 2.5 Sunburst with 2.6 Sunburst at its default complexity and at `medium` and `low`. They covered 19 cases across the three stages with three repeats each, at `quality=high` and `moderation=low`, using the same prompts, references and sizes per case. It cost US$16.64 at the listed rates. Images and contact sheets remain private in `data/image-2.6-comparison-2026-11-05/`.
+
+| Stage | Billed output tokens, all configurations | Mean cost | Median seconds: 2.5 / 2.6 default / medium / low |
+| --- | ---: | ---: | --- |
+| Cutouts (7 cases) | 1,756 | US$0.066 | 36 / 42 / 35 / 35 |
+| Modelled photos (6 cases) | 1,372 | US$0.064 | 39 / 46 / 43 / 42 |
+| Outfits (6 cases) | 1,756 | US$0.095 | 50 / 58 / 53 / 51 |
+
+- **Cutouts:** all 84 passed the transparency check, and print, plaid, mesh and pale fabric were similar across models. In the one source with a white shirt cuff showing inside a jacket sleeve, 2.6 kept that cuff in 8 of 9 cutouts and 2.5 in none of 3, despite the prompt asking to remove other garments.
+- **Instruction following:** 2.6 kept the layered look's coat closed as asked in all 9 attempts, where 2.5 left it open in all 3. In the repeat reviewed across all modelled and outfit cases, 2.5 often put hands in pockets over the garment and 2.6 kept them clear, at the cost of a stiffer pose.
+- **Refusals:** the four failures were all on 2.6, on the denim-shorts outfit: the API blocked 4 of 9 outputs as `sexual` at the `output` stage, against none of 3 on 2.5. This is one case, but `moderation=low` didn't prevent it.
+- **Complexity:** cost was identical and latency differences were small. The reviewer saw no clear fidelity gain or harm between levels.
+- **Likeness and printed text:** no clear winner, and likeness is best judged by the person in the photo.
+
+One non-blind reviewer judged these from contact sheets and selected close-ups, so treat them as directional. Prompts weren't tuned for 2.6, and each case has few repeats. Hosted behaviour and approval rates weren't measured.
+
+### Marked edits
+
+A marked edit sends the photo under review as the first `image[]`, followed by the identity and garment references, with the marks as a transparent PNG `markup` layer scaled to exactly the photo's dimensions. It does not replan the scene. The request is validated and the marks saved before any paid call, and they apply only to that exact photo: the client sends the photo's URL, and a changed photo returns 409. An explicit retry without marks discards them, and an outfit collection retry keeps them. Cutouts cannot be marked yet because the post-processing for that path has not been evaluated.
 
 ## Prompt behaviour
 
@@ -48,4 +89,19 @@ For an authorised visual evaluation, use a separate `WARDROBE_DATA_DIR` and expl
 4. Inspect cutout silhouette, original colours, asymmetry, markings, transparent edges, and missing pieces. Compare modelled identity, exact garment construction, unobstructed details, anatomy, and framing against both references.
 5. Record accepted/rejected results, reasons, latency, retries, and API usage. Compare cost per accepted image rather than assuming identical quality labels imply identical cost or consistency.
 
-Regenerate starts from the source references and correction text, without attaching the previous output. Modelled regeneration also replans the scene. Describe the desired result explicitly and request the previous setting if it should be retained. Saved modelled photos remain unchanged until the replacement is approved; manually uploaded replacements also require approval.
+To compare GPT Image 2.5 and 2.6, restart the app between configurations with the same separate data directory, so telemetry collects both:
+
+```sh
+# Baseline
+OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst
+
+# Candidate. Repeat with each complexity under test; unset uses the model's default (high).
+OPENAI_MODELED_MODEL=gpt-image-2.6-sunburst
+OPENAI_GARMENT_MODEL=gpt-image-2.6-sunburst
+OPENAI_MODELED_COMPLEXITY=medium
+OPENAI_GARMENT_COMPLEXITY=low
+```
+
+Then read `imageUsage` and `cohorts` from the [telemetry report](GENERATION_TELEMETRY.md#read-only-report), which separate results by model, complexity and moderation. Its candidates are generated results, so track approvals separately. Each configuration needs its own review of the images themselves.
+
+Unless the photo is marked, regenerate starts from the source references and correction text, without attaching the previous output. Modelled regeneration also replans the scene. Describe the desired result explicitly and request the previous setting if it should be retained. Saved modelled photos remain unchanged until the replacement is approved; manually uploaded replacements also require approval.

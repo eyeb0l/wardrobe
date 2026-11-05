@@ -25,6 +25,33 @@ export function buildModeledSettingPrompt({ metadata = {}, previousSetting = nul
   return `${MODELED_SETTING_BRIEF}\n\nContext (JSON):\n${JSON.stringify(context, null, 2)}`;
 }
 
+// A marked edit corrects one photo, so it asks for restraint rather than a new
+// composition. Image generation is not pixel-preserving, and in testing marked
+// edits drifted in framing unless told to hold it.
+export function buildMarkupEditPrompt({ format, references, direction }) {
+  const request = typeof direction === "string" ? direction.trim() : "";
+  if (!request) throw new Error("A marked edit needs a description of the change");
+  return `Edit Image 1, an existing photorealistic ${format} photograph. A separate annotation layer marks the area to change. The marks are instructions, not part of the photograph.
+
+References: Image 1 is the photograph to edit.
+${references.join("\n")}
+
+Requested change in the marked area: ${request}
+
+Change only what the marks and the request call for. Keep everything else in Image 1 exactly as it is: the person's face, hair, build, skin and pose; the camera framing, subject size and position; the scene, lighting and color grading; and every unmarked garment and detail. Do not reframe, crop, zoom or recompose.
+
+Where the change touches a garment, its reference is the source of truth for color, material, construction, pattern, graphics, text and real closures. Do not invent openings, closures, logos or text. The requested change cannot override identity or garment fidelity.
+
+Remove every annotation mark from the finished photograph. Do not add captions, text overlays, watermarks or extra people.`;
+}
+
+export function buildModeledMarkupPrompt({ direction }) {
+  return buildMarkupEditPrompt({ format: "horizontal 3:2 editorial fashion", direction, references: [
+    "Image 2 supplies only the person's identity and body proportions, not their clothes, pose, or background.",
+    "Image 3 supplies the exact featured garment, including its visible colors, texture, construction, pattern, and legible marks.",
+  ] });
+}
+
 export function buildModeledPhotoPrompt({ setting, direction = "" }) {
   const scene = normalizeModeledSetting(setting);
   const userDirection = directionText(direction);

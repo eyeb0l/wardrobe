@@ -11,6 +11,10 @@
 | `OPENAI_GARMENT_MODEL` | Overrides the image model for cutouts |
 | `OPENAI_MODELED_MODEL` | Overrides the image model for modelled pieces and outfits |
 | `OPENAI_IMAGE_QUALITY` | `high` |
+| `OPENAI_IMAGE_COMPLEXITY` | Unset, so the model default applies. GPT Image 2.6 only; `low`, `medium` or `high` for new cutouts and modelled images |
+| `OPENAI_GARMENT_COMPLEXITY` | Overrides `OPENAI_IMAGE_COMPLEXITY` for cutouts |
+| `OPENAI_MODELED_COMPLEXITY` | Overrides `OPENAI_IMAGE_COMPLEXITY` for modelled pieces and outfits |
+| `OPENAI_MARKUP_COMPLEXITY` | `low`; marked edits. Does not inherit `OPENAI_IMAGE_COMPLEXITY` |
 | `OPENAI_API_BASE_URL` | `https://api.openai.com/v1` |
 | `WARDROBE_DECISIONS_ENABLED` | `0`; set to `1` for image-aware saved-look search, owned-piece swaps and optional image checks |
 | `OPENAI_DECISIONS_MODEL` | `gpt-6-luna`; uses the existing server-only `OPENAI_API_KEY` |

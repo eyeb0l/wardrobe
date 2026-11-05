@@ -35,3 +35,7 @@ Browser removal uses Transformers.js 4.3.0 (Apache-2.0) and the MIT-licensed [Bi
 The file picker, drop and paste accept JPEG, PNG, WebP and HEIC/HEIF sources up to 50 MB and 64 megapixels. Import uploads preserve JPEG/PNG/WebP files of at most 2 MB byte-for-byte, including resolution, transparency and metadata. Larger files are compressed locally to at most 2 MB and a 2,400-pixel edge; PNG/WebP compression preserves transparency. HEIC converts locally to JPEG; a source of at most 2 MB keeps its resolution if the converted result also fits. The server normalises import images to PNG before review.
 
 Modelled-photo uploads follow the [manual modelled photos](MODELED_PHOTOS.md) rules, and Shopping uploads follow the [Shopping](SHOPPING.md#upload-preparation) rules.
+
+## Fix one detail in a modelled photo
+
+When reviewing a modelled photo, choose **Mark what to change**, circle the problem, describe the change and choose **Apply marked edit**. This keeps the photo's scene and edits it rather than planning a new one. The result returns to review, and a saved photo stays unchanged until you approve its replacement. AI editing is not pixel-preserving, so check the rest of the photo too. Cutouts can't be marked yet.

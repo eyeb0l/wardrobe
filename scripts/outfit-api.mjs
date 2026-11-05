@@ -6,6 +6,9 @@ import sharp from "sharp";
 import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
 import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
+import { IMAGE_MODERATION, imageComplexity, providerAdvice } from "./image-request.mjs";
+import { prepareMarkup } from "./photo-markup.mjs";
+import { buildMarkupEditPrompt } from "./modeled-photo-prompts.mjs";
 import { atomicJson, readManifest, acceptedFilename, validateJob, publishCandidateImage, publishImage } from "./outfit-storage.mjs";
 import { outfitCutoutPreview } from "./outfit-cutouts.mjs";
 import { readLibrary, publicLibraryItem, withLibraryLock } from "./wardrobe-library.mjs";
@@ -123,10 +126,19 @@ export async function outfitContactSheets(items, thumbnails) {
 
 const imageHash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
+const PART_NAMES = { upperbody: "top", lowerbody: "bottom", wholebody_up: "outer-layer", shoes: "shoes", accessories_up: "accessory" };
+
+export function buildOutfitMarkupPrompt(items, correction) {
+  return buildMarkupEditPrompt({ format: "square editorial fashion", direction: correction, references: [
+    "Image 2: identity reference for the exact person to preserve. Use only their identity and body proportions, not their clothes, pose or background.",
+    ...items.map((item, index) => `Image ${index + 3}: exact ${PART_NAMES[item.part]} garment reference (${item.name}).`),
+  ] });
+}
+
 export function buildOutfitPrompt(outfit, items, correction = "", previousImage = false) {
   const outer = items.find((item) => item.part === "wholebody_up");
   const shoes = items.some((item) => item.part === "shoes");
-  const referenceLines = items.map((item, index) => `Image ${index + 2}: exact ${({ upperbody: "top", lowerbody: "bottom", wholebody_up: "outer-layer", shoes: "shoes", accessories_up: "accessory" })[item.part]} garment reference (${item.name}).`);
+  const referenceLines = items.map((item, index) => `Image ${index + 2}: exact ${PART_NAMES[item.part]} garment reference (${item.name}).`);
   const construction = outfit.internal?.outerLayerConstruction;
   const layered = !outer ? "" : construction === "full-front-opening"
     ? "Layer the exact inner top and outer layer naturally so both remain visibly identifiable. The inspected outer reference has a real full front closure; it may be naturally open or partly open using only that actual closure. Preserve its precise real fastenings. Never invent a zipper, buttons, placket or opening. Keep its true length even when it overlaps the waistband."
@@ -551,7 +563,7 @@ Looks: ${JSON.stringify(looks)}`;
         controller.signal.throwIfAborted();
         if (telemetry) {
           await beforeTelemetry();
-          await telemetry.start({ model: models().image, baseUrl: setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1"), prompt: init.body.get("prompt"), images: await Promise.all(init.body.getAll("image[]").map(async image => Buffer.from(await image.arrayBuffer()))) });
+          await telemetry.start({ model: models().image, baseUrl: setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1"), prompt: init.body.get("prompt"), images: await Promise.all([...init.body.getAll("image[]"), ...init.body.getAll("markup")].map(async image => Buffer.from(await image.arrayBuffer()))), settings: { complexity: init.body.get("complexity"), moderation: init.body.get("moderation"), markup: init.body.has("markup") } });
           controller.signal.throwIfAborted();
         }
         return (options.outsideLease || (fn => fn()))(async () => {
@@ -574,11 +586,8 @@ Looks: ${JSON.stringify(looks)}`;
       telemetry?.observe(response, result);
       ensureActive();
       if (!response.ok) {
-        const advice = [401, 403].includes(response.status) ? "Check the configured API key and model access."
-          : response.status === 429 ? "Check the API quota or rate limit, then retry."
-            : response.status === 400 || response.status === 404 ? "Check the configured model and API base URL support this request." : "The API could not complete the request. Retry when it is available.";
         // Never reflect provider messages, which can include credentials or URLs.
-        throw fail(`Generation API returned HTTP ${response.status}. ${advice}`, 502);
+        throw fail(`Generation API returned HTTP ${response.status}. ${providerAdvice(response.status, result)}`, 502);
       }
       return result;
     } catch (error) {
@@ -684,9 +693,18 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     const items = validateSelection(outfit.garmentIds, await inventory({ verifyImageIds: new Set(outfit.garmentIds) }));
     const reference = await resolveReference(job.modelReferenceId);
     const inputs = [{ file: reference.file, name: "identity.png" }, ...items.map((item) => ({ file: item.file, name: `${item.part}-${item.id}.png` }))];
-    const previous = outfit.internal.previousImage;
+    const marked = outfit.internal.markup;
+    let markupBytes = null;
+    if (marked) {
+      // The API applies marks to the first image, and they refer to this exact photo.
+      try {
+        inputs.unshift({ file: await containedFile(path.join(jobsDir, job.id), marked.base), name: "marked-photo.png" });
+        markupBytes = await readFile(await containedFile(path.join(jobsDir, job.id), marked.file));
+      } catch { throw fail("The marked photo is no longer available. Mark it again or regenerate this photo.", 409); }
+    }
+    const previous = marked ? null : outfit.internal.previousImage;
     if (previous) inputs.push({ file: await containedFile(path.join(jobsDir, job.id), previous), name: "previous-attempt.png" });
-    const prompt = buildOutfitPrompt(outfit, items, outfit.prompt || "", Boolean(previous));
+    const prompt = marked ? buildOutfitMarkupPrompt(items, outfit.prompt) : buildOutfitPrompt(outfit, items, outfit.prompt || "", Boolean(previous));
     const form = new FormData();
     form.set("model", models().image);
     form.set("prompt", prompt);
@@ -694,13 +712,17 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     form.set("quality", setting("OPENAI_IMAGE_QUALITY", "high"));
     form.set("output_format", "png");
     form.set("n", "1");
+    form.set("moderation", IMAGE_MODERATION);
+    const complexity = imageComplexity(setting, "modeled", models().image, { markup: Boolean(marked) });
+    if (complexity) form.set("complexity", complexity);
+    if (markupBytes) form.set("markup", new Blob([markupBytes], { type: "image/png" }), "markup.png");
     for (const input of inputs) {
       const bytes = await sharp(await readFile(input.file), { limitInputPixels: 64e6 }).rotate().toColorspace("srgb").png().toBuffer();
       form.append("image[]", new Blob([bytes], { type: "image/png" }), input.name);
     }
     await transition(job, async (next) => {
       next.outfits.find((item) => item.id === outfit.id).internal.telemetryGarments = items.map(garmentTelemetry);
-      next.outfits.find((item) => item.id === outfit.id).internal.history.push({ attempt: outfit.attempts, at: now(), model: models().image, prompt, correction: outfit.prompt, references: inputs.map((item) => item.name) });
+      next.outfits.find((item) => item.id === outfit.id).internal.history.push({ attempt: outfit.attempts, at: now(), model: models().image, complexity, markup: Boolean(marked), prompt, correction: outfit.prompt, references: inputs.map((item) => item.name) });
     });
     const context = outfitTelemetryContext(job, outfit, items);
     const telemetry = generationAttempt(dataDir, context);
@@ -769,7 +791,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.internal.telemetryEpisodeId ||= randomUUID(); item.internal.telemetrySucceeded = false; item.status = "generating"; item.attempts += 1; item.error = null; recompute(next); });
       try {
         const filename = await generate(job, outfit);
-        await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "review"; item.image = `${API}/jobs/${job.id}/assets/${filename}`; item.internal.candidateFile = filename; item.internal.telemetrySucceeded = true; item.source = "generated"; item.error = null; recompute(next); });
+        await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "review"; item.image = `${API}/jobs/${job.id}/assets/${filename}`; item.internal.candidateFile = filename; delete item.internal.markup; item.internal.telemetrySucceeded = true; item.source = "generated"; item.error = null; recompute(next); });
       } catch (error) {
         if (disposed) return;
         await transition(job, async (next) => { const item = next.outfits.find((item) => item.id === outfit.id); item.status = "failed"; item.error = safeError(error); recompute(next); });
@@ -887,6 +909,18 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
     try { await sharp(await readFile(reference.file), { limitInputPixels: 64e6 }).metadata(); }
     catch { throw fail("The selected model reference cannot be decoded. Replace it with a valid image before generating.", 503); }
     return reference;
+  }
+
+  async function saveOutfitMarkup(job, outfit, input) {
+    const base = outfit.internal.candidateFile;
+    if (!["review", "failed"].includes(outfit.status) || !base) throw fail("This photo can't be marked at its current stage.", 409);
+    if (input.baseImage !== outfit.image) throw fail("The photo changed. Review the latest image before marking it.", 409);
+    if (!outfit.prompt?.trim()) throw fail("Describe the change you want in the marked area.");
+    const dir = path.join(jobsDir, job.id);
+    const bytes = await prepareMarkup(input.markup, await readFile(await containedFile(dir, base)));
+    const file = `${outfit.id}-markup-${randomUUID()}.png`;
+    await writeFile(path.join(dir, file), bytes, { flag: "wx" });
+    return { file, base };
   }
 
   async function previousCandidate(job, outfit) {
@@ -1405,7 +1439,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       }
       const outfitAction = action.match(/^outfits\/([a-z0-9-]+)\/(approve|reject|retry|upload)$/);
       if (req.method === "POST" && outfitAction) {
-        const input = await readBody(req, outfitAction[2] === "upload" ? MODELED_UPLOAD_BODY_BYTES : undefined);
+        const input = await readBody(req, ["upload", "retry"].includes(outfitAction[2]) ? MODELED_UPLOAD_BODY_BYTES : undefined);
         await transition(job, async (next) => {
           const outfit = next.outfits.find((item) => item.id === outfitAction[1]);
           if (!outfit) throw fail("Outfit not found", 404);
@@ -1420,6 +1454,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             await writeFile(path.join(jobsDir, job.id, filename), bytes, { flag: "wx" });
             outfit.internal.previousImage = outfit.internal.candidateFile || outfit.internal.previousImage || null;
             outfit.internal.candidateFile = filename;
+            delete outfit.internal.markup;
             outfit.image = `${API}/jobs/${job.id}/assets/${filename}`;
             if (outfit.status === "review" && outfit.source === "generated") { outfit.internal.telemetryEpisodeId = randomUUID(); outfit.internal.telemetryAttempts = 0; }
             outfit.status = "review";
@@ -1440,6 +1475,9 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
             else if ((await usedPairs(items, null, outfit.id)).has(pairKey(outfit.garmentIds, items))) throw fail("This top-and-bottom combination is already saved or being generated.", 409);
             outfit.prompt = input.prompt === undefined ? outfit.prompt : shortText(input.prompt, "correction (maximum 2000 characters)", 2000, false);
             outfit.internal.previousImage = await previousCandidate(next, outfit);
+            // An explicit retry replaces earlier marks; a collection retry keeps them.
+            delete outfit.internal.markup;
+            if (input.markup !== undefined) outfit.internal.markup = await saveOutfitMarkup(next, outfit, input);
             if (outfit.status !== "failed" && (outfit.status !== "rejected" || outfit.internal.telemetrySucceeded || outfit.source === "uploaded")) { outfit.internal.telemetryEpisodeId = randomUUID(); outfit.internal.telemetryAttempts = 0; }
             outfit.status = "planned";
             outfit.error = null;

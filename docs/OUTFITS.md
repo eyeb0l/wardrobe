@@ -330,6 +330,8 @@ Jobs and review candidates persist in the selected store. Accept each reviewed l
 
 Hosted requests and workflow steps read only open jobs (planning, generating, or holding a look that is neither accepted nor rejected), so their cost does not grow with completed history; only the history list reads every job. A derived `outfit-jobs/.open-jobs.json` index records them. It is not backed up, and it is rebuilt automatically when it is missing, unreadable, or its job count disagrees with the stored jobs. After running an older release against the same cloud data, delete that file so the next request rebuilds it.
 
+To fix one detail, choose **Mark what to change**, circle it, describe the change and choose **Apply marked edit**. This edits the photo under review rather than creating a new one, and the result returns to review. AI editing is not pixel-preserving, so check the rest of the photo too.
+
 If generation fails, you can supply your own photograph instead; see [manual modelled photos](MODELED_PHOTOS.md). Image generations also collect private [refusal and retry telemetry](GENERATION_TELEMETRY.md), including eventual recovery and manual fallback. The read-only report separates models, generation types and garment categories without duplicating prompts.
 
 ## Find and refine saved looks

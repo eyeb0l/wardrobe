@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { mkdir, readFile, readdir } from './storage-fs.mjs';
 import { atomicJson } from './outfit-storage.mjs';
+import { moderationDetails } from './image-request.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const token = value => typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,100}$/.test(value) ? value : null;
@@ -25,6 +26,13 @@ export function garmentTelemetry(item) {
 export function providerTelemetry(baseUrl) {
   try { return new URL(baseUrl).hostname.toLowerCase(); } catch { return 'unknown'; }
 }
+const tokens = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
+function imageUsage(result) {
+  const usage = result?.usage;
+  if (!usage || typeof usage !== 'object') return null;
+  return { inputImageTokens: tokens(usage.input_tokens_details?.image_tokens), inputTextTokens: tokens(usage.input_tokens_details?.text_tokens),
+    outputImageTokens: tokens(usage.output_tokens_details?.image_tokens) };
+}
 export function apiTelemetry(response, result) {
   const code = token(result?.error?.code);
   const type = token(result?.error?.type);
@@ -32,16 +40,17 @@ export function apiTelemetry(response, result) {
   const output = Array.isArray(result?.output) ? result.output : [];
   const explicitRefusal = Boolean(result?.refusal || data.some(item => item?.refusal)
     || output.some(item => item?.type === 'refusal' || (Array.isArray(item?.content) && item.content.some(content => content?.type === 'refusal'))));
-  return { httpStatus: response.status, apiCode: code, apiType: type,
+  const moderation = moderationDetails(result);
+  return { httpStatus: response.status, apiCode: code, apiType: type, moderationStage: moderation.stage, moderationCategories: moderation.categories, usage: imageUsage(result),
     refused: explicitRefusal || refusalCodes.has(code) || refusalCodes.has(type) };
 }
 
 export function generationAttempt(dataDir, context) {
   let record;
   return {
-    async start({ model, baseUrl, prompt, images = [] }) {
+    async start({ model, baseUrl, prompt, images = [], settings = {} }) {
       record = { version: 1, kind: 'attempt', id: randomUUID(), ...context,
-        provider: providerTelemetry(baseUrl), model, promptHash: hash(prompt),
+        provider: providerTelemetry(baseUrl), model, complexity: settings.complexity ?? null, moderation: settings.moderation ?? null, markup: settings.markup === true, promptHash: hash(prompt),
         referencesHash: hash(images.map(image => hash(image)).join(':')), startedAt: new Date().toISOString(),
         outcome: 'unknown', httpStatus: null, apiCode: null, apiType: null };
       await persist(dataDir, record);
@@ -112,6 +121,41 @@ function metrics(episodes, hardRefusalAttempts) {
     manualFallbackUsage: rate(episodes.filter(fallback).length, generated.filter(ep => ep.attempts.some(a => a.outcome === 'refused')).length),
   };
 }
+function moderationCategoryCounts(records) {
+  const counts = new Map();
+  for (const record of records) {
+    if (record.kind !== 'attempt') continue;
+    for (const category of record.moderationCategories || []) {
+      const dimensions = { provider: record.provider, model: record.model, moderation: record.moderation ?? null, generationType: record.generationType, moderationStage: record.moderationStage ?? null, category };
+      const key = JSON.stringify(dimensions);
+      if (!counts.has(key)) counts.set(key, { ...dimensions, count: 0 });
+      counts.get(key).count++;
+    }
+  }
+  return [...counts.values()];
+}
+const mean = values => values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+// Successful attempts only: a candidate here has not necessarily been approved.
+function imageUsageSummary(records) {
+  const groups = new Map();
+  for (const record of records) {
+    if (record.kind !== 'attempt' || record.outcome !== 'succeeded') continue;
+    const dimensions = { provider: record.provider, model: record.model, complexity: record.complexity ?? null, moderation: record.moderation ?? null, markup: record.markup === true, generationType: record.generationType };
+    const key = JSON.stringify(dimensions);
+    if (!groups.has(key)) groups.set(key, { dimensions, records: [] });
+    groups.get(key).records.push(record);
+  }
+  const known = (group, field) => group.records.map(record => record.usage?.[field]).filter(Number.isFinite);
+  return [...groups.values()].map(group => ({ ...group.dimensions, candidates: group.records.length,
+    medianSeconds: median(group.records.map(record => (Date.parse(record.finishedAt) - Date.parse(record.startedAt)) / 1000).filter(Number.isFinite)),
+    meanInputImageTokens: mean(known(group, 'inputImageTokens')), meanInputTextTokens: mean(known(group, 'inputTextTokens')), meanOutputImageTokens: mean(known(group, 'outputImageTokens')) }));
+}
 export function summarizeTelemetry(records, { hardRefusalAttempts = 3 } = {}) {
   if (!Number.isInteger(hardRefusalAttempts) || hardRefusalAttempts < 2) throw new Error('Hard refusal threshold must be at least two attempts');
   const groups = new Map();
@@ -126,7 +170,7 @@ export function summarizeTelemetry(records, { hardRefusalAttempts = 3 } = {}) {
     const first = ep.attempts[0] || ep.manual[0];
     const categories = new Set((first.garments || []).flatMap(g => [`category:${g.category}`, ...(g.subtype ? [`subtype:${g.subtype}`] : [])]));
     for (const category of ['all', ...categories]) {
-      const dimensions = { provider: first.provider || null, model: first.model || null, generationType: first.generationType, category };
+      const dimensions = { provider: first.provider || null, model: first.model || null, complexity: first.complexity ?? null, moderation: first.moderation ?? null, markup: first.markup === true, generationType: first.generationType, category };
       const key = JSON.stringify(dimensions);
       if (!cohorts.has(key)) cohorts.set(key, { dimensions, episodes: [] });
       cohorts.get(key).episodes.push(ep);
@@ -134,12 +178,12 @@ export function summarizeTelemetry(records, { hardRefusalAttempts = 3 } = {}) {
   }
   const apiOutcomes = new Map();
   for (const record of records.filter(record => record.kind === 'attempt')) {
-    const dimensions = { provider: record.provider, model: record.model, generationType: record.generationType, outcome: record.outcome, httpStatus: record.httpStatus, apiCode: record.apiCode, apiType: record.apiType };
+    const dimensions = { provider: record.provider, model: record.model, generationType: record.generationType, outcome: record.outcome, httpStatus: record.httpStatus, apiCode: record.apiCode, apiType: record.apiType, moderationStage: record.moderationStage ?? null };
     const key = JSON.stringify(dimensions);
     if (!apiOutcomes.has(key)) apiOutcomes.set(key, { ...dimensions, count: 0 });
     apiOutcomes.get(key).count++;
   }
-  return { version: 1, apiOutcomes: [...apiOutcomes.values()], generatedAt: new Date().toISOString(), hardRefusalAttempts,
+  return { version: 1, apiOutcomes: [...apiOutcomes.values()], moderationCategories: moderationCategoryCounts(records), imageUsage: imageUsageSummary(records), generatedAt: new Date().toISOString(), hardRefusalAttempts,
     overall: metrics(episodes, hardRefusalAttempts),
     cohorts: [...cohorts.values()].map(c => ({ ...c.dimensions, ...metrics(c.episodes, hardRefusalAttempts) })) };
 }

@@ -12,6 +12,9 @@ Each image record contains:
 - Garment categories captured at generation time. `subtype` currently distinguishes skirts and bodysuits using names/tags and explicitly labels that inference `name-or-tags-v1`. Missing subtypes remain unknown; these are not a comprehensive or manually verified taxonomy.
 - `attemptNumber`, counting image dispatches within the episode, and `pipelineAttempt`, identifying the existing generation record. Scene-planning failures and manual uploads do not increment the image counter.
 - Start/end timestamps, outcome (`succeeded`, `refused`, `technical_failure`, or `unknown`), HTTP status, bounded API error code/type, and local error class.
+- Request settings: `complexity` (null when none was sent), `moderation` and whether the attempt was a marked edit (`markup`). Records from before these fields report them as null or false.
+- For a provider moderation block, its bounded `moderationStage` (`input`, `output` or `unknown`) and coarse `moderationCategories`, such as `sexual`, when the API supplies them. These stay out of the error shown in the app, which names only the stage.
+- Image and text token counts from the API's `usage`, when it returns them.
 - SHA-256 prompt/reference fingerprints and a pointer to the existing generation record. No prompt text, response/error messages, image data, garment names/tags, or API keys are copied into telemetry.
 
 Refusals require an explicit refusal field or a recognised API code/type (`content_policy_violation`, `moderation_blocked`, `safety_violation`, `safety_system`, `content_filter`, `refusal`). HTTP 400/403 alone and arbitrary error-message wording do not prove refusal. Unrecognised provider errors count as technical failures; inspect code distributions before interpreting category comparisons. Extend the explicit mapping when a new provider code is verified.
@@ -56,8 +59,10 @@ The command prints JSON, makes no model calls, and changes no collection data. W
 | `observedHardRefusal` | At least three image attempts, all refused, with no unknown attempt / episodes with a known first outcome. |
 | `attemptRefusal` | Refused image attempts / completed image attempts (secondary diagnostic). |
 
+`imageUsage` gives candidate counts, median seconds and mean token counts for successful attempts, by model, complexity, moderation and marked edit. `moderationCategories` counts blocks by stage and category. Comparing refusal rates across the switch to `moderation=low` uses the cohorts' `moderation` value; sample sizes and the mix of garments still limit what that comparison can show.
+
 The report includes API outcome/code distributions for investigating unfamiliar errors. It also shows initially refused episodes, those without any retry, unknown attempts, technical failures, episodes with changed retry inputs, manual uploads, manual approvals, and uploads after unresolved refusal. A model or input change is visible, and a different model's success is not credited as same-model recovery.
 
-Cohorts are attributed to the **first observed provider/model** in the episode, with separate generation types and category/subtype rows. Their later attempts can use different models; use the same-model metric and changed-input counts when assessing a model. Small samples (fewer than 30 known first outcomes) are flagged. This is a descriptive signal, not a confidence threshold: also inspect refusal/retry denominator sizes and observation time before drawing conclusions.
+Cohorts are attributed to the **first observed provider/model** and its complexity, moderation and marked-edit settings in the episode, with separate generation types and category/subtype rows. Their later attempts can use different models; use the same-model metric and changed-input counts when assessing a model. Small samples (fewer than 30 known first outcomes) are flagged. This is a descriptive signal, not a confidence threshold: also inspect refusal/retry denominator sizes and observation time before drawing conclusions.
 
 “Hard refusal” is provisional evidence of repeated refusal, never proof that a garment is deterministically impossible. Later success removes that episode from the metric. Scene planning can change the prompt on a retry; fingerprints expose that distinction. Review recovery and manual fallback alongside refusal frequency rather than using raw refusal rate alone.

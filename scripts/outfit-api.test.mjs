@@ -635,3 +635,101 @@ test("approving an uploaded candidate from before telemetry creates a valid appr
   assert.equal(records[0].garments.length, outfit.garmentIds.length);
   assert.equal(summarizeTelemetry(records).overall.imageEpisodes, 0);
 });
+
+const outfitMarks = async () => `data:image/png;base64,${(await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="16" fill="none" stroke="#ff0000" stroke-width="4"/></svg>')).png().toBuffer()).toString("base64")}`;
+
+test("every outfit image request sets low moderation and leaves complexity to the model unless configured", async (t) => {
+  const h = await harness(t);
+  await h.settled((await h.create()).id);
+  const edit = h.requests.find((item) => item.kind === "edit");
+  assert.equal(edit.form.get("moderation"), "low");
+  assert.equal(edit.form.has("complexity"), false);
+  assert.equal(edit.form.has("markup"), false);
+});
+
+test("outfit complexity applies to 2.6 models but never reaches a model that rejects it", async (t) => {
+  for (const [model, expected] of [["gpt-image-2.6-sunburst", "medium"], ["gpt-image-2.5-sunburst", null]]) {
+    const h = await harness(t, { env: { OPENAI_MODELED_MODEL: model, OPENAI_MODELED_COMPLEXITY: "medium" } });
+    await h.settled((await h.create()).id);
+    assert.equal(h.requests.find((item) => item.kind === "edit").form.get("complexity"), expected);
+    await h.close();
+  }
+});
+
+test("a marked outfit edit sends the photo first with its marks, then clears them after success", async (t) => {
+  const h = await harness(t, { env: { OPENAI_MODELED_MODEL: "gpt-image-2.6-sunburst" } });
+  const job = await h.settled((await h.create()).id);
+  const outfit = job.outfits[0];
+  const photo = await readFile(path.join(h.dataDir, "outfit-jobs", job.id, path.basename(outfit.image)));
+  const body = { prompt: "Remove the invented zip.", markup: await outfitMarks(), baseImage: outfit.image };
+
+  await h.action(job, outfit, "retry", { ...body, baseImage: "/api/outfits/jobs/other/assets/other.png" }, 409);
+  await h.action(job, outfit, "retry", { ...body, prompt: "   " }, 400);
+  await h.action(job, outfit, "retry", { ...body, markup: "data:image/jpeg;base64,AAAA" }, 400);
+  const editsBefore = h.requests.filter((item) => item.kind === "edit").length;
+  assert.equal((await h.request("GET", `${API}/jobs/${job.id}`)).outfits[0].status, "review", "rejected marks leave the review untouched");
+
+  await h.action(job, outfit, "retry", body);
+  const edited = await h.settled(job.id);
+  const edits = h.requests.filter((item) => item.kind === "edit");
+  assert.equal(edits.length, editsBefore + 1);
+  const edit = edits.at(-1);
+  assert.deepEqual(edit.images.map((image) => image.name).slice(0, 2), ["marked-photo.png", "identity.png"]);
+  assert.ok(!edit.images.some((image) => image.name === "previous-attempt.png"));
+  assert.deepEqual(await sharp(edit.images[0].bytes).raw().toBuffer(), await sharp(photo).raw().toBuffer());
+  const markup = edit.form.get("markup");
+  const sent = await sharp(Buffer.from(await markup.arrayBuffer())).metadata();
+  const base = await sharp(photo).metadata();
+  assert.deepEqual([sent.format, sent.width, sent.height, sent.hasAlpha], ["png", base.width, base.height, true]);
+  assert.equal(edit.form.get("complexity"), "low");
+  assert.equal(edit.form.get("moderation"), "low");
+  assert.match(edit.form.get("prompt"), /^Edit Image 1,/);
+  assert.match(edit.form.get("prompt"), /Requested change in the marked area: Remove the invented zip\./);
+  assert.match(edit.form.get("prompt"), /Image 2: identity reference/);
+  assert.match(edit.form.get("prompt"), /Image 3: exact top garment reference/);
+  assert.equal(edited.outfits[0].status, "review");
+  assert.ok(!JSON.stringify(edited).includes("markup-"), "the marks file is not exposed to the client");
+
+  const persisted = JSON.parse(await readFile(path.join(h.dataDir, "outfit-jobs", job.id, "job.json"), "utf8"));
+  assert.equal(persisted.outfits[0].internal.markup, undefined);
+  await h.action(edited, edited.outfits[0], "retry", { prompt: "Try a different pose" });
+  await h.settled(job.id);
+  const plain = h.requests.filter((item) => item.kind === "edit").at(-1);
+  assert.equal(plain.form.has("markup"), false, "a later plain retry does not reuse old marks");
+  assert.equal(plain.images[0].name, "identity.png");
+  assert.equal(plain.images.at(-1).name, "previous-attempt.png");
+});
+
+test("a failed marked edit keeps its marks for a collection retry, and an explicit retry replaces them", async (t) => {
+  const h = await harness(t);
+  const job = await h.settled((await h.create()).id);
+  const outfit = job.outfits[0];
+  h.setEdit(() => Response.json({ error: { code: "moderation_blocked", moderation_details: { moderation_stage: "output", categories: ["sexual"] } } }, { status: 400 }));
+  await h.action(job, outfit, "retry", { prompt: "Remove the zip.", markup: await outfitMarks(), baseImage: outfit.image });
+  const failed = await h.settled(job.id);
+  assert.equal(failed.outfits[0].status, "failed");
+  assert.match(failed.outfits[0].error, /safety checks blocked the generated image/);
+  assert.doesNotMatch(failed.outfits[0].error, /sexual/);
+  h.setEdit(undefined);
+  await h.request("POST", `${API}/jobs/${job.id}/retry`, {}, 202);
+  await h.settled(job.id);
+  assert.equal(h.requests.filter((item) => item.kind === "edit").at(-1).images[0].name, "marked-photo.png");
+});
+
+test("an uploaded photo can be marked, but uploading discards marks for the photo it replaces", async (t) => {
+  const h = await harness(t);
+  const job = await h.settled((await h.create()).id);
+  h.setEdit(() => Response.json({ error: { code: "server_error" } }, { status: 500 }));
+  const outfit = job.outfits[0];
+  await h.action(job, outfit, "retry", { prompt: "Fix the collar.", markup: await outfitMarks(), baseImage: outfit.image });
+  const failed = await h.settled(job.id);
+  const uploaded = await h.action(failed, failed.outfits[0], "upload", { imageDataUrl: `data:image/png;base64,${(await h.image("#887766", 1024, 1024)).toString("base64")}` });
+  const current = (uploaded.outfits || [])[0] || (await h.request("GET", `${API}/jobs/${job.id}`)).outfits[0];
+  h.setEdit(undefined);
+  await h.request("POST", `${API}/jobs/${job.id}/outfits/${current.id}/retry`, { prompt: "Fix the collar.", markup: await outfitMarks(), baseImage: current.image }, 202);
+  await h.settled(job.id);
+  const edit = h.requests.filter((item) => item.kind === "edit").at(-1);
+  assert.equal(edit.images[0].name, "marked-photo.png");
+  const sent = await sharp(Buffer.from(await edit.form.get("markup").arrayBuffer())).metadata();
+  assert.deepEqual([sent.width, sent.height], [1024, 1024], "marks are scaled to the uploaded photo");
+});

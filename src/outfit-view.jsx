@@ -7,6 +7,7 @@ import { OutfitFinder, OwnedItemSwaps } from "./outfit-discovery.jsx";
 import { discoveryFingerprint, orderDiscovery } from "../shared/outfit-discovery.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
 import { ImageCheck } from "./image-check.jsx";
+import { marksFor, PhotoMarkup } from "./photo-markup.jsx";
 import { FavouriteButton, OutfitActivity, WearSummary } from "./outfit-activity.jsx";
 import { inLaundry } from "../shared/garment-availability.mjs";
 import { formatWearDate } from "../shared/outfit-activity.mjs";
@@ -247,11 +248,14 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob, visible 
   const outfits = job.outfits || [];
   const [selectedId, setSelectedId] = useState(() => outfits.find((outfit) => ["review", "failed"].includes(outfit.status))?.id || outfits[0]?.id || null);
   const [correction, setCorrection] = useState("");
+  const [marks, setMarks] = useState(null);
   const selected = outfits.find((outfit) => outfit.id === selectedId) || outfits.find((outfit) => ["review", "failed"].includes(outfit.status)) || outfits[0];
   const nextReview = outfits.find((outfit) => outfit.status === "review" && outfit.id !== selected?.id);
   const canReview = selected?.status === "review";
   const canRetry = selected && ["review", "failed", "rejected"].includes(selected.status);
-  const select = (id) => { setSelectedId(id); setCorrection(""); };
+  const canMark = selected?.image && ["review", "failed"].includes(selected.status);
+  const activeMarks = canMark ? marksFor(marks, selected.image) : null;
+  const select = (id) => { setSelectedId(id); setCorrection(""); setMarks(null); };
 
   useEffect(() => {
     if (!selectedId && outfits.length) setSelectedId(outfits[0].id);
@@ -279,7 +283,7 @@ function ReviewJob({ job, itemsById, busy, error, onAction, onRetryJob, visible 
           {selected.status === "accepted" ? <p className="outfit-added"><Check size={17} aria-hidden="true" />{job.targetOutfitId ? "Photo added to your variation." : "Added to your collection."}</p> : null}
           {selected.status === "rejected" ? <p className="outfit-small">{job.targetOutfitId ? "Photo rejected. Your cutout variation is still saved." : "Rejected. This look is not in your collection."}</p> : null}
           {nextReview && ["accepted", "rejected"].includes(selected.status) ? <button className="outfit-secondary" type="button" onClick={() => select(nextReview.id)}>Next to review <ArrowRight size={16} aria-hidden="true" /></button> : null}
-          {canRetry ? <div className="outfit-correction"><label className="outfit-field" htmlFor={`correction-${selected.id}`}><span>{selected.status === "failed" ? "Retry notes" : "Adjust this photo"} <em>optional</em></span><textarea id={`correction-${selected.id}`} rows="2" maxLength={1500} value={correction} disabled={busy || cropping} onChange={(event) => setCorrection(event.target.value)} placeholder="For example, keep the coat open and show the full shoes" /></label><div className="outfit-action-row"><button className="outfit-secondary" type="button" disabled={busy || cropping || running(job)} onClick={() => onAction(job.id, selected.id, "retry", { prompt: correction.trim() })}><ArrowCounterClockwise size={16} aria-hidden="true" />{selected.status === "failed" ? "Retry photo" : "Regenerate photo"}</button>{selected.status === "failed" && <CopyPrompt prompt={selected.generationPrompt} className="outfit-secondary" disabled={busy || cropping} />}</div><ModeledPhotoUpload key={selected.id} kind="outfit" className="outfit-secondary" disabled={busy || running(job)} onEditingChange={setCropping} onUpload={(image) => onAction(job.id, selected.id, "upload", image)} />{running(job) ? <p className="outfit-small">You can retry this photo when the current generation finishes.</p> : null}</div> : null}
+          {canRetry ? <div className="outfit-correction">{canMark ? <PhotoMarkup key={`marks-${selected.image}`} src={selected.image} value={marks} className="outfit-secondary" primaryClassName="outfit-primary" disabled={busy || cropping || running(job)} onChange={setMarks} /> : null}<label className="outfit-field" htmlFor={`correction-${selected.id}`}><span>{activeMarks ? "What should change in the marked area?" : <>{selected.status === "failed" ? "Retry notes" : "Adjust this photo"} <em>optional</em></>}</span><textarea id={`correction-${selected.id}`} rows="2" maxLength={1500} value={correction} disabled={busy || cropping} onChange={(event) => setCorrection(event.target.value)} placeholder={activeMarks ? "For example, remove this zip and keep the coat closed" : "For example, keep the coat open and show the full shoes"} /></label><div className="outfit-action-row"><button className="outfit-secondary" type="button" disabled={busy || cropping || running(job) || (activeMarks && !correction.trim())} onClick={() => onAction(job.id, selected.id, "retry", { prompt: correction.trim(), ...(activeMarks ? { markup: activeMarks.dataUrl, baseImage: selected.image } : {}) })}><ArrowCounterClockwise size={16} aria-hidden="true" />{activeMarks ? "Apply marked edit" : selected.status === "failed" ? "Retry photo" : "Regenerate photo"}</button>{selected.status === "failed" && <CopyPrompt prompt={selected.generationPrompt} className="outfit-secondary" disabled={busy || cropping} />}</div><ModeledPhotoUpload key={selected.id} kind="outfit" className="outfit-secondary" disabled={busy || running(job)} onEditingChange={setCropping} onUpload={(image) => onAction(job.id, selected.id, "upload", image)} />{running(job) ? <p className="outfit-small">You can retry this photo when the current generation finishes.</p> : null}</div> : null}
         </div>
       </OutfitDetails>
     </> : <div className="outfit-planning-state"><div className={running(job) ? "outfit-progress-line" : ""} aria-hidden="true" /><p>{job.status === "failed" ? "Your existing collection is safe. Retry when you're ready." : "Finding a balanced mix of colours, shapes, and pieces from your wardrobe."}</p></div>}

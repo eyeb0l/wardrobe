@@ -3,6 +3,7 @@ import * as localFs from "node:fs/promises";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import sharp from "sharp";
 import { randomUUID } from "node:crypto";
 import { wardrobeOutfitApi } from "./outfit-api.mjs";
 import { withStorage } from "./storage-fs.mjs";
@@ -413,4 +414,30 @@ test("hosted variation and optional exact-piece photo persist through fresh inst
   const updated = collection.find(o => o.id === saved.id);
   assert.equal(updated.imageKind, "modelled"); assert.equal(updated.favourite, true);
   assert.equal(collection[0].image, `${API}/images/original-1.png`);
+});
+
+test("a hosted marked edit persists its marks across instances and uses them in the durable task", async (t) => {
+  const forms = [];
+  const h = await hostedHarness(t, { plan: [plan(1)], fetch: async (kind, init) => {
+    if (kind === "planning") return Response.json({ output_text: JSON.stringify({ outfits: [plan(1)] }) });
+    forms.push(init.body);
+    return Response.json({ data: [{ b64_json: h.output.toString("base64") }] });
+  } });
+  let plugin = await h.makePlugin();
+  const job = await h.create(plugin, 1);
+  const firstTask = h.scheduled[0];
+  assert.equal(await plugin.runTask(firstTask), true);
+  await plugin.runTask(firstTask);
+  const reviewed = await h.request(plugin, "GET", `${API}/jobs/${job.id}`);
+  const outfit = reviewed.outfits[0];
+  const markup = `data:image/png;base64,${(await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="16" fill="none" stroke="#ff0000" stroke-width="4"/></svg>')).png().toBuffer()).toString("base64")}`;
+  await h.request(plugin, "POST", `${API}/jobs/${job.id}/outfits/${outfit.id}/retry`, { prompt: "Remove the zip.", markup, baseImage: outfit.image }, 202);
+  assert.equal(forms.length, 1, "the request only queues the paid work");
+  await plugin.closeBundle();
+  plugin = await h.makePlugin();
+  await plugin.runTask(h.scheduled.at(-1));
+  assert.equal(forms.length, 2);
+  assert.equal(forms[1].getAll("image[]")[0].name, "marked-photo.png");
+  assert.ok(forms[1].has("markup"));
+  assert.match(forms[1].get("prompt"), /Remove the zip\./);
 });
