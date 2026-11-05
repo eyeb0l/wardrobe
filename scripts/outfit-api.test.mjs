@@ -182,6 +182,9 @@ test("corrective retry attaches the failed candidate after exact references and 
   assert.equal(retried.outfits[0].status, "review");
   assert.equal(retried.outfits[0].attempts, 2);
   assert.notEqual(retried.outfits[0].image, job.outfits[0].image);
+  assert.equal(job.outfits[0].previousImage, null, "a first attempt has nothing to compare");
+  assert.equal(retried.outfits[0].previousImage, job.outfits[0].image, "review can compare the replaced photo");
+  assert.equal((await sharp(await h.request("GET", retried.outfits[0].previousImage)).metadata()).width, 64);
   const edit = h.requests.filter((item) => item.kind === "edit").at(-1);
   assert.equal(edit.images.length, 4);
   assert.equal(edit.images[0].name, "identity.png");
@@ -516,6 +519,7 @@ test("refused outfit photos expose the sent prompt and accept a manual photo thr
   const uploaded = await h.action(job, outfit, "upload", input);
   assert.equal(uploaded.outfits[0].status, "review");
   assert.equal(uploaded.outfits[0].source, "uploaded");
+  assert.equal(uploaded.outfits[0].previousImage, null, "an upload is not a regeneration to compare");
   assert.equal((await h.request("GET", API)).outfits.length, h.originals.length);
   const variant = await h.request("GET", `${uploaded.outfits[0].image}?format=webp&w=640`, undefined, null);
   assert.equal(variant.headers["content-type"], "image/webp");

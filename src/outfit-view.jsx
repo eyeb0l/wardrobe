@@ -2,6 +2,7 @@ import { CopyPrompt, ModeledPhotoUpload } from "./modeled-photo-controls.jsx";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, ArrowRight, Check, Plus, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
+import { ImageCompare } from "./image-compare.jsx";
 import { createViewResource } from "./view-resource.mjs";
 import { OutfitFinder, OwnedItemSwaps } from "./outfit-discovery.jsx";
 import { discoveryFingerprint, orderDiscovery } from "../shared/outfit-discovery.mjs";
@@ -171,8 +172,9 @@ function AccessorySuggestions({ outfit, visible = true }) {
 }
 
 function OutfitDetails({ outfit, itemsById, visible = true, activity, children, showAccessories = true }) {
+  const photoAlt = `${outfit.name}, ${outfit.imageKind === "cutouts" ? "cutout preview" : "modelled head to toe"}`;
   return <div className="outfit-detail-layout">
-    <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className={`outfit-photo-fallback${outfit.status === "generating" ? " is-generating" : ""}`} role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <Photo key={outfit.image || outfit.id} src={outfit.image} alt={`${outfit.name}, ${outfit.imageKind === "cutouts" ? "cutout preview" : "modelled head to toe"}`} sizes={DETAIL_PHOTO_SIZES} priority />}</div>
+    <div className="outfit-detail-photo">{!outfit.image && ["planned", "generating"].includes(outfit.status) ? <div className={`outfit-photo-fallback${outfit.status === "generating" ? " is-generating" : ""}`} role="status">{outfit.status === "generating" ? "Creating this photo…" : "Waiting to create this photo…"}</div> : <ImageCompare key={outfit.image || outfit.id} before={outfit.status === "review" ? outfit.previousImage : null} after={outfit.image} alt={photoAlt} sizes={DETAIL_PHOTO_SIZES}><Photo src={outfit.image} alt={photoAlt} sizes={DETAIL_PHOTO_SIZES} priority /></ImageCompare>}</div>
     <div className="outfit-detail-copy">
       {outfit.imageKind === "cutouts" ? <p className="outfit-occasion">Cutout preview</p> : null}
       {activity}

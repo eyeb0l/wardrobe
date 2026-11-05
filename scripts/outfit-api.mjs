@@ -78,14 +78,16 @@ function sendJson(res, status, value) {
   res.end(JSON.stringify(value));
 }
 
-function publicOutfit(outfit) {
+function publicOutfit(outfit, jobId) {
   const { internal, ...publicValue } = outfit;
-  return { ...structuredClone(publicValue), generationPrompt: internal?.history?.at(-1)?.prompt || null };
+  // Only a regeneration has a previous image to compare, not your own upload.
+  const previous = outfit.source !== "uploaded" && internal?.previousImage;
+  return { ...structuredClone(publicValue), generationPrompt: internal?.history?.at(-1)?.prompt || null, previousImage: previous ? `${API}/jobs/${jobId}/assets/${previous}` : null };
 }
 
 function publicJob(job) {
   const { internal, ...publicValue } = job;
-  return { ...structuredClone(publicValue), outfits: job.outfits.map(publicOutfit) };
+  return { ...structuredClone(publicValue), outfits: job.outfits.map((outfit) => publicOutfit(outfit, job.id)) };
 }
 
 function recompute(job) {

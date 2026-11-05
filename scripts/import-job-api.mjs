@@ -1200,7 +1200,7 @@ export function wardrobeImportApi(options = {}) {
         if (stage.status === "review" && stage.source === "generated") { stage.telemetryEpisodeId = randomUUID(); stage.telemetryAttempts = 0; }
         stage.telemetryEpisodeId ||= randomUUID();
         if (job.internal) delete job.internal.modeledMarkup;
-        Object.assign(stage, { status: "review", decision: null, source: "uploaded", assetUrl: `${ASSET_ROOT}/${job.id}/${filename}`,
+        Object.assign(stage, { status: "review", decision: null, source: "uploaded", assetUrl: `${ASSET_ROOT}/${job.id}/${filename}`, previousAssetUrl: null,
           error: null, failedAssetUrl: null, taskId: null, setting: null, attempts: stage.attempts + 1, updatedAt: new Date().toISOString() });
         await saveJob(job);
         await manualTelemetry(dataDir, telemetryContext(job, "modeled"), filename, "uploaded");
@@ -1234,6 +1234,8 @@ export function wardrobeImportApi(options = {}) {
           if (stageName === "modeled") delete job.internal.modeledMarkup;
           if (input.markup !== undefined) job.internal.modeledMarkup = await saveModeledMarkup(job, input);
           job.stages[stageName].prompt = typeof input.prompt === "string" ? input.prompt.trim().slice(0, 1200) || null : null;
+          // Review compares the new image with the one it replaces.
+          if (job.stages[stageName].assetUrl) job.stages[stageName].previousAssetUrl = job.stages[stageName].assetUrl;
           prepareGeneration(job, stageName);
           await saveJob(job);
           await scheduleGeneration(job, stageName);

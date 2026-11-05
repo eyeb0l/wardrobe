@@ -2,7 +2,7 @@
 
 The importer detects up to eight visible clothing items per photo with the Responses API, then creates product cutouts and modelled previews with the Images API. Review each stage before approval. It supports drag-and-drop, paste, metadata editing, regeneration and manual modelled-photo uploads.
 
-The gallery filters Tops, Dresses, Jackets, Bottoms, Accessories and Shoes. Reclassify existing dresses in the item editor. Open a saved item and choose **Update modelled photo** or **Create modelled photo** to select a reference and optional direction. A replacement remains a review candidate until **Approve**; **Reject** keeps the existing photo.
+The gallery filters Tops, Dresses, Jackets, Bottoms, Accessories and Shoes. Reclassify existing dresses in the item editor. Open a saved item and choose **Update modelled photo** or **Create modelled photo** to select a reference and optional direction. A replacement remains a review candidate until **Approve**; **Reject** keeps the existing photo. A regenerated cutout or modelled photo opens in review with a slider to compare it with the image it replaces.
 
 ## Import from a website
 
