@@ -7,10 +7,6 @@ export function isImageUpload(file) {
 }
 const MAX_PIXELS = 64_000_000;
 
-export function formatImageBytes(bytes) {
-  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
 function imageKind(bytes) {
   const ascii = (start, end) => String.fromCharCode(...bytes.slice(start, end));
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
