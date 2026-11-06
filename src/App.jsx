@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, Check, CoatHanger, GearSix, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { GarmentWearControls } from "./garment-wear-controls.jsx";
@@ -125,7 +125,7 @@ function sampleImageColor(image, canvas, event) {
   return null;
 }
 
-function GalleryItem({ item, selected, onOpen, rearranging }) {
+function GalleryItem({ item, selected, onOpen, rearranging, captioned }) {
   const type = TYPE_MAP[item.part]?.singular || "wardrobe item";
   const Tag = rearranging ? "div" : "button";
 
@@ -137,6 +137,7 @@ function GalleryItem({ item, selected, onOpen, rearranging }) {
       aria-label={rearranging ? undefined : `View ${item.name || type}`}
       aria-pressed={rearranging ? undefined : selected}
       data-testid={`wardrobe-item-${item.id}`}
+      data-name={captioned && item.name ? item.name : undefined}
     >
       <OptimizedImage
         draggable={false}
@@ -794,10 +795,11 @@ export function App() {
   return (
     <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
       <nav className="wardrobe-site-nav" aria-label="Main navigation">
+        <span className="site-mark" aria-hidden="true"><CoatHanger size={20} /></span>
         <a href="/" onClick={(event) => navigate(event, "/")} aria-current={!["/outfits", "/shopping"].includes(route) ? "page" : undefined}>Wardrobe</a>
         <a href="/outfits" onClick={(event) => navigate(event, "/outfits")} aria-current={route === "/outfits" ? "page" : undefined}>Outfits</a>
         <a href="/shopping" onClick={(event) => navigate(event, "/shopping")} aria-current={route === "/shopping" ? "page" : undefined}>Shopping</a>
-        <button className="setup-nav-button" type="button" onClick={() => setSetupRequested(value => value + 1)}>Setup & guide</button>
+        <button className="setup-nav-button" type="button" onClick={() => setSetupRequested(value => value + 1)}><GearSix size={18} aria-hidden="true" /><span>Setup & guide</span></button>
       </nav>
       <SetupFlow requested={setupRequested} />
       {(shoppingOpened || route === "/shopping") ? (
@@ -881,7 +883,7 @@ export function App() {
               </ReorderableItem>
             ) : (
               <div key={item.id} className="availability-item">
-                <GalleryItem item={item} selected={selectedId === item.id} onOpen={setSelectedId} />
+                <GalleryItem item={item} selected={selectedId === item.id} onOpen={setSelectedId} captioned={!wearSelecting && availabilityFilter !== "laundry"} />
                 {wearSelecting ? <label className="wear-select"><input type="checkbox" checked={wearSelection.includes(item.id)} disabled={garmentWearBusy || availabilityBusy} onChange={event => setWearSelection(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />{item.name || "Select piece"}</label> : null}
                 {availabilityFilter === "laundry" && !wearSelecting ? <label className="laundry-select"><input type="checkbox" checked={laundrySelection.includes(item.id)} disabled={availabilityBusy} onChange={event => setLaundrySelection(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />{item.name || "Select piece"}</label> : null}
               </div>
