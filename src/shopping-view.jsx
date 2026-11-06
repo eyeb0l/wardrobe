@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowRight, CaretDown, TShirt, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, LinkSimple, TShirt, UploadSimple, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { prepareShoppingImage } from "./shopping-image.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
@@ -517,7 +517,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             <div className="shopping-link-controls">
               <input id={`${id}-website-url`} type="url" name="websiteUrl" inputMode="url" autoComplete="url" placeholder="https://shop.example/product" value={websiteUrl} disabled={analyzing || importing} aria-describedby={`${id}-link-hint`}
                 onChange={(event) => setWebsiteUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void importWebsite(); } }} />
-              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || tryingOn || !websiteUrl.trim()}>{importing ? "Importing…" : "Import link"}<ArrowRight size={16} aria-hidden="true" /></button>
+              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || tryingOn || !websiteUrl.trim()}><LinkSimple size={16} aria-hidden="true" />{importing ? "Importing…" : "Import link"}</button>
             </div>
             <p id={`${id}-link-hint`} className="shopping-small">Import the product photo and details, then check the piece when you're ready.</p>
             {importing ? <div className="shopping-link-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-small">Finding the product photo and details…</p><button type="button" className="shopping-text-button" onClick={cancelImport}>Cancel import</button></div> : null}

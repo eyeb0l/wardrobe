@@ -137,7 +137,7 @@ function GalleryItem({ item, selected, onOpen, rearranging }) {
       aria-label={rearranging ? undefined : `View ${item.name || type}`}
       aria-pressed={rearranging ? undefined : selected}
       data-testid={`wardrobe-item-${item.id}`}
-      data-name={!rearranging && item.name ? item.name : undefined}
+      data-name={item.name || undefined}
     >
       <OptimizedImage
         draggable={false}

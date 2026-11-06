@@ -62,6 +62,8 @@ body {
 h1, h2 { font-variant-ligatures: no-common-ligatures; }
 
 button { font: inherit; }
+/* Browsers reset word spacing on form controls; keep the body's. */
+button, input, select, textarea { word-spacing: inherit; }
 
 ::selection { background: #e4d5c3; }
 

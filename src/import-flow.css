@@ -19,11 +19,11 @@
 .import-reference-picker { min-width: 0; margin: 8px 0; padding: 0; border: 0; }
 .import-reference-picker legend { padding: 0; margin-bottom: 10px; font-size: 13px; font-weight: 550; }
 .import-reference-options { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px; }
-.import-reference-options label { flex: 0 0 116px; padding: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-m); cursor: pointer; }
+.import-reference-options label { position: relative; flex: 0 0 116px; padding: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-m); cursor: pointer; }
 .import-reference-options label.is-selected { border-color: var(--import-ink); box-shadow: var(--selected-ring); }
 .import-reference-options img { display: block; width: 100%; height: 96px; object-fit: cover; object-position: 50% 20%; background: var(--well); border-radius: 8px; }
-.import-reference-options span { display: flex; align-items: flex-start; gap: 6px; margin: 7px 3px 3px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
-.import-reference-options input[type="radio"] { flex-shrink: 0; width: 14px; height: 14px; margin: 1px 0 0; accent-color: var(--import-ink); }
+.import-reference-options span { display: block; margin: 7px 3px 3px; font-size: 13px; font-weight: 530; text-align: center; line-height: 1.4; overflow-wrap: anywhere; }
+.import-reference-options input[type="radio"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .import-reference-refresh { margin-top: 4px; color: var(--import-muted); font-weight: 500; }
 
 /* Full-page drag and paste target. */
@@ -294,8 +294,8 @@ body.import-open { overflow: hidden; }
   .import-tray__actions { max-width: calc(100vw - 96px); }
   .import-popover-backdrop { place-items: end center; padding: 12px 0 0; }
   .import-popover { width: 100%; max-height: calc(100dvh - 12px); border-radius: 24px 24px 0 0; }
-  .import-popover__header { padding: 18px; gap: 12px; }
-  .import-popover__body { padding: 20px 18px calc(24px + env(safe-area-inset-bottom)); }
+  .import-popover__header { padding: 18px 16px 18px 20px; gap: 12px; }
+  .import-popover__body { padding: 20px 20px calc(24px + env(safe-area-inset-bottom)); }
   .import-drop-overlay { padding: 12px; }
   .import-drop-target { min-height: 240px; padding: 28px 20px; }
   .import-card { grid-template-columns: 68px minmax(0, 1fr); }
@@ -380,5 +380,5 @@ body.import-open { overflow: hidden; }
 }
 @media (max-width: 480px) {
   .import-website-input { flex-direction: column; }
-  .import-website-input button { align-self: flex-start; }
+  .import-website-input button { align-self: stretch; }
 }

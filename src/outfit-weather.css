@@ -18,6 +18,7 @@
 .outfit-weather-temps strong { color: var(--ink); font-weight: 560; }
 .outfit-weather-day > .outfit-weather-meta { grid-column: 1 / -1; }
 .outfit-weather-day > .outfit-weather-meta:nth-child(2) { grid-column: 2 / -1; }
+.outfit-nowrap { white-space: nowrap; }
 .outfit-weather-meta { font-size: 13px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
 .outfit-weather-error { grid-column: 1 / -1; }
 .outfit-weather .outfit-weather-credit { margin-left: auto; }
@@ -63,6 +64,9 @@
 }
 @media (max-width: 580px) {
   .outfit-weather { gap: 8px 16px; padding-inline: 16px; }
+  .outfit-weather-day > .outfit-weather-meta > span { display: block; }
+  .outfit-weather-day > .outfit-weather-meta > .outfit-weather-sep { display: none; }
+  .outfit-weather-temps { font-size: 14px; }
   .outfit-weather-header .outfit-text-button { min-height: 44px; }
   .outfit-weather-form, .outfit-weather-backfill { padding: 18px; }
   .outfit-weather-backfill > .outfit-form-actions { margin: 0 -18px; padding-inline: 18px; }
