@@ -475,7 +475,7 @@ Pull requests and pushes to `main` run three GitHub Actions jobs:
   native workflow packaging verification and SPA fallback checks. This builds
   the deployment package without deploying or requiring cloud credentials.
 - `browser`: Node 22, `npm ci`, `npx playwright install --with-deps chromium`,
-  and `npm run test:browser -- --forbid-only --reporter=list,html --global-timeout=600000`.
+  and `npm run test:browser -- --forbid-only --reporter=list,html --global-timeout=720000`.
   Both desktop and mobile projects run with one worker and no retries. Playwright
   starts and stops its isolated Vite server; fixtures do not require AI credentials.
 
@@ -496,8 +496,9 @@ and `$RUNNER_TEMP/wardrobe-browser-report`. Open the extracted HTML report with
 `npx playwright show-trace <trace.zip>`.
 
 Superseded runs on the same branch are canceled. The `build` and `hosted` jobs
-have 10-minute limits; the browser job has a 15-minute limit and a 10-minute global
-limit so Playwright can produce its report before the job times out.
+have 10-minute limits; the browser job has a 15-minute limit and a 12-minute global
+limit so Playwright can produce its report before the job times out. The suite
+takes 8 to 10 minutes on the shared runner, depending on its load.
 
 ## Headless browser tests
 

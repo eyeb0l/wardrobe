@@ -1,12 +1,12 @@
 .image-compare { display: block; }
-.image-compare-frame { position: relative; max-height: inherit; line-height: 0; overflow: hidden; cursor: ew-resize; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.image-compare-frame { position: relative; border-radius: var(--radius-s); max-height: inherit; line-height: 0; overflow: hidden; cursor: ew-resize; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .image-compare-frame img { display: block; width: 100%; max-height: inherit; object-fit: contain; -webkit-user-drag: none; }
 /* Clip both layers, so a transparent cutout never shows the other image through it. */
 .image-compare-frame .image-compare-after { height: auto; clip-path: inset(0 0 0 var(--compare-position)); }
 .image-compare-frame .image-compare-before { position: absolute; inset: 0; height: 100%; clip-path: inset(0 calc(100% - var(--compare-position)) 0 0); }
 .image-compare-divider { position: absolute; top: 0; bottom: 0; left: var(--compare-position); width: 2px; margin-left: -1px; background: var(--paper); box-shadow: 0 0 0 1px rgba(25, 25, 25, .35); pointer-events: none; }
-.image-compare-handle { position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 36px; height: 36px; color: var(--ink); background: var(--paper); box-shadow: 0 0 0 1px rgba(25, 25, 25, .35); transform: translate(-50%, -50%); }
-.image-compare-label { position: absolute; top: 8px; padding: 4px 7px; font-size: 11px; line-height: 1.2; color: var(--ink); background: var(--paper); pointer-events: none; }
+.image-compare-handle { position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--ink); background: var(--surface); box-shadow: 0 0 0 1px rgba(31, 28, 24, .3), var(--shadow-m); transform: translate(-50%, -50%); }
+.image-compare-label { position: absolute; top: 8px; border-radius: var(--radius-pill); padding: 4px 10px; font-size: 12px; font-weight: 540; line-height: 1.3; color: var(--ink); background: var(--surface); pointer-events: none; }
 .image-compare-label.is-before { left: 8px; }
 .image-compare-label.is-after { right: 8px; }
 .image-compare-range { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }

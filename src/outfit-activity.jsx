@@ -17,7 +17,7 @@ export function WearSummary({ outfit }) {
   return <>{count ? `${count} ${count === 1 ? "wear" : "wears"} logged · Last worn ${formatWearDate(lastWorn)}` : "No wears logged"}</>;
 }
 
-export function OutfitActivity({ outfit, itemsById, busy, error, notice, onChange, onAvailabilityChange, wardrobeError, onRefreshWardrobe }) {
+export function OutfitActivity({ outfit, itemsById, busy, error, notice, onChange, onAvailabilityChange, wardrobeError, onRefreshWardrobe, children }) {
   const id = useId();
   const [date, setDate] = useState(localDate);
   const [pieces, setPieces] = useState(outfit.garmentIds);
@@ -27,11 +27,12 @@ export function OutfitActivity({ outfit, itemsById, busy, error, notice, onChang
   const dateEntry = history.find((event) => event.date === date);
   return <section className="outfit-activity" aria-label="Favourites and wearing history">
     <div className="outfit-action-row">
-      <FavouriteButton outfit={outfit} busy={busy} onChange={onChange} />
-      <button type="button" className="outfit-secondary" disabled={busy || !!todayEntry} onClick={() => onChange(outfit, "wears", { date: today })}>
+      <button type="button" className="outfit-primary" disabled={busy || !!todayEntry} onClick={() => onChange(outfit, "wears", { date: today })}>
         <Check size={17} aria-hidden="true" />{todayEntry ? "Worn today" : "Wore this today"}
       </button>
+      <FavouriteButton outfit={outfit} busy={busy} onChange={onChange} />
     </div>
+    {children}
     <p className="outfit-small"><WearSummary outfit={outfit} /></p>
     {notice?.outfitId === outfit.id ? <div className="outfit-activity-notice" role="status"><span>{notice.text}</span>{notice.eventId && history.some((event) => event.id === notice.eventId) ? <button type="button" className="outfit-text-button" disabled={busy} onClick={() => onChange(outfit, `wears/${notice.eventId}/remove`, {})}>Undo</button> : null}</div> : null}
     {error ? <p className="outfit-error" role="alert">{error}</p> : null}

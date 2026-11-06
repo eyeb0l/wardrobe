@@ -8,7 +8,8 @@ import { formatWearDate } from '../shared/outfit-activity.mjs';
 import './wardrobe-rediscovery.css';
 
 function HistorySummary({ count, lastWorn }) {
-  return <>{count ? `${count} ${count === 1 ? 'day' : 'days'} logged · Last worn ${formatWearDate(lastWorn)}` : 'No wears logged'}</>;
+  // Two unbroken parts, so a narrow card stacks them rather than breaking inside the date.
+  return count ? <><span className="rediscovery-history-part">{count} {count === 1 ? 'day' : 'days'} logged</span><span className="rediscovery-history-sep">{' · '}</span><span className="rediscovery-history-part">Last worn {formatWearDate(lastWorn)}</span></> : <>No wears logged</>;
 }
 
 function PieceChoice({ item, count, lastWorn, onOpen, onImageError }) {
@@ -47,9 +48,8 @@ function ReadyLook({ outfit, itemsById, days, disabled, onOpen, onPlan, onImageE
   const mark = source => setLoaded(current => new Set([...current, source]));
   return <article className="rediscovery-look" aria-label={outfit.name}>
     <OptimizedImage src={outfit.image} alt={`${outfit.name}, saved look`} sizes="120px" loading="eager" onLoad={() => mark(outfit.image)} onError={() => onImageError(outfit.image)} />
-    <div><h4>{outfit.name}</h4><p>{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</p><p>{ready ? 'All pieces are Ready.' : 'Checking images…'}</p>
-      <div className="rediscovery-actions"><button className="secondary-button" type="button" disabled={disabled || !ready} onClick={() => onOpen(outfit.id)}>View look</button>{days.map((date, index) => <button key={date} className="secondary-button" type="button" disabled={disabled || !ready} onClick={() => onPlan(outfit.id, date)}>Plan for {index ? 'tomorrow' : 'today'}</button>)}</div>
-    </div>
+    <div><h4>{outfit.name}</h4><p>{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</p><p>{ready ? 'All pieces are Ready.' : 'Checking images…'}</p></div>
+    <div className="rediscovery-actions"><button className="secondary-button" type="button" disabled={disabled || !ready} onClick={() => onOpen(outfit.id)}>View look</button>{days.map((date, index) => <button key={date} className="secondary-button" type="button" disabled={disabled || !ready} onClick={() => onPlan(outfit.id, date)}>Plan for {index ? 'tomorrow' : 'today'}</button>)}</div>
     <span hidden aria-hidden="true">{sources.filter(source => source !== outfit.image).map(source => <img key={source} src={source} alt="" onLoad={() => mark(source)} onError={() => onImageError(source)} />)}</span>
   </article>;
 }

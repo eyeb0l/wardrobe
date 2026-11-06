@@ -46,7 +46,7 @@ export function ReorderableItem({ item, children, previous, next, busy, drag, se
       </div>
       <div className="reorder-controls">
         <button type="button" aria-label={`Move ${name} earlier`} disabled={busy || !previous} onClick={() => onMove(item.id, previous.id)}><ArrowLeft size={16} aria-hidden="true" /></button>
-        <span>{name}</span>
+        <span className="visually-hidden">{name}</span>
         <button type="button" aria-label={`Move ${name} later`} disabled={busy || !next} onClick={() => onMove(item.id, next.id)}><ArrowRight size={16} aria-hidden="true" /></button>
       </div>
     </div>

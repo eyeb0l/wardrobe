@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowCounterClockwise, Check, Plus, Trash, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, Check, CoatHanger, GearSix, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { GarmentWearControls } from "./garment-wear-controls.jsx";
@@ -137,6 +137,7 @@ function GalleryItem({ item, selected, onOpen, rearranging }) {
       aria-label={rearranging ? undefined : `View ${item.name || type}`}
       aria-pressed={rearranging ? undefined : selected}
       data-testid={`wardrobe-item-${item.id}`}
+      data-name={item.name || undefined}
     >
       <OptimizedImage
         draggable={false}
@@ -567,6 +568,7 @@ export function App() {
   const [orderError, setOrderError] = useState("");
   const [orderNotice, setOrderNotice] = useState("");
   const [drag, setDrag] = useState(null);
+  const [importSlot, setImportSlot] = useState(null);
   const requestVersion = useRef(0);
   const mutating = useRef(false);
   const refreshing = useRef(null);
@@ -792,12 +794,13 @@ export function App() {
   }, []);
 
   return (
-    <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
+    <div className={`app-shell${selectedItem ? " has-selection" : ""}${rearranging || wearSelecting ? " is-arranging" : ""}`}>
       <nav className="wardrobe-site-nav" aria-label="Main navigation">
+        <span className="site-mark" aria-hidden="true"><CoatHanger size={20} /></span>
         <a href="/" onClick={(event) => navigate(event, "/")} aria-current={!["/outfits", "/shopping"].includes(route) ? "page" : undefined}>Wardrobe</a>
         <a href="/outfits" onClick={(event) => navigate(event, "/outfits")} aria-current={route === "/outfits" ? "page" : undefined}>Outfits</a>
         <a href="/shopping" onClick={(event) => navigate(event, "/shopping")} aria-current={route === "/shopping" ? "page" : undefined}>Shopping</a>
-        <button className="setup-nav-button" type="button" onClick={() => setSetupRequested(value => value + 1)}>Setup & guide</button>
+        <button className="setup-nav-button" type="button" onClick={() => setSetupRequested(value => value + 1)}><GearSix size={18} aria-hidden="true" /><span>Setup & guide</span></button>
       </nav>
       <SetupFlow requested={setupRequested} />
       {(shoppingOpened || route === "/shopping") ? (
@@ -823,6 +826,7 @@ export function App() {
               <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving || availabilityBusy || garmentWearBusy || wearSelecting || availabilityFilter !== "all"} title={availabilityFilter !== "all" ? "Show all availability before rearranging" : undefined} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>
               <button className="secondary-button" type="button" aria-pressed={wearSelecting} disabled={orderSaving || availabilityBusy || garmentWearBusy || rearranging} onClick={() => { setWearSelecting(value => !value); setWearSelection([]); setLaundrySelection([]); }}>{wearSelecting ? "Done selecting" : "Log wear"}</button>
             </div>}
+            <div className="gallery-add" ref={setImportSlot} />
           </div>
           <div className="gallery-filters">
           <nav className="category-nav" aria-label="Filter wardrobe by item type">
@@ -904,7 +908,7 @@ export function App() {
         setRoute("/outfits");
         window.scrollTo(0, 0);
       }} />}
-      <WardrobeImportFlow regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} onOpenSetup={() => setSetupRequested(value => value + 1)} />
+      <WardrobeImportFlow traySlot={importSlot} regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} onOpenSetup={() => setSetupRequested(value => value + 1)} />
       </>}
     </div>
   );

@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from 'react';
+import { Check } from '@phosphor-icons/react';
 import { validWearDate, formatWearDate } from '../shared/outfit-activity.mjs';
 import { garmentWearDates } from '../shared/outfit-shortlist.mjs';
 import { WornLaundry } from './worn-laundry.jsx';
@@ -39,7 +40,7 @@ export function GarmentWearControls({ ids, showCount = true, outfits, garmentWea
     || (event.garmentIds.some(id => itemsById.get(id)?.part === 'upperbody') && event.garmentIds.some(id => itemsById.get(id)?.part === 'lowerbody'))
     ? <button className="garment-wear-link" type="button" disabled={busy || !!unavailable} onClick={() => onSaveLook(event)}>Save as a look</button> : null;
   return <section className="garment-wear-controls" aria-label="Log garment wear">
-    <div className="garment-wear-actions"><button type="button" className="secondary-button" disabled={busy || !!unavailable || !ids.length || allLogged(today)} onClick={() => log(today)}>{allLogged(today) ? 'Worn today' : ids.length === 1 ? 'Wore this today' : 'Wore these today'}</button>{showCount ? <span>{ids.length} {ids.length === 1 ? 'piece' : 'pieces'} selected</span> : null}</div>
+    <div className="garment-wear-actions"><button type="button" className="primary-button" disabled={busy || !!unavailable || !ids.length || allLogged(today)} onClick={() => log(today)}><Check size={17} aria-hidden="true" />{allLogged(today) ? 'Worn today' : ids.length === 1 ? 'Wore this today' : 'Wore these today'}</button>{showCount ? <span>{ids.length} {ids.length === 1 ? 'piece' : 'pieces'} selected</span> : null}</div>
     {unavailable ? <p role="status">{unavailable} <button type="button" className="secondary-button" onClick={onRefresh} disabled={busy}>Refresh wear history</button></p> : null}
     {entry ? <>
       <p className="garment-wear-notice" role="status">Wear logged for {formatWearDate(entry.date)}. <button className="garment-wear-link" type="button" disabled={busy || !!unavailable} onClick={() => remove(entry)}>Undo</button></p>

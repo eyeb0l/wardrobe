@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowRight, CaretDown, Plus, TShirt, X } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, LinkSimple, TShirt, UploadSimple, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { prepareShoppingImage } from "./shopping-image.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
@@ -511,15 +511,15 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     <form className="shopping-form" onSubmit={analyze} noValidate>
       <div className="shopping-workspace">
         <section className="shopping-upload-section" aria-labelledby={`${id}-upload-title`}>
-          <h2 id={`${id}-upload-title`} className="shopping-section-title">The piece you're considering</h2>
+          <h2 id={`${id}-upload-title`} className="shopping-section-title">The piece you’re considering</h2>
           <div className="shopping-link-import" aria-busy={importing}>
             <label className="shopping-field" htmlFor={`${id}-website-url`}><span>Product URL</span></label>
             <div className="shopping-link-controls">
               <input id={`${id}-website-url`} type="url" name="websiteUrl" inputMode="url" autoComplete="url" placeholder="https://shop.example/product" value={websiteUrl} disabled={analyzing || importing} aria-describedby={`${id}-link-hint`}
                 onChange={(event) => setWebsiteUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void importWebsite(); } }} />
-              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || tryingOn || !websiteUrl.trim()}>{importing ? "Importing…" : "Import link"}<ArrowRight size={16} aria-hidden="true" /></button>
+              <button type="button" className="shopping-secondary" onClick={() => void importWebsite()} disabled={analyzing || findingGaps || importing || tryingOn || !websiteUrl.trim()}><LinkSimple size={16} aria-hidden="true" />{importing ? "Importing…" : "Import link"}</button>
             </div>
-            <p id={`${id}-link-hint`} className="shopping-small">Import the product photo and details, then check the piece when you're ready.</p>
+            <p id={`${id}-link-hint`} className="shopping-small">Import the product photo and details, then check the piece when you’re ready.</p>
             {importing ? <div className="shopping-link-progress" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-small">Finding the product photo and details…</p><button type="button" className="shopping-text-button" onClick={cancelImport}>Cancel import</button></div> : null}
           </div>
           <p className="shopping-upload-alternative">Or add a photo or screenshot</p>
@@ -530,10 +530,10 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             onDrop={(event) => { if (fileDragged(event)) { event.preventDefault(); dragDepth.current = 0; setDragging(false); acceptFiles([...event.dataTransfer.files]); } }}
           >
             {prepared ? <img className="shopping-upload-preview" src={prepared.dataUrl} alt={prepared.websiteSource ? prepared.websiteSource.name : "The shopping image you selected"} /> : preparing ? <div className="shopping-upload-empty" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-upload-title">Preparing your photo…</p><button type="button" className="shopping-text-button" onClick={removeImage}>Cancel</button></div> : <div className="shopping-upload-empty">
-              <Plus size={30} weight="light" aria-hidden="true" />
+              <UploadSimple size={30} weight="light" aria-hidden="true" />
               <p className="shopping-upload-title">Add a photo or screenshot</p>
               <p>Use a saved listing or a photo from a shop.</p>
-              <button ref={chooseImageButton} type="button" className="shopping-secondary" onClick={() => fileInput.current?.click()}>Choose image</button>
+              <button ref={chooseImageButton} type="button" className="shopping-primary" onClick={() => fileInput.current?.click()}>Choose image</button>
               <p className="shopping-upload-hint">You can also drop or paste an image here.</p>
             </div>}
             {dragging ? <div className="shopping-drop-message" aria-hidden="true">Drop your image here</div> : null}
@@ -558,7 +558,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
           <label className="shopping-field" htmlFor={`${id}-notes`}>
             <span>What are you looking for? <em>optional</em></span>
             <textarea id={`${id}-notes`} name="notes" rows={3} maxLength={1500} value={notes} disabled={analyzing} placeholder="An everyday layer, something for a wedding… Add the price or any questions about fit." onChange={(event) => { setNotes(event.target.value); if (result) setResult(null); setAnalysisError(""); }} />
-            <small>Include anything the photo doesn't tell us.</small>
+            <small>Include anything the photo doesn’t tell us.</small>
           </label>
 
           {references.length ? <fieldset className="shopping-reference-picker" disabled={analyzing || configLoading}>
@@ -573,7 +573,7 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
 
           <div className="shopping-wardrobe-context">
             <p>{loading ? "Loading your wardrobe…" : `${items.length} ${items.length === 1 ? "piece" : "pieces"} in your wardrobe`}</p>
-            <span>We'll look for new combinations and pieces similar to this one.</span>
+            <span>We’ll look for new combinations and pieces similar to this one.</span>
           </div>
 
           {wardrobeProblem ? <div className="shopping-notice" role="status"><p>{wardrobeProblem}</p>{wardrobeError ? <button type="button" className="shopping-text-button" onClick={() => window.location.reload()}>Reload wardrobe</button> : <a className="shopping-text-button" href="/">Go to Wardrobe <ArrowRight size={14} aria-hidden="true" /></a>}</div> : null}

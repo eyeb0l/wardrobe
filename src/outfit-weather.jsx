@@ -25,7 +25,7 @@ function WeatherDay({ label, day, loading }) {
     <span className="outfit-weather-day-name" aria-hidden="true">{label}</span>
     <Icon size={22} aria-hidden="true" />
     <span className="outfit-weather-temps" aria-hidden="true"><strong>{day.high}°</strong> / {day.low}°</span>
-    <span className="outfit-weather-meta" aria-hidden="true">{condition.label}{rain} · feels {day.feelsLow}–{day.feelsHigh}°</span>
+    <span className="outfit-weather-meta" aria-hidden="true"><span>{condition.label}{rain}</span><span className="outfit-weather-sep"> · </span><span className="outfit-nowrap">feels {day.feelsLow}–{day.feelsHigh}°</span></span>
   </div>;
 }
 
@@ -97,10 +97,16 @@ export function WeatherLocationForm({ weather, onDone }) {
   </div>;
 }
 
+// In a narrow card a temperature range never breaks across lines; the words around it still wrap.
+const RANGE = /((?:feels(?:-like)? )?\d+°?–\d+°)/;
+export function keepRanges(text) {
+  return text.split(RANGE).map((part, index) => RANGE.test(part) ? <span key={index} className="outfit-nowrap">{part}</span> : part);
+}
+
 export function WeatherFitLine({ fit, label, compact = false }) {
   if (!fit) return null;
   if (fit.level === 'unknown') return <p className="outfit-weather-fit unknown">{label ? `${label}: ` : ''}No weather details for this look yet.</p>;
-  return <p className={`outfit-weather-fit ${fit.level}`}><strong>{label ? `${label}: ` : ''}{fit.summary}.</strong>{compact ? ` ${fit.reasons[0]}` : ` ${fit.reasons.join(' ')}`}</p>;
+  return <p className={`outfit-weather-fit ${fit.level}`}><strong>{label ? `${label}: ` : ''}{fit.summary}.</strong>{compact ? keepRanges(` ${fit.reasons[0]}`) : ` ${fit.reasons.join(' ')}`}</p>;
 }
 
 function WeatherForm({ outfit, busy, onSave, onCancel }) {
@@ -159,7 +165,7 @@ export function OutfitWeather({ outfit, weather, hasApiKey, disabled = false, on
         {weather?.ready ? weather.days.map((day, index) => day ? <WeatherFitLine key={WEATHER_DAY_LABELS[index]} label={WEATHER_DAY_LABELS[index]} fit={weatherFit(outfit.weather, day)} /> : null) : null}
         <div className="outfit-weather-actions">
           <button type="button" className="outfit-text-button" onClick={() => { setEditing({ expectedUpdatedAt: outfit.weather?.updatedAt ?? null }); setError(''); }} disabled={locked}>Edit weather details</button>
-          <button type="button" className="outfit-text-button" onClick={() => run('clear', async () => { onSaved([await post(`/api/outfits/${encodeURIComponent(outfit.id)}/weather`, { weather: null, expectedUpdatedAt: outfit.weather.updatedAt })]); })} disabled={locked}>{busy === 'clear' ? 'Removing…' : 'Remove'}</button>
+          <button type="button" className="outfit-text-button outfit-text-danger" onClick={() => run('clear', async () => { onSaved([await post(`/api/outfits/${encodeURIComponent(outfit.id)}/weather`, { weather: null, expectedUpdatedAt: outfit.weather.updatedAt })]); })} disabled={locked}>{busy === 'clear' ? 'Removing…' : 'Remove'}</button>
         </div>
       </> : <>
         <p className="outfit-small">No weather details yet. Add the temperatures and rain this look suits to match it to the forecast.</p>
