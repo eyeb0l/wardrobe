@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowRight, CaretDown, Plus, TShirt, X } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, TShirt, UploadSimple, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { prepareShoppingImage } from "./shopping-image.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
@@ -530,10 +530,10 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             onDrop={(event) => { if (fileDragged(event)) { event.preventDefault(); dragDepth.current = 0; setDragging(false); acceptFiles([...event.dataTransfer.files]); } }}
           >
             {prepared ? <img className="shopping-upload-preview" src={prepared.dataUrl} alt={prepared.websiteSource ? prepared.websiteSource.name : "The shopping image you selected"} /> : preparing ? <div className="shopping-upload-empty" role="status"><div className="shopping-progress-line" aria-hidden="true" /><p className="shopping-upload-title">Preparing your photo…</p><button type="button" className="shopping-text-button" onClick={removeImage}>Cancel</button></div> : <div className="shopping-upload-empty">
-              <Plus size={30} weight="light" aria-hidden="true" />
+              <UploadSimple size={30} weight="light" aria-hidden="true" />
               <p className="shopping-upload-title">Add a photo or screenshot</p>
               <p>Use a saved listing or a photo from a shop.</p>
-              <button ref={chooseImageButton} type="button" className="shopping-secondary" onClick={() => fileInput.current?.click()}>Choose image</button>
+              <button ref={chooseImageButton} type="button" className="shopping-primary" onClick={() => fileInput.current?.click()}>Choose image</button>
               <p className="shopping-upload-hint">You can also drop or paste an image here.</p>
             </div>}
             {dragging ? <div className="shopping-drop-message" aria-hidden="true">Drop your image here</div> : null}

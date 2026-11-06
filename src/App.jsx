@@ -125,7 +125,7 @@ function sampleImageColor(image, canvas, event) {
   return null;
 }
 
-function GalleryItem({ item, selected, onOpen, rearranging, captioned }) {
+function GalleryItem({ item, selected, onOpen, rearranging }) {
   const type = TYPE_MAP[item.part]?.singular || "wardrobe item";
   const Tag = rearranging ? "div" : "button";
 
@@ -137,7 +137,7 @@ function GalleryItem({ item, selected, onOpen, rearranging, captioned }) {
       aria-label={rearranging ? undefined : `View ${item.name || type}`}
       aria-pressed={rearranging ? undefined : selected}
       data-testid={`wardrobe-item-${item.id}`}
-      data-name={captioned && item.name ? item.name : undefined}
+      data-name={!rearranging && item.name ? item.name : undefined}
     >
       <OptimizedImage
         draggable={false}
@@ -568,6 +568,7 @@ export function App() {
   const [orderError, setOrderError] = useState("");
   const [orderNotice, setOrderNotice] = useState("");
   const [drag, setDrag] = useState(null);
+  const [importSlot, setImportSlot] = useState(null);
   const requestVersion = useRef(0);
   const mutating = useRef(false);
   const refreshing = useRef(null);
@@ -793,7 +794,7 @@ export function App() {
   }, []);
 
   return (
-    <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
+    <div className={`app-shell${selectedItem ? " has-selection" : ""}${rearranging || wearSelecting ? " is-arranging" : ""}`}>
       <nav className="wardrobe-site-nav" aria-label="Main navigation">
         <span className="site-mark" aria-hidden="true"><CoatHanger size={20} /></span>
         <a href="/" onClick={(event) => navigate(event, "/")} aria-current={!["/outfits", "/shopping"].includes(route) ? "page" : undefined}>Wardrobe</a>
@@ -825,6 +826,7 @@ export function App() {
               <button type="button" className="secondary-button" aria-pressed={rearranging} disabled={orderSaving || availabilityBusy || garmentWearBusy || wearSelecting || availabilityFilter !== "all"} title={availabilityFilter !== "all" ? "Show all availability before rearranging" : undefined} onClick={() => { setRearranging(value => !value); setDrag(null); setOrderNotice(""); }}> {rearranging ? "Done" : "Rearrange"}</button>
               <button className="secondary-button" type="button" aria-pressed={wearSelecting} disabled={orderSaving || availabilityBusy || garmentWearBusy || rearranging} onClick={() => { setWearSelecting(value => !value); setWearSelection([]); setLaundrySelection([]); }}>{wearSelecting ? "Done selecting" : "Log wear"}</button>
             </div>}
+            <div className="gallery-add" ref={setImportSlot} />
           </div>
           <div className="gallery-filters">
           <nav className="category-nav" aria-label="Filter wardrobe by item type">
@@ -883,7 +885,7 @@ export function App() {
               </ReorderableItem>
             ) : (
               <div key={item.id} className="availability-item">
-                <GalleryItem item={item} selected={selectedId === item.id} onOpen={setSelectedId} captioned={!wearSelecting && availabilityFilter !== "laundry"} />
+                <GalleryItem item={item} selected={selectedId === item.id} onOpen={setSelectedId} />
                 {wearSelecting ? <label className="wear-select"><input type="checkbox" checked={wearSelection.includes(item.id)} disabled={garmentWearBusy || availabilityBusy} onChange={event => setWearSelection(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />{item.name || "Select piece"}</label> : null}
                 {availabilityFilter === "laundry" && !wearSelecting ? <label className="laundry-select"><input type="checkbox" checked={laundrySelection.includes(item.id)} disabled={availabilityBusy} onChange={event => setLaundrySelection(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />{item.name || "Select piece"}</label> : null}
               </div>
@@ -906,7 +908,7 @@ export function App() {
         setRoute("/outfits");
         window.scrollTo(0, 0);
       }} />}
-      <WardrobeImportFlow regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} onOpenSetup={() => setSetupRequested(value => value + 1)} />
+      <WardrobeImportFlow traySlot={importSlot} regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} onOpenSetup={() => setSetupRequested(value => value + 1)} />
       </>}
     </div>
   );

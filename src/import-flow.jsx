@@ -3,6 +3,7 @@ import { prepareOriginalCutout } from "./background-removal.mjs";
 import { CopyPrompt, ModeledPhotoUpload } from "./modeled-photo-controls.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowCounterClockwise, Check, LinkSimple, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { IMAGE_ACCEPT, isImageUpload, prepareUploadImage } from "./image-upload.mjs";
 import { activeImportJobIds, importPollUrls, nextPollDelay, POLL_MIN_MS } from "./import-polling.mjs";
@@ -261,7 +262,7 @@ function CleanupEditor({ job, tolerance, setTolerance, busy, active, onPreview, 
   );
 }
 
-export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regenerationRequest, onOpenSetup }) {
+export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regenerationRequest, onOpenSetup, traySlot }) {
   const inputRef = useRef(null);
   const dialogRef = useRef(null);
   const panelRef = useRef(null);
@@ -621,10 +622,11 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
     <>
       <input ref={inputRef} type="file" accept={IMAGE_ACCEPT} aria-label="Choose wardrobe images" multiple hidden disabled={!setup?.ready || Boolean(busyId)} onChange={(event) => { submitFiles(event.target.files); event.target.value = ""; }} />
       <div className="import-drop-overlay" data-active={dragging && !setupRequired} aria-hidden={!dragging || setupRequired}><div className="import-drop-target is-over"><UploadSimple size={34} weight="light" /><h2>Drop clothing images here</h2><p>Add a product photo or a full outfit. You’ll review each item before saving it.</p></div></div>
-      <aside className={`import-tray${hasImportActivity ? " is-expanded" : ""}`} aria-label="Wardrobe imports">
+      {/* The launcher sits in the Wardrobe header and floats only while an import is under way. */}
+      {traySlot ? createPortal(<aside className={`import-tray${hasImportActivity ? " is-expanded" : ""}`} aria-label="Wardrobe imports">
         <button className="import-tray__button" type="button" onClick={() => setOpen(true)} aria-label={setupRequired ? "Open setup instructions" : hasImportActivity ? "Open import progress" : "Add clothes"}>{activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
         <div className="import-tray__actions">{(uploads[0]?.previewUrl || (!uploads.length && active)) && <OptimizedImage className="import-tray__preview" sizes="80px" src={uploads[0]?.previewUrl || active?.stages?.garment?.assetUrl || active?.stages?.garment?.failedAssetUrl || active?.stages?.crop?.assetUrl || active?.originalAssetUrl} alt="" />}<span className="import-tray__label" role="status">{activeStatus?.text || "Add clothes"}</span>{!setupRequired && <button className="import-icon-button" type="button" disabled={Boolean(busyId)} onClick={() => inputRef.current?.click()} aria-label="Choose images"><UploadSimple size={17} /></button>}</div>
-      </aside>
+      </aside>, traySlot) : null}
       <dialog ref={dialogRef} className="import-popover-backdrop" aria-labelledby="import-title"
         onCancel={(event) => { event.preventDefault(); setOpen(false); }}
         onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}
@@ -641,7 +643,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
           <header className="import-popover__header"><div><p className="import-popover__eyebrow">{reviewJob?.modeledReplacement ? "Modelled photo" : "Wardrobe import"}</p><h2 className="import-popover__title" id="import-title">{uploads.length ? activeStatus.text : reviewJob && hasCleanupFailure(reviewJob) ? "Review garment edges" : reviewJob?.stages?.modeled?.status === "ready" ? "Create a modelled photo" : readyCount ? `${readyCount} ready for review` : activeStatus?.tone === "error" ? "Import needs attention" : jobs.length ? "Preparing new pieces" : notice?.text || "Add to your wardrobe"}</h2></div><button ref={closeRef} className="import-icon-button" type="button" onClick={() => setOpen(false)} aria-label="Close import progress"><X size={20} /></button></header>
           <div className="import-popover__body">
           {!setupRequired && <form className="import-website-form" onSubmit={submitWebsite} aria-busy={busyId === "website"}>
-            <div className="import-field"><label htmlFor="import-website-url">Import from a website</label><div className="import-website-input"><input id="import-website-url" type="url" required placeholder="https://shop.com/product" value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} disabled={!setup?.ready || Boolean(busyId) || uploads.length > 0} aria-describedby="import-website-help" /><button className="import-button import-button--primary" type="submit" disabled={!setup?.ready || Boolean(busyId) || uploads.length > 0 || !websiteUrl.trim()}>{busyId === "website" ? <SpinnerGap size={16} className="import-spinner" /> : <LinkSimple size={16} />} {busyId === "website" ? "Importing…" : "Import link"}</button></div></div>
+            <div className="import-field"><label htmlFor="import-website-url">Import from a website</label><div className="import-website-input"><input id="import-website-url" type="url" required placeholder="https://shop.com/product" value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} disabled={!setup?.ready || Boolean(busyId) || uploads.length > 0} aria-describedby="import-website-help" /><button className="import-button" type="submit" disabled={!setup?.ready || Boolean(busyId) || uploads.length > 0 || !websiteUrl.trim()}>{busyId === "website" ? <SpinnerGap size={16} className="import-spinner" /> : <LinkSimple size={16} />} {busyId === "website" ? "Importing…" : "Import link"}</button></div></div>
             <p className="import-card__detail" id="import-website-help">Paste a product link to import its photo and details, then review the cutout and modelled shot.</p>
             {busyId === "website" && <p className="import-card__detail" role="status">Reading the product page and checking its photo…</p>}
           </form>}

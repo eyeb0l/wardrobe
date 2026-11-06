@@ -20,8 +20,8 @@
 .import-reference-picker legend { padding: 0; margin-bottom: 10px; font-size: 13px; font-weight: 550; }
 .import-reference-options { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px; }
 .import-reference-options label { flex: 0 0 116px; padding: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-m); cursor: pointer; }
-.import-reference-options label.is-selected { border-color: var(--import-ink); box-shadow: 0 0 0 1px var(--import-ink); }
-.import-reference-options img { display: block; width: 100%; height: 96px; object-fit: contain; background: var(--well); border-radius: 8px; }
+.import-reference-options label.is-selected { border-color: var(--import-ink); box-shadow: var(--selected-ring); }
+.import-reference-options img { display: block; width: 100%; height: 96px; object-fit: cover; object-position: 50% 20%; background: var(--well); border-radius: 8px; }
 .import-reference-options span { display: flex; align-items: flex-start; gap: 6px; margin: 7px 3px 3px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .import-reference-options input[type="radio"] { flex-shrink: 0; width: 14px; height: 14px; margin: 1px 0 0; accent-color: var(--import-ink); }
 .import-reference-refresh { margin-top: 4px; color: var(--import-muted); font-weight: 500; }
@@ -70,34 +70,35 @@
 .import-drop-overlay.is-active .import-drop-target,
 .import-drop-overlay[data-active="true"] .import-drop-target { transform: scale(1); }
 .import-drop-target.is-over { background: rgba(255, 253, 247, 0.9); }
-.import-drop-target h2 { margin: 0; font: 400 clamp(30px, 4vw, 40px)/1.1 var(--display); letter-spacing: -0.01em; }
-.import-drop-target p { max-width: 40ch; margin: 0; color: var(--import-muted); font-size: 15px; line-height: 1.6; }
+.import-drop-target h2 { margin: 0; font-size: 19px; font-weight: 560; line-height: 1.4; letter-spacing: -0.01em; }
+.import-drop-overlay .import-drop-target h2 { font: 400 clamp(30px, 4vw, 40px)/1.1 var(--display); }
+.import-drop-target p { max-width: 40ch; margin: 0; color: var(--import-muted); font-size: 14px; line-height: 1.6; }
 
-/* Bottom-left launcher expands to show import progress. */
+/* The launcher is the Wardrobe header's main action. While an import is under
+   way it lifts off into a floating pill, so progress stays visible on scroll. */
 .import-tray {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  overflow: hidden;
+  color: var(--import-paper);
+  background: var(--import-ink);
+  border-radius: var(--radius-pill);
+  transition: background 160ms ease, box-shadow 220ms ease;
+}
+
+.import-tray:not(.is-expanded):hover { background: var(--ink-soft); box-shadow: var(--shadow-m); }
+
+.import-tray.is-expanded {
   position: fixed;
   left: 20px;
   bottom: 20px;
   z-index: 70;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  width: auto;
-  max-width: calc(100vw - 36px);
+  max-width: calc(100vw - 40px);
   min-height: 56px;
   padding: 6px;
-  overflow: hidden;
-  color: var(--import-paper);
-  background: var(--import-ink);
-  border: 0;
-  border-radius: var(--radius-pill);
   box-shadow: 0 10px 28px -6px rgba(31, 28, 24, 0.45), 0 2px 6px rgba(31, 28, 24, 0.16);
-  transition: box-shadow 220ms ease;
 }
-
-.import-tray:hover,
-.import-tray:focus-within,
-.import-tray.is-expanded { box-shadow: 0 14px 36px -6px rgba(31, 28, 24, 0.5), 0 2px 6px rgba(31, 28, 24, 0.16); }
 
 .import-tray__button,
 .import-icon-button {
@@ -115,32 +116,25 @@
   transition: background 160ms ease, transform 220ms var(--import-ease);
 }
 
-.import-tray__button:hover,
-.import-tray__button:focus-visible,
+/* At rest the button shows its own label, so the whole pill is one target. */
+.import-tray:not(.is-expanded) .import-tray__button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; width: auto; border-radius: var(--radius-pill); padding: 0 20px 0 16px; }
+.import-tray:not(.is-expanded) .import-tray__button::after { content: attr(aria-label); font-size: 14px; font-weight: 540; line-height: 1.2; white-space: nowrap; }
+.import-tray:not(.is-expanded) .import-tray__actions { display: none; }
+
+.import-tray.is-expanded .import-tray__button:hover,
+.import-tray.is-expanded .import-tray__button:focus-visible,
 .import-icon-button:hover,
 .import-icon-button:focus-visible { background: rgba(255, 255, 255, 0.14); }
 .import-tray__button:active, .import-icon-button:active { transform: scale(0.94); }
+.import-tray:not(.is-expanded) .import-tray__button:focus-visible { outline-offset: -4px; outline-color: var(--surface); }
 
 .import-tray__actions {
   display: flex;
   align-items: center;
   gap: 2px;
   min-width: 0;
-  max-width: 0;
+  max-width: min(420px, calc(100vw - 104px));
   overflow: hidden;
-  opacity: 0;
-  transform: translateX(-8px);
-  pointer-events: none;
-  transition: max-width 420ms var(--import-ease), opacity 180ms ease 40ms, transform 320ms var(--import-ease);
-}
-
-.import-tray:hover .import-tray__actions,
-.import-tray:focus-within .import-tray__actions,
-.import-tray.is-expanded .import-tray__actions {
-  max-width: min(420px, calc(100vw - 92px));
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
 }
 
 .import-tray__label {
@@ -153,10 +147,7 @@
   font-size: 13px;
   font-weight: 530;
 }
-.import-tray__preview { width: 0; height: 34px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,.1); opacity: 0; transition: width 320ms var(--import-ease), opacity 180ms ease; }
-.import-tray:hover .import-tray__preview,
-.import-tray:focus-within .import-tray__preview,
-.import-tray.is-expanded .import-tray__preview { width: 34px; opacity: 1; }
+.import-tray__preview { width: 34px; height: 34px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,.1); }
 
 /* A native modal keeps keyboard focus and scrolling within the review. */
 body.import-open { overflow: hidden; }
@@ -177,7 +168,7 @@ body.import-open { overflow: hidden; }
   color: var(--import-ink);
 }
 .import-popover-backdrop:not([open]) { display: none; }
-.import-popover-backdrop::backdrop { background: rgba(31, 28, 24, .4); backdrop-filter: blur(5px); }
+.import-popover-backdrop::backdrop { background: var(--scrim); }
 .import-popover {
   width: min(920px, 100%);
   max-height: min(900px, calc(100dvh - 48px));
@@ -267,7 +258,7 @@ body.import-open { overflow: hidden; }
 .import-card__retry { min-height: 36px; padding: 6px 14px; font-size: 13px; }
 .import-card.is-approved { border-color: rgba(63, 90, 58, 0.4); background: var(--good-soft); }
 .import-card.is-rejected { opacity: 0.55; }
-.import-card.is-selected { border-color: var(--import-ink); box-shadow: 0 0 0 1px var(--import-ink); }
+.import-card.is-selected { border-color: var(--import-ink); box-shadow: var(--selected-ring); }
 
 .import-editor { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1fr); align-items: start; gap: 28px; }
 .import-editor__preview { position: sticky; top: 132px; width: 100%; max-height: min(520px, 65dvh); object-fit: contain; background: var(--import-ivory); border-radius: var(--radius-l); }
@@ -299,11 +290,8 @@ body.import-open { overflow: hidden; }
 .import-spinner { animation: import-spin 900ms linear infinite; }
 
 @media (max-width: 700px) {
-  .app-shell.has-selection .import-tray { display: none; }
-  .import-tray { left: 14px; bottom: max(14px, env(safe-area-inset-bottom)); max-width: calc(100vw - 28px); }
-  .import-tray__actions { max-width: 0; }
-  .import-tray:focus-within .import-tray__actions,
-  .import-tray.is-expanded .import-tray__actions { max-width: calc(100vw - 68px); }
+  .import-tray.is-expanded { left: 14px; bottom: max(14px, env(safe-area-inset-bottom)); max-width: calc(100vw - 28px); }
+  .import-tray__actions { max-width: calc(100vw - 96px); }
   .import-popover-backdrop { place-items: end center; padding: 12px 0 0; }
   .import-popover { width: 100%; max-height: calc(100dvh - 12px); border-radius: 24px 24px 0 0; }
   .import-popover__header { padding: 18px; gap: 12px; }
@@ -323,26 +311,10 @@ body.import-open { overflow: hidden; }
   .import-card__actions { gap: 8px; }
 }
 
-@media (hover: none) and (pointer: coarse) {
-  .import-tray:not(.is-expanded):hover .import-tray__actions {
-    max-width: 0;
-    opacity: 0;
-    transform: translateX(-8px);
-    pointer-events: none;
-  }
-
-  .import-tray:not(.is-expanded):hover .import-tray__preview {
-    width: 0;
-    opacity: 0;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .import-drop-overlay,
   .import-drop-target,
   .import-tray,
-  .import-tray__actions,
-  .import-tray__preview,
   .import-popover-backdrop,
   .import-popover,
   .import-progress__bar,
@@ -360,7 +332,7 @@ body.import-open { overflow: hidden; }
 .import-detection-candidates legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 550; }
 .import-detection-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .import-detection-options label { min-width: 0; padding: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-m); cursor: pointer; }
-.import-detection-options label.is-selected { border-color: var(--import-ink); box-shadow: 0 0 0 1px var(--import-ink); }
+.import-detection-options label.is-selected { border-color: var(--import-ink); box-shadow: var(--selected-ring); }
 .import-detection-options img { display: block; width: 100%; height: 96px; object-fit: contain; background: var(--import-ivory); border-radius: 8px; }
 .import-detection-options span { display: flex; align-items: flex-start; gap: 6px; margin-top: 7px; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
 .import-detection-options input { flex-shrink: 0; margin: 1px 0 0; accent-color: var(--import-ink); }
@@ -402,6 +374,10 @@ body.import-open { overflow: hidden; }
 .import-website-source { display: grid; gap: 6px; overflow-wrap: anywhere; }
 .import-website-source a { color: var(--import-ink); font-size: 13px; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
 .import-website-source svg { vertical-align: middle; }
+@media (max-width: 380px) {
+  .import-tray:not(.is-expanded) .import-tray__button { width: 44px; justify-content: center; padding: 0; }
+  .import-tray:not(.is-expanded) .import-tray__button::after { content: none; }
+}
 @media (max-width: 480px) {
   .import-website-input { flex-direction: column; }
   .import-website-input button { align-self: flex-start; }

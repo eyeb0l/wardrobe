@@ -8,7 +8,8 @@ import { formatWearDate } from '../shared/outfit-activity.mjs';
 import './wardrobe-rediscovery.css';
 
 function HistorySummary({ count, lastWorn }) {
-  return <>{count ? `${count} ${count === 1 ? 'day' : 'days'} logged · Last worn ${formatWearDate(lastWorn)}` : 'No wears logged'}</>;
+  // Two unbroken parts, so a narrow card stacks them rather than breaking inside the date.
+  return count ? <><span className="rediscovery-history-part">{count} {count === 1 ? 'day' : 'days'} logged</span><span className="rediscovery-history-sep">{' · '}</span><span className="rediscovery-history-part">Last worn {formatWearDate(lastWorn)}</span></> : <>No wears logged</>;
 }
 
 function PieceChoice({ item, count, lastWorn, onOpen, onImageError }) {

@@ -19,6 +19,8 @@
   --warn: #835b31;
   --warn-soft: #f4ead9;
   --tint: rgba(31, 28, 24, .05);
+  --scrim: rgba(31, 28, 24, .4);
+  --selected-ring: 0 0 0 .5px var(--ink);
   --radius-s: 10px;
   --radius-m: 14px;
   --radius-l: 20px;
@@ -52,8 +54,12 @@ body {
   color: var(--ink);
   font-size: 15px;
   line-height: 1.5;
+  word-spacing: .05em;
   -webkit-font-smoothing: antialiased;
 }
+
+/* The serif's fi and fl ligatures blot at display sizes. */
+h1, h2 { font-variant-ligatures: no-common-ligatures; }
 
 button { font: inherit; }
 
@@ -135,7 +141,10 @@ button { font: inherit; }
   text-decoration-color: currentColor;
 }
 
-:is(.primary-button, .secondary-button, .sample-button, .outfit-primary, .outfit-secondary, .shopping-primary, .shopping-secondary, .import-button, .setup-primary):disabled { opacity: .5; cursor: not-allowed; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* A disabled primary stays quiet rather than turning into a heavy grey block. */
+:is(.primary-button, .outfit-primary, .shopping-primary, .import-button--primary, .setup-primary):disabled { border-color: var(--well); background: var(--well); color: var(--muted); opacity: .85; }
 
 :is(a, button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 

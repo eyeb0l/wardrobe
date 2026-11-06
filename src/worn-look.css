@@ -1,5 +1,5 @@
 .worn-look-modal { width: min(1060px, calc(100% - 36px)); max-height: calc(100dvh - 36px); padding: 28px; border: 0; border-radius: var(--radius-l); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-l); overflow: auto; }
-.worn-look-modal::backdrop { background: rgba(31, 28, 24, .44); }
+.worn-look-modal::backdrop { background: var(--scrim); }
 .worn-look-modal header { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
 .worn-look-modal h2 { margin: 4px 0 10px; font-family: var(--display); font-size: 32px; font-weight: 400; letter-spacing: -.01em; line-height: 1.1; }
 .worn-look-modal p { font-size: 14px; color: var(--muted); line-height: 1.6; }
@@ -25,6 +25,5 @@
 .worn-look-result p { color: var(--ink); }
 .worn-look-result button { margin-top: 10px; }
 .worn-look-link { padding: 8px 0; }
-.worn-look-modal button:disabled { opacity: .5; cursor: not-allowed; }
 .worn-look-modal :is(button,input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (max-width: 700px) { .worn-look-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } .worn-look-modal { padding: 20px; } .worn-look-modal h2 { font-size: 28px; } }
+@media (max-width: 700px) { .worn-look-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } .worn-look-modal { width: 100%; max-width: 100%; max-height: calc(100dvh - 12px); margin: auto 0 0; border-radius: 24px 24px 0 0; padding: 20px; } .worn-look-modal h2 { font-size: 28px; } }

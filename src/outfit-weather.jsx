@@ -159,7 +159,7 @@ export function OutfitWeather({ outfit, weather, hasApiKey, disabled = false, on
         {weather?.ready ? weather.days.map((day, index) => day ? <WeatherFitLine key={WEATHER_DAY_LABELS[index]} label={WEATHER_DAY_LABELS[index]} fit={weatherFit(outfit.weather, day)} /> : null) : null}
         <div className="outfit-weather-actions">
           <button type="button" className="outfit-text-button" onClick={() => { setEditing({ expectedUpdatedAt: outfit.weather?.updatedAt ?? null }); setError(''); }} disabled={locked}>Edit weather details</button>
-          <button type="button" className="outfit-text-button" onClick={() => run('clear', async () => { onSaved([await post(`/api/outfits/${encodeURIComponent(outfit.id)}/weather`, { weather: null, expectedUpdatedAt: outfit.weather.updatedAt })]); })} disabled={locked}>{busy === 'clear' ? 'Removing…' : 'Remove'}</button>
+          <button type="button" className="outfit-text-button outfit-text-danger" onClick={() => run('clear', async () => { onSaved([await post(`/api/outfits/${encodeURIComponent(outfit.id)}/weather`, { weather: null, expectedUpdatedAt: outfit.weather.updatedAt })]); })} disabled={locked}>{busy === 'clear' ? 'Removing…' : 'Remove'}</button>
         </div>
       </> : <>
         <p className="outfit-small">No weather details yet. Add the temperatures and rain this look suits to match it to the forecast.</p>

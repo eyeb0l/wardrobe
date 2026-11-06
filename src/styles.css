@@ -16,9 +16,7 @@ body.viewer-open { overflow: hidden; }
   min-height: 68px;
   padding: 0 max(var(--page-gutter), calc((100% - var(--page-width)) / 2));
   border-bottom: 1px solid var(--line);
-  background: rgba(245, 242, 236, .92);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  backdrop-filter: blur(16px) saturate(1.3);
+  background: var(--paper);
 }
 .site-mark { flex: 0 0 36px; display: grid; place-items: center; width: 36px; height: 36px; margin-right: 12px; border-radius: 11px; background: var(--ink); color: var(--surface); }
 .wardrobe-site-nav a { display: flex; align-items: center; min-height: 40px; padding: 8px 16px; border-radius: var(--radius-pill); color: var(--muted); text-decoration: none; font-size: 15px; font-weight: 540; transition: background-color 160ms ease, color 160ms ease; }
@@ -39,6 +37,12 @@ body.viewer-open { overflow: hidden; }
 }
 
 .gallery-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-left: auto; }
+/* A mode that is switched on is marked, but the action inside the mode stays the filled one. */
+.gallery-actions > .secondary-button[aria-pressed="true"],
+.gallery-actions > .secondary-button[aria-pressed="true"]:not(:disabled):hover { border-color: var(--ink); background: var(--surface); box-shadow: var(--selected-ring); color: var(--ink); }
+.gallery-add { display: flex; margin-left: -16px; }
+.piece-count + .gallery-add { margin-left: auto; }
+.gallery-add:empty, .app-shell.is-arranging .gallery-add:not(:has(.is-expanded)) { display: none; }
 
 .piece-count {
   margin: 0;
@@ -101,7 +105,7 @@ body.viewer-open { overflow: hidden; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
   gap: 14px;
-  padding: 24px 0 104px;
+  padding: 24px 0 80px;
 }
 
 .gallery-item {
@@ -114,7 +118,7 @@ body.viewer-open { overflow: hidden; }
   place-items: center;
   border: 1px solid var(--line);
   border-radius: var(--radius-l);
-  padding: 18px;
+  padding: 24px 18px 16px;
   color: var(--ink);
   background: var(--surface);
   cursor: zoom-in;
@@ -134,16 +138,18 @@ body.viewer-open { overflow: hidden; }
 /* The name is decorative here: the button's label already announces it. */
 .gallery-item[data-name]::after {
   content: attr(data-name);
-  width: 100%;
-  margin: 10px 0 -4px;
+  display: -webkit-box;
+  width: calc(100% + 16px);
+  height: 2.7em;
+  margin: 10px -8px 0;
   overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--ink-soft);
   font-size: 13px;
   font-weight: 520;
-  line-height: 1.4;
+  line-height: 1.35;
   text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--shadow-m); transform: translateY(-2px); }
@@ -151,7 +157,7 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 .gallery-item:hover img,
 .gallery-item:focus-visible img { transform: scale(1); }
 
-.gallery-item.selected { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.gallery-item.selected, .availability-item:has(> label input:checked) > .gallery-item { border-color: var(--ink); box-shadow: var(--selected-ring); }
 
 .gallery-item:focus-visible {
   outline: 2px solid var(--accent);
@@ -184,7 +190,7 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
   z-index: 20;
   display: flex;
   justify-content: flex-end;
-  background: rgba(31, 28, 24, .36);
+  background: var(--scrim);
   animation: overlay-in 180ms ease-out both;
 }
 
@@ -202,16 +208,20 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
   min-width: 0;
   width: 100%;
   height: 100%;
+  --viewer-pad: 32px;
+  --viewer-top: 32px;
   border-radius: 24px;
   display: flex;
   flex-direction: column;
-  padding: 32px 32px 36px;
+  padding: var(--viewer-top) var(--viewer-pad) 36px;
   background: var(--surface);
   overflow: auto;
   box-shadow: var(--shadow-l);
 }
 
 .viewer.has-modeled-image {
+  --viewer-pad: 0px;
+  --viewer-top: 0px;
   padding: 0;
 }
 
@@ -253,12 +263,16 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
   80% { transform: translateX(3px); }
 }
 
+/* The name and close button stay put while the sheet scrolls. Sticky offsets
+   start inside the sheet's padding, so they are pulled back by it. */
 .viewer-icon-close {
-  position: absolute;
-  top: 24px;
-  right: 24px;
+  position: sticky;
+  top: calc(20px - var(--viewer-top));
+  flex: 0 0 44px;
+  align-self: flex-end;
   width: 44px;
   height: 44px;
+  margin: calc(20px - var(--viewer-top)) calc(20px - var(--viewer-pad)) -44px 0;
   display: grid;
   place-items: center;
   border: 0;
@@ -274,12 +288,18 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 .viewer-icon-close:hover { background: rgba(31, 28, 24, .1); }
 
 .viewer-heading {
+  position: sticky;
+  top: calc(-1 * var(--viewer-top));
+  z-index: 7;
   flex: 0 0 auto;
-  padding: 4px 60px 0 0;
+  margin: -20px calc(-1 * var(--viewer-pad)) 0;
+  border-bottom: 1px solid var(--line);
+  padding: 26px calc(var(--viewer-pad) + 52px) 16px var(--viewer-pad);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
+  background: var(--surface);
 }
 
 .viewer-heading h2 {
@@ -294,10 +314,13 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 }
 
 .modeled-heading {
+  position: static;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 100px;
   align-items: center;
   gap: 20px;
+  margin: 0;
+  border-bottom: 0;
   padding: 20px 32px 16px;
 }
 
@@ -308,8 +331,7 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 }
 
 .has-modeled-image .viewer-icon-close {
-  top: 20px;
-  right: 20px;
+  margin: 20px 20px -64px 0;
   background: rgba(255, 253, 250, .88);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
@@ -401,6 +423,7 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 }
 .viewer-style-action { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
 .viewer-style-action:has(+ .viewer-style-action) { margin-bottom: 10px; border-bottom: 0; padding-bottom: 0; }
+.viewer-style-action > .secondary-button { width: 100%; }
 .viewer-style-action p { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 
 .has-modeled-image .viewer-details.editing {
@@ -701,14 +724,12 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
   .gallery-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
-    padding: 20px 0 88px;
+    padding: 20px 0 64px;
   }
   .gallery-item { padding: 12px; }
-  .gallery-item[data-name]::after { margin-bottom: 0; }
-  .viewer-entry { width: 100%; height: 100dvh; padding: 0; }
-  .viewer { border-radius: 0; padding: 28px 24px 32px; }
-  .viewer-icon-close { top: 18px; right: 16px; }
-  .has-modeled-image .viewer-icon-close { top: 16px; right: 16px; }
+  .gallery-item[data-name]::after { width: calc(100% + 12px); margin: 8px -6px 0; }
+  .viewer-entry { width: 100%; height: 100dvh; padding: 12px 0 0; }
+  .viewer { --viewer-pad: 24px; --viewer-top: 28px; border-radius: 24px 24px 0 0; padding-bottom: 32px; }
   .has-modeled-image .viewer-details.editing { padding: 14px 24px 32px; }
   .modeled-heading { padding-inline: 24px; }
   .viewer-art { flex-basis: min(32vh, 300px); height: min(32vh, 300px); min-height: 210px; }
@@ -728,17 +749,22 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 @media (max-width: 520px) {
   .gallery-header { padding-top: max(22px, env(safe-area-inset-top)); }
   .piece-count { font-size: 38px; }
-  .gallery-meta-row { align-items: center; }
+  .gallery-meta-row { align-items: center; gap: 14px 8px; }
+  .piece-count { flex-basis: 100%; }
+  .gallery-actions { margin-left: 0; }
+  .gallery-actions > button { padding-inline: 14px; }
+  .gallery-add { margin-left: auto; }
+  .piece-count + .gallery-add { margin-left: 0; }
   .gallery-filters { margin-top: 20px; }
-  .category-nav { width: calc(100% + 2 * var(--page-gutter)); margin-inline: calc(-1 * var(--page-gutter)); padding-inline: var(--page-gutter); scroll-padding-inline: var(--page-gutter); }
+  .category-nav { flex-wrap: wrap; overflow: visible; }
   .category-nav button { min-height: 44px; padding: 8px 15px; }
   .gallery-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
-    padding: 18px 0 88px;
+    padding: 18px 0 56px;
   }
   .gallery-item { aspect-ratio: .88; border-radius: var(--radius-m); }
-  .viewer { padding: max(22px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom)); }
+  .viewer { --viewer-pad: 20px; --viewer-top: 26px; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
   .viewer-heading h2 { font-size: 28px; }
   .modeled-hero { flex-basis: 326px; height: 326px; }
   .modeled-hero-photo { object-fit: cover; }
@@ -788,21 +814,21 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 .modeled-crop-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 
 .viewer :is(button, input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.viewer :is(button, select):disabled { opacity: .5; cursor: not-allowed; }
+.viewer select:disabled { opacity: .5; cursor: not-allowed; }
 .viewer .status.error { margin: 16px 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 
 .reorder-help, .reorder-feedback { font-size: 14px; line-height: 1.5; color: var(--muted); margin: 16px 0 0; }
 .reorder-feedback:empty { display: none; }
 .reorder-feedback.error { color: var(--accent); }
 .reorder-item { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-l); background: var(--surface); overflow: hidden; transition: border-color 160ms ease, box-shadow 160ms ease; }
-.reorder-item .gallery-item { border: 0; border-radius: 0; background: transparent; }
+.reorder-item .gallery-item { border: 0; border-radius: 0; padding-bottom: 8px; background: transparent; }
 .reorder-grip { touch-action: none; cursor: grab; user-select: none; }
 .reorder-grip .gallery-item { cursor: inherit; }
 .reorder-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-l) var(--radius-l) 0 0; }
 .reorder-item.is-dragging { opacity: .5; }
 .reorder-item.is-drop-target { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
-.reorder-controls { display: flex; align-items: center; gap: 4px; padding: 4px; border-top: 1px solid var(--line); }
-.reorder-controls span { flex: 1; min-width: 0; text-align: center; font-size: 13px; font-weight: 520; overflow-wrap: anywhere; }
+.reorder-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 0 4px 4px; }
+.reorder-controls span { order: -1; flex: 0 0 100%; display: -webkit-box; min-width: 0; height: 2.7em; padding: 0 10px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--ink-soft); text-align: center; font-size: 13px; font-weight: 520; line-height: 1.35; }
 .reorder-controls button { display: grid; place-items: center; flex: 0 0 36px; min-height: 44px; border: 0; border-radius: var(--radius-s); background: transparent; color: var(--ink); cursor: pointer; }
 .reorder-controls button:not(:disabled):hover { background: var(--tint); }
 .reorder-controls button:disabled { opacity: .25; cursor: default; }
@@ -812,12 +838,15 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 .wardrobe-availability > .field { width: 190px; max-width: 100%; margin: 0; }
 .wardrobe-availability > .field select { min-height: 40px; border-radius: var(--radius-pill); padding-block: 7px; padding-left: 16px; font-weight: 530; }
 .laundry-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
-.laundry-actions label, .laundry-select { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; line-height: 1.5; }
-.laundry-actions input, .laundry-select input { flex-shrink: 0; width: 16px; height: 16px; margin: 0; }
-.availability-item { min-width: 0; }
+.laundry-actions label { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; line-height: 1.5; }
+.laundry-actions input { flex-shrink: 0; width: 16px; height: 16px; margin: 0; }
+.availability-item { position: relative; min-width: 0; }
+/* Selection sits in the tile's corner; the name beside the checkbox is read out, not shown twice. */
+.wear-select, .laundry-select { position: absolute; top: 2px; right: 2px; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; font-size: 0; cursor: pointer; }
+.wear-select input, .laundry-select input { width: 20px; height: 20px; margin: 0; cursor: pointer; }
 .availability-item > .gallery-item { width: 100%; }
 .gallery-item.in-laundry img { opacity: .5; }
-.availability-badge { position: absolute; top: 10px; left: 10px; border-radius: var(--radius-pill); padding: 3px 10px; background: var(--warn-soft); color: var(--warn); font-size: 12px; font-weight: 550; line-height: 1.5; white-space: nowrap; }
-.laundry-select { padding: 6px 8px; border-radius: var(--radius-s); overflow-wrap: anywhere; }
-.laundry-select:focus-within, .laundry-actions label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.availability-badge { position: absolute; top: 8px; left: 8px; border-radius: var(--radius-pill); padding: 2px 9px; background: var(--warn-soft); color: var(--warn); font-size: 12px; font-weight: 550; line-height: 1.5; white-space: nowrap; }
+.wear-select:focus-within, .laundry-select:focus-within { outline: 2px solid var(--accent); outline-offset: -6px; }
+.laundry-actions label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 520px) { .wardrobe-availability > .field select { min-height: 44px; } }

@@ -1,10 +1,9 @@
 .outfit-page button:focus-visible, .outfit-modal button:focus-visible, .outfit-modal input:focus-visible, .outfit-modal textarea:focus-visible, .outfit-history summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .outfit-page { max-width: calc(var(--page-width) + 2 * var(--page-gutter)); margin: 0 auto; padding: 0 var(--page-gutter) 96px; }
 .outfit-page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 40px 0 36px; }
-.outfit-count { margin: 0 0 10px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.outfit-count { margin: 0 0 10px; color: var(--accent); font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
 .outfit-page-heading h1 { margin: 0; font-family: var(--display); font-size: clamp(44px, 5vw, 64px); font-weight: 400; line-height: 1; letter-spacing: -.015em; }
 .outfit-page-heading > div > p:last-child { margin: 12px 0 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
-.outfit-page button:disabled, .outfit-modal button:disabled { opacity: .5; cursor: not-allowed; }
 .outfit-page-heading > button { flex-shrink: 0; min-height: 48px; padding-inline: 22px; }
 .outfit-finder { margin-bottom: 24px; border: 1px solid var(--line); border-radius: var(--radius-l); padding: 18px 20px; background: var(--surface); }
 .outfit-finder form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 14px; }
@@ -22,9 +21,11 @@
 .outfit-collection-heading > p { margin: 0; }
 .outfit-filter-fields { flex: 1 1 560px; display: flex; align-items: flex-end; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
 .outfit-filter-fields > .outfit-field { flex: 0 1 220px; }
+.outfit-filter-fields select, .outfit-shortlist-controls select { border-radius: var(--radius-pill); padding-left: 16px; font-weight: 530; }
+.outfit-filter-fields > .outfit-field > span, .outfit-shortlist-controls > .outfit-field > span { padding-left: 4px; }
 .outfit-filters select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .outfit-card-entry { position: relative; min-width: 0; }
-.outfit-favourite { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255, 253, 250, .92); box-shadow: var(--shadow-s); color: var(--ink); cursor: pointer; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); transition: background-color 160ms ease, color 160ms ease, transform 160ms ease; }
+.outfit-favourite { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255, 253, 250, .94); box-shadow: var(--shadow-s); color: var(--ink); cursor: pointer; transition: background-color 160ms ease, color 160ms ease, transform 160ms ease; }
 .outfit-favourite:not(:disabled):hover { background: var(--surface); transform: scale(1.06); }
 .outfit-favourite[aria-pressed="true"] { color: var(--accent); }
 .outfit-activity { min-width: 0; }
@@ -43,12 +44,12 @@
 .outfit-wear-history li time { font-weight: 550; }
 .outfit-wear-history li p { margin: 4px 0 0; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
 .outfit-wear-history li > button { flex-shrink: 0; }
-@media (max-width: 580px) { .outfit-filters { display: block; } .outfit-filters > .outfit-collection-heading { margin-bottom: 14px; } .outfit-filter-fields { justify-content: flex-start; } .outfit-filter-fields > .outfit-field { flex-basis: 100%; max-width: none; } }
+@media (max-width: 580px) { .outfit-filters { display: block; } .outfit-filters > .outfit-collection-heading { margin-bottom: 14px; } .outfit-filter-fields { justify-content: flex-start; } .outfit-filter-fields > .outfit-field { flex: 1 1 calc(50% - 6px); max-width: none; } .outfit-filter-fields > button { order: 1; } }
 .outfit-card { min-width: 0; width: 100%; border: 0; border-radius: var(--radius-l); padding: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .outfit-card-photo { aspect-ratio: 1; width: 100%; border-radius: var(--radius-l); background: var(--well); overflow: hidden; }
 .outfit-card-photo img { width: 100%; height: 100%; display: block; object-fit: contain; transition: transform 420ms var(--ease); }
 .outfit-card:hover .outfit-card-photo img { transform: scale(1.025); }
-.outfit-card-caption { padding: 14px 4px 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; }
+.outfit-card-caption { padding: 14px 0 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; }
 .outfit-card h2 { margin: 0 0 2px; font-size: 18px; font-weight: 560; letter-spacing: -.01em; line-height: 1.3; }
 .outfit-card-caption > svg { color: var(--muted); transition: transform 200ms var(--ease), color 160ms ease; }
 .outfit-card:hover .outfit-card-caption > svg { color: var(--ink); transform: translateX(3px); }
@@ -66,7 +67,7 @@
 .outfit-history { margin-top: 56px; border-top: 1px solid var(--line); }
 .outfit-history summary { padding: 20px 0; }
 .outfit-history summary span { color: var(--muted); font-weight: 400; }
-.outfit-history[open] { display: grid; gap: 10px; }
+.outfit-history > .outfit-job-row { margin-bottom: 10px; }
 .outfit-page-notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 0 0 24px; border: 1px solid var(--line); border-radius: var(--radius-m); padding: 12px 18px; background: var(--surface); font-size: 14px; }
 .outfit-page-notice p { margin: 0; }
 .outfit-text-button { min-height: 44px; }
@@ -74,7 +75,7 @@
 .outfit-empty h2 { color: var(--ink); font-family: var(--display); font-size: 32px; font-weight: 400; margin: 0 0 8px; }
 .outfit-empty p { margin: 0; }
 .outfit-modal { width: min(1200px, calc(100vw - 64px)); max-width: none; max-height: calc(100dvh - 64px); padding: 0; border: 0; border-radius: 24px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow-l); overflow: auto; }
-.outfit-modal::backdrop { background: rgba(31, 28, 24, .44); }
+.outfit-modal::backdrop { background: var(--scrim); }
 .outfit-modal-heading { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px 18px 28px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .outfit-modal-heading h2 { font-family: var(--display); font-size: 30px; font-weight: 400; letter-spacing: -.01em; line-height: 1.15; margin: 0; }
 .outfit-close { display: grid; place-items: center; flex-shrink: 0; height: 44px; width: 44px; border: 0; border-radius: 50%; padding: 0; background: var(--tint); color: var(--ink); cursor: pointer; transition: background-color 160ms ease; }
@@ -96,7 +97,7 @@
 .outfit-piece { min-width: 0; }
 .outfit-piece > img, .outfit-piece > .outfit-photo-fallback, .outfit-piece-missing { display: block; width: 100%; height: 118px; border-radius: var(--radius-m); padding: 10px; background: var(--paper); object-fit: contain; }
 .outfit-piece > .outfit-photo-fallback, .outfit-piece-missing { display: grid; place-items: center; min-height: 0; font-size: 12px; color: var(--muted); }
-.outfit-piece p { margin: 8px 2px 0; font-size: 13px; line-height: 1.4; color: var(--ink-soft); }
+.outfit-piece p { margin: 8px 0 0; font-size: 13px; line-height: 1.4; color: var(--ink-soft); }
 .outfit-generate-modal { width: min(680px, calc(100vw - 64px)); overflow: hidden; }
 .outfit-generate-modal[open] { display: flex; flex-direction: column; }
 .outfit-generate-modal .outfit-modal-heading { flex-shrink: 0; padding-block: 16px; }
@@ -121,9 +122,9 @@
 .outfit-reference-picker legend { font-size: 13px; font-weight: 550; padding: 0; margin-bottom: 10px; }
 .outfit-reference-options { display: flex; gap: 10px; overflow-x: auto; padding: 4px; margin: -4px; }
 .outfit-reference-options > label { flex: 0 0 132px; border: 1px solid var(--line-strong); border-radius: var(--radius-m); padding: 6px; background: var(--surface); cursor: pointer; transition: border-color 160ms ease, box-shadow 160ms ease; }
-.outfit-reference-options > label.selected { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.outfit-reference-options > label.selected { border-color: var(--ink); box-shadow: var(--selected-ring); }
 .outfit-reference-options > label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.outfit-reference-options img, .outfit-reference-options .outfit-photo-fallback { width: 100%; height: 124px; min-height: 124px; border-radius: 8px; object-fit: contain; display: block; background: var(--well); }
+.outfit-reference-options img, .outfit-reference-options .outfit-photo-fallback { width: 100%; height: 124px; min-height: 124px; border-radius: 8px; object-fit: cover; object-position: 50% 20%; display: block; background: var(--well); }
 .outfit-reference-options label > span { display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 1.4; padding: 9px 4px 5px; }
 .outfit-reference-options input { flex-shrink: 0; margin: 0; }
 .outfit-reference-picker > button { margin-top: 4px; }
@@ -139,7 +140,7 @@
 .outfit-job-intro > button { margin-top: 14px; }
 .outfit-review-strip { display: flex; gap: 8px; padding: 16px 28px; overflow-x: auto; border-bottom: 1px solid var(--line); }
 .outfit-review-strip > button { flex: 0 0 140px; display: grid; grid-template-columns: 40px 1fr; gap: 8px; align-items: center; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-m); padding: 7px; background: transparent; color: var(--muted); font-size: 12px; line-height: 1.4; text-align: left; cursor: pointer; transition: border-color 160ms ease, background-color 160ms ease; }
-.outfit-review-strip > button.selected { border-color: var(--ink); color: var(--ink); background: var(--paper); }
+.outfit-review-strip > button.selected { border-color: var(--ink); box-shadow: var(--selected-ring); color: var(--ink); }
 .outfit-review-strip > button > img, .outfit-review-strip > button > .outfit-photo-fallback { width: 40px; height: 40px; border-radius: 8px; object-fit: contain; padding: 0; min-height: 0; font-size: 8px; }
 .outfit-review-strip > button > svg { grid-column: 2; }
 .outfit-review-number { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px; background: var(--well); font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -147,7 +148,7 @@
 .outfit-review-actions { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; }
 .outfit-review-actions > .outfit-small:first-child { margin-top: 0; }
 .outfit-action-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.outfit-action-row > button { font-size: 13px; padding-inline: 16px; }
+.outfit-action-row > button { font-size: 14px; padding-inline: 18px; }
 .outfit-action-row > .outfit-secondary[aria-pressed="true"], .outfit-action-row > .outfit-secondary[aria-pressed="true"]:not(:disabled):hover { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
 .outfit-correction { margin-top: 22px; }
 .outfit-correction > button { margin-top: 10px; }
@@ -163,15 +164,18 @@
 @media (max-width: 1180px) { .outfit-grid { gap: 30px 18px; } .outfit-detail-copy { padding: 24px; } }
 @media (max-width: 960px) { .outfit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .outfit-detail-layout { grid-template-columns: 1fr; } .outfit-detail-photo { position: static; width: min(calc(100% - 40px), 670px); margin: 20px auto 0; } .outfit-pieces-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .outfit-detail-copy { padding: 26px 28px; } }
 @media (max-width: 860px) { .outfit-page-heading { padding-top: 28px; align-items: flex-start; } .outfit-page-heading > button { margin-top: 30px; } .outfit-page-heading > div > p:last-child { max-width: 270px; } }
-@media (max-width: 580px) { .outfit-page { padding-bottom: 88px; } .outfit-page-heading { display: block; padding: 24px 0 26px; } .outfit-page-heading h1 { font-size: 44px; } .outfit-page-heading > div > p:last-child { max-width: none; font-size: 15px; } .outfit-page-heading > button { margin-top: 18px; } .outfit-grid { grid-template-columns: 1fr; gap: 28px; } .outfit-card-caption { padding-top: 12px; } .outfit-job-row { align-items: flex-start; gap: 10px; padding: 14px 16px; } .outfit-job-link { font-size: 0; padding-top: 2px; } .outfit-job-direction { max-width: 68vw; } .outfit-modal, .outfit-generate-modal { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: var(--radius-l); } .outfit-modal-heading { padding: 12px 12px 12px 18px; } .outfit-modal-heading h2 { font-size: 26px; } .outfit-form-content { padding: 18px 18px 14px; } .outfit-form-row { grid-template-columns: minmax(0, 1fr); gap: 18px; } .outfit-form-actions { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px 18px; } .outfit-detail-photo { width: calc(100% - 24px); margin-top: 12px; } .outfit-detail-copy { padding: 22px 18px; } .outfit-pieces-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .outfit-form-actions > button { width: 100%; } .outfit-job-intro, .outfit-review-title { padding: 18px 18px; } .outfit-review-strip { padding-inline: 18px; } .outfit-planning-state { padding: 30px 24px; } }
+@media (max-width: 580px) { .outfit-page { padding-bottom: 88px; } .outfit-page-heading { display: block; padding: 24px 0 26px; } .outfit-page-heading h1 { font-size: 44px; } .outfit-page-heading > div > p:last-child { max-width: none; font-size: 15px; } .outfit-page-heading > button { margin-top: 18px; } .outfit-grid { grid-template-columns: 1fr; gap: 28px; } .outfit-card-caption { padding-top: 12px; } .outfit-job-row { align-items: flex-start; gap: 10px; padding: 14px 16px; } .outfit-job-link { font-size: 0; padding-top: 2px; } .outfit-job-direction { max-width: 68vw; } dialog.outfit-modal { width: 100vw; max-width: 100vw; max-height: calc(100dvh - 12px); margin: auto 0 0; border-radius: 24px 24px 0 0; } .outfit-modal-heading { padding: 12px 12px 12px 18px; } .outfit-modal-heading h2 { font-size: 26px; } .outfit-form-content { padding: 18px 18px 14px; } .outfit-form-row { grid-template-columns: minmax(0, 1fr); gap: 18px; } .outfit-form-actions { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px 18px; } .outfit-detail-photo { width: calc(100% - 24px); margin-top: 12px; } .outfit-detail-copy { padding: 22px 18px; } .outfit-pieces-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .outfit-form-actions > button { width: 100%; } .outfit-job-intro, .outfit-review-title { padding: 18px 18px; } .outfit-review-strip { padding-inline: 18px; } .outfit-planning-state { padding: 30px 24px; } }
 @media (prefers-reduced-motion: reduce) { .outfit-card-photo img { transition: none; } .outfit-card:hover .outfit-card-photo img { transform: none; } .outfit-progress-line::after { animation: none; transform: translateX(50%); } .outfit-photo-fallback.is-generating::before, .outfit-review-number.is-generating::before { animation: none; transform: none; opacity: .4; } }
 
 .outfit-variation-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
-.outfit-variation-actions > button { font-size: 13px; padding-inline: 16px; }
+.outfit-text-danger { color: var(--accent); }
+@media (max-width: 580px) { .outfit-variation-actions, .outfit-activity > .outfit-action-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .outfit-variation-actions > :nth-child(odd):last-child { grid-column: 1 / -1; } }
+.outfit-text-danger:not(:disabled):hover { color: var(--accent); }
+.outfit-variation-actions > button { font-size: 14px; padding-inline: 15px; }
 .outfit-cutout-preview { min-width: 0; margin: 20px 0 20px 20px; border-radius: var(--radius-l); padding: 20px; background: var(--paper); }
 .outfit-cutout-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .outfit-cutout-grid figure { margin: 0; min-width: 0; border: 1px solid transparent; border-radius: var(--radius-m); background: var(--surface); }
-.outfit-cutout-grid figure.is-replacement { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.outfit-cutout-grid figure.is-replacement { border-color: var(--ink); box-shadow: var(--selected-ring); }
 .outfit-cutout-grid img { display: block; width: 100%; aspect-ratio: 1; padding: 10px; object-fit: contain; }
 .outfit-cutout-grid figcaption { padding: 0 12px 12px; font-size: 13px; font-weight: 520; line-height: 1.5; overflow-wrap: anywhere; }
 .outfit-cutout-grid figcaption span { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
@@ -180,7 +184,7 @@
 .outfit-replacement-picker legend { padding: 0; font-size: 13px; font-weight: 550; margin-bottom: 10px; }
 .outfit-replacement-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-height: 340px; overflow-y: auto; padding: 3px; }
 .outfit-replacement-options label { border: 1px solid var(--line-strong); border-radius: var(--radius-m); padding: 8px; cursor: pointer; min-width: 0; transition: border-color 160ms ease, box-shadow 160ms ease; }
-.outfit-replacement-options label.selected { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.outfit-replacement-options label.selected { border-color: var(--ink); box-shadow: var(--selected-ring); }
 .outfit-replacement-options label:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .outfit-replacement-options img { width: 100%; height: 100px; object-fit: contain; display: block; }
 .outfit-replacement-options span { display: flex; gap: 8px; align-items: center; min-height: 44px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
@@ -203,14 +207,18 @@
 .outfit-shortlist-controls > .outfit-field { flex: 0 1 200px; }
 .outfit-shortlist-modes { display: flex; flex-wrap: wrap; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .outfit-shortlist-modes legend { font-size: 13px; font-weight: 550; margin-bottom: 7px; padding: 0; }
-.outfit-shortlist-modes label { display: flex; align-items: center; gap: 7px; min-height: 40px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 7px 15px 7px 12px; background: var(--surface); font-size: 13px; font-weight: 530; cursor: pointer; transition: border-color 160ms ease, background-color 160ms ease; }
-.outfit-shortlist-modes label.selected { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
-.outfit-shortlist-modes input { margin: 0; }
+/* Each choice is a chip, filled when chosen like the wardrobe's category chips; the radio stays for the keyboard. */
+.outfit-shortlist-modes label { position: relative; display: flex; align-items: center; min-height: 40px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 7px 16px; background: var(--surface); font-size: 14px; font-weight: 530; cursor: pointer; transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease; }
+.outfit-shortlist-modes label:not(.selected):hover { border-color: var(--ink); }
+.outfit-shortlist-modes label.selected { border-color: var(--ink); background: var(--ink); color: var(--surface); }
+.outfit-shortlist-modes label:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+.outfit-shortlist-modes input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
 .outfit-shortlist select:focus-visible, .outfit-shortlist-modes label:focus-within, .outfit-shortlist-history summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .outfit-shortlist-notes { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
 .outfit-shortlist-notes > p { margin: 0; }
 .outfit-shortlist-notes .outfit-text-button { display: inline; min-height: 0; padding: 0; }
 .outfit-shortlist-status > span { margin-right: .35em; }
+.outfit-shortlist-status .outfit-text-button { margin-inline: 4px 10px; }
 .outfit-shortlist-about { max-width: 86ch; }
 .outfit-shortlist-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
 .outfit-shortlist-entry { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-l); padding: 12px 12px 4px; background: var(--surface); }
@@ -236,8 +244,8 @@
 .outfit-plans { margin: 0 0 40px; }
 .outfit-plan-grid { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
 /* Each day is one strip: label, cutouts, then the look and its actions. */
-.outfit-plan-card { display: grid; grid-template-columns: 96px auto minmax(0, 1fr); align-items: start; gap: 10px 20px; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-l); padding: 20px 24px; background: var(--surface); box-shadow: var(--shadow-s); }
-.outfit-plan-card > .outfit-count { margin: 0; padding-top: 5px; color: var(--ink); white-space: nowrap; }
+.outfit-plan-card { display: grid; grid-template-columns: 96px 290px minmax(0, 1fr); align-items: start; gap: 10px 20px; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-l); padding: 20px 24px; background: var(--surface); box-shadow: var(--shadow-s); }
+.outfit-plan-card > .outfit-count { margin: 0; padding-top: 5px; white-space: nowrap; }
 .outfit-plan-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .outfit-plan-card h3 { margin: 0; font-size: 19px; font-weight: 560; letter-spacing: -.01em; line-height: 1.3; }
 .outfit-plan-card p { margin: 0; }
@@ -249,12 +257,13 @@
 .outfit-plan-status { display: flex; flex-wrap: wrap; gap: 0 14px; margin-top: 4px; }
 .outfit-plan-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
 .outfit-plan-actions > .outfit-primary, .outfit-plan-actions > .outfit-secondary { min-height: 40px; padding-block: 8px; }
-.outfit-plan-links { display: flex; flex-wrap: wrap; gap: 0 16px; margin-left: 8px; }
-.outfit-plan-links .outfit-text-button { min-height: 40px; color: var(--muted); font-weight: 500; }
-.outfit-plan-links .outfit-text-button:not(:disabled):hover { color: var(--ink); }
+/* Lesser plan actions are quiet text that turns into a chip on hover, not a row of underlines. */
+.outfit-plan-links { display: flex; flex-wrap: wrap; gap: 0 2px; margin-left: 4px; }
+.outfit-plan-links .outfit-text-button { min-height: 40px; border-radius: var(--radius-pill); padding: 6px 12px; color: var(--ink-soft); font-weight: 530; text-decoration: none; transition: background-color 160ms ease, color 160ms ease; }
+.outfit-plan-links .outfit-text-button:not(:disabled):hover { background: var(--tint); color: var(--ink); }
 .outfit-plan-pieces { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
 .outfit-plan-pieces.compact { gap: 6px; margin: 0; }
-.outfit-plan-cutouts { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.outfit-plan-cutouts { display: flex; flex-direction: column; gap: 6px; width: 290px; min-width: 0; }
 .outfit-plan-cutouts > p { max-width: 220px; }
 .outfit-plan-pieces > div { flex: 0 1 92px; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.4; }
 .outfit-plan-pieces img { display: block; width: 92px; max-width: 100%; aspect-ratio: 1; border-radius: var(--radius-s); padding: 6px; object-fit: contain; background: var(--paper); }
@@ -268,10 +277,11 @@
 .outfit-plan-form > .outfit-primary { justify-self: start; margin-top: 4px; }
 @media (max-width: 700px) {
   .outfit-plan-card { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 16px; }
+  .outfit-plan-cutouts { width: auto; }
   .outfit-plan-card > .outfit-count { padding-top: 0; }
   .outfit-plan-empty { grid-column: auto; }
   .outfit-plan-empty > .outfit-secondary { min-height: 44px; }
   .outfit-plan-actions > .outfit-primary, .outfit-plan-actions > .outfit-secondary, .outfit-plan-links .outfit-text-button { min-height: 44px; }
-  .outfit-plan-links { flex-basis: 100%; margin-left: 0; }
+  .outfit-plan-links { flex-basis: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 0 8px; margin-left: -12px; }
   .outfit-plan-form { padding: 18px; }
 }

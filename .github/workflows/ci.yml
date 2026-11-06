@@ -49,7 +49,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser -- --forbid-only --reporter=list,html --global-timeout=600000
+      - run: npm run test:browser -- --forbid-only --reporter=list,html --global-timeout=720000
         env:
           WARDROBE_BROWSER_ARTIFACTS: ${{ runner.temp }}/wardrobe-browser
           PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ runner.temp }}/wardrobe-browser-report

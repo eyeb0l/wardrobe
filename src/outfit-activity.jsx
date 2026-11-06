@@ -28,7 +28,7 @@ export function OutfitActivity({ outfit, itemsById, busy, error, notice, onChang
   return <section className="outfit-activity" aria-label="Favourites and wearing history">
     <div className="outfit-action-row">
       <FavouriteButton outfit={outfit} busy={busy} onChange={onChange} />
-      <button type="button" className="outfit-secondary" disabled={busy || !!todayEntry} onClick={() => onChange(outfit, "wears", { date: today })}>
+      <button type="button" className="outfit-primary" disabled={busy || !!todayEntry} onClick={() => onChange(outfit, "wears", { date: today })}>
         <Check size={17} aria-hidden="true" />{todayEntry ? "Worn today" : "Wore this today"}
       </button>
     </div>
