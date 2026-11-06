@@ -730,8 +730,9 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
   .gallery-item[data-name]::after { width: calc(100% + 12px); margin: 8px -6px 0; }
   .viewer-entry { width: 100%; height: 100dvh; padding: 12px 0 0; }
   .viewer { --viewer-pad: 24px; --viewer-top: 28px; border-radius: 24px 24px 0 0; padding-bottom: 32px; }
-  .viewer-icon-close { margin-right: calc(16px - var(--viewer-pad)); }
-  .has-modeled-image .viewer-icon-close { margin-right: 16px; }
+  .viewer-icon-close { top: calc(16px - var(--viewer-top)); margin: calc(16px - var(--viewer-top)) calc(16px - var(--viewer-pad)) -44px 0; }
+  .viewer-heading { padding-top: 22px; }
+  .has-modeled-image .viewer-icon-close { margin: 16px 16px -60px 0; }
   .has-modeled-image .viewer-details.editing { padding: 14px 24px 32px; }
   .modeled-heading { padding-inline: 24px; }
   .viewer-art { flex-basis: min(32vh, 300px); height: min(32vh, 300px); min-height: 210px; }
@@ -759,9 +760,12 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
   .gallery-add { order: 2; flex: 0 0 auto; }
   .gallery-add:empty { display: none; }
   .gallery-actions { order: 3; flex: 0 0 auto; }
-  .gallery-actions > button { padding-inline: 10px; }
+  .gallery-actions > button { padding-inline: 12px; font-size: 15px; }
   .app-shell.is-arranging .gallery-actions > .secondary-button[aria-pressed="false"]:disabled { display: none; }
+  .app-shell.is-arranging .piece-count { flex-basis: 100%; }
   .wardrobe-availability { order: 4; flex: 0 1 auto; margin-left: auto; }
+  .app-shell.is-arranging .wardrobe-availability { flex: 1 1 0; margin-left: 0; }
+  .app-shell.is-arranging .wardrobe-availability > .field { width: 100%; }
   .category-nav { order: 5; flex-wrap: wrap; overflow: visible; }
   .category-nav button { min-height: 44px; padding: 8px 15px; }
   .gallery-grid {
@@ -826,14 +830,14 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 .reorder-help, .reorder-feedback { font-size: 14px; line-height: 1.5; color: var(--muted); margin: 16px 0 0; }
 .reorder-feedback:empty { display: none; }
 .reorder-feedback.error { color: var(--accent); }
-.reorder-item { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-l); background: var(--surface); overflow: hidden; transition: border-color 160ms ease, box-shadow 160ms ease; }
-.reorder-item .gallery-item { border-color: transparent; border-radius: var(--radius-l) var(--radius-l) 0 0; background: transparent; }
+.reorder-item { min-width: 0; }
+.reorder-item .gallery-item { border-bottom: 0; border-radius: var(--radius-l) var(--radius-l) 0 0; }
 .reorder-grip { touch-action: none; cursor: grab; user-select: none; }
 .reorder-grip .gallery-item { cursor: inherit; }
-.reorder-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-l) var(--radius-l) 0 0; }
+.reorder-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-l) var(--radius-l) 0 0; }
 .reorder-item.is-dragging { opacity: .5; }
-.reorder-item.is-drop-target { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
-.reorder-controls { display: flex; align-items: center; justify-content: space-between; margin-top: -8px; padding: 0 4px 4px; }
+.reorder-item.is-drop-target .gallery-item, .reorder-item.is-drop-target .reorder-controls { border-color: var(--accent); background: var(--accent-soft); }
+.reorder-controls { display: flex; align-items: center; justify-content: space-between; margin-top: -8px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--radius-l) var(--radius-l); padding: 0 4px 4px; background: var(--surface); }
 .reorder-controls button { display: grid; place-items: center; flex: 0 0 36px; min-height: 44px; border: 0; border-radius: var(--radius-s); background: transparent; color: var(--ink); cursor: pointer; }
 .reorder-controls button:not(:disabled):hover { background: var(--tint); }
 .reorder-controls button:disabled { opacity: .25; cursor: default; }
@@ -855,6 +859,7 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
 .wear-select:focus-within, .laundry-select:focus-within { outline: 2px solid var(--accent); outline-offset: -6px; }
 .laundry-actions label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 520px) {
-  .wardrobe-availability > .field { width: 152px; }
-  .wardrobe-availability > .field select { min-height: 44px; padding-left: 14px; padding-right: 30px; background-position: right 10px center; }
+  .wardrobe-availability > .field { width: 146px; }
+  .wardrobe-availability > .field select { min-height: 44px; padding-left: 12px; padding-right: 28px; background-position: right 10px center; }
+  .app-shell.is-arranging .wardrobe-availability > .field { width: 100%; }
 }

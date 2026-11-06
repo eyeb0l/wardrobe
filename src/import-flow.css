@@ -24,7 +24,7 @@
 .import-reference-options img { display: block; width: 100%; height: 96px; object-fit: cover; object-position: 50% 20%; background: var(--well); border-radius: 8px; }
 .import-reference-options span { display: block; margin: 7px 3px 3px; font-size: 13px; font-weight: 530; text-align: center; line-height: 1.4; overflow-wrap: anywhere; }
 .import-reference-options input[type="radio"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
-.import-reference-refresh { margin-top: 4px; color: var(--import-muted); font-weight: 500; }
+.import-reference-refresh { margin-top: 4px; }
 
 /* Full-page drag and paste target. */
 .import-drop-overlay {
@@ -187,12 +187,12 @@ body.import-open { overflow: hidden; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  padding: 22px 20px 20px 28px;
+  padding: 20px 20px 20px 28px;
   background: var(--import-paper);
   border-bottom: 1px solid var(--import-line);
 }
 .import-popover__body { padding: 24px 28px 28px; }
-.import-popover__eyebrow { margin: 0 0 6px; color: var(--import-muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; }
+.import-popover__eyebrow { margin: 0 0 6px; color: var(--accent); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; }
 .import-popover__title { margin: 0; font-family: var(--display); font-size: clamp(30px, 3.4vw, 38px); font-weight: 400; line-height: 1.1; letter-spacing: -.01em; }
 .import-popover :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .import-popover .import-icon-button { background: var(--tint); }
@@ -294,7 +294,7 @@ body.import-open { overflow: hidden; }
   .import-tray__actions { max-width: calc(100vw - 96px); }
   .import-popover-backdrop { place-items: end center; padding: 12px 0 0; }
   .import-popover { width: 100%; max-height: calc(100dvh - 12px); border-radius: 24px 24px 0 0; }
-  .import-popover__header { padding: 18px 16px 18px 20px; gap: 12px; }
+  .import-popover__header { padding: 16px 16px 16px 20px; gap: 12px; }
   .import-popover__body { padding: 20px 20px calc(24px + env(safe-area-inset-bottom)); }
   .import-drop-overlay { padding: 12px; }
   .import-drop-target { min-height: 240px; padding: 28px 20px; }

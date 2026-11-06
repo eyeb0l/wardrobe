@@ -98,7 +98,7 @@ export function WeatherLocationForm({ weather, onDone }) {
 }
 
 // In a narrow card a temperature range never breaks across lines; the words around it still wrap.
-const RANGE = /(\d+°?–\d+°)/;
+const RANGE = /((?:feels(?:-like)? )?\d+°?–\d+°)/;
 export function keepRanges(text) {
   return text.split(RANGE).map((part, index) => RANGE.test(part) ? <span key={index} className="outfit-nowrap">{part}</span> : part);
 }

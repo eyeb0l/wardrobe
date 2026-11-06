@@ -16,4 +16,4 @@
 .wardrobe-wear-selection > .garment-wear-controls { margin-bottom: 0; border-bottom: 0; padding-bottom: 8px; }
 .wardrobe-wear-selection > label { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; font-weight: 530; line-height: 1.5; }
 .wardrobe-wear-selection input[type="checkbox"] { flex-shrink: 0; width: 16px; height: 16px; margin: 0; }
-@media (max-width: 580px) { .wardrobe-wear-selection { padding-inline: 16px; } }
+@media (max-width: 580px) { .wardrobe-wear-selection { padding-inline: 16px; } .viewer .garment-wear-actions > .primary-button { width: 100%; } }
