@@ -100,7 +100,7 @@
 .outfit-piece p { margin: 8px 0 0; font-size: 13px; line-height: 1.4; color: var(--ink-soft); }
 .outfit-generate-modal { width: min(680px, calc(100vw - 64px)); overflow: hidden; }
 .outfit-generate-modal[open] { display: flex; flex-direction: column; }
-.outfit-generate-modal .outfit-modal-heading { flex-shrink: 0; padding-block: 16px; }
+.outfit-generate-modal .outfit-modal-heading { flex-shrink: 0; }
 .outfit-generate-form { display: flex; flex-direction: column; min-height: 0; }
 .outfit-form-content { min-height: 0; overflow-y: auto; padding: 22px 28px 26px; }
 .outfit-form-intro { margin: 0 0 20px; color: var(--muted); font-size: 15px; line-height: 1.6; }
@@ -273,8 +273,8 @@
 .outfit-plan-links { display: flex; flex-wrap: wrap; gap: 8px; margin-left: 4px; }
 .outfit-plan-links .outfit-text-button { min-height: 40px; border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 6px 14px; background: var(--paper); color: var(--ink-soft); font-weight: 530; text-decoration: none; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
 .outfit-plan-links .outfit-text-button:not(:disabled):hover { border-color: var(--line-strong); background: var(--well); color: var(--ink); }
-.outfit-plan-links > :last-child { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
-.outfit-plan-links > :last-child:not(:disabled):hover { border-color: transparent; background: #ecdcd6; color: var(--accent); }
+.outfit-plan-links > :last-child { color: var(--accent); }
+.outfit-plan-links > :last-child:not(:disabled):hover, .outfit-plan-links > :last-child:focus-visible { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
 .outfit-plan-pieces { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
 .outfit-plan-pieces.compact { gap: 6px; margin: 0; }
 .outfit-plan-cutouts { display: flex; flex-direction: column; gap: 6px; width: 290px; min-width: 0; }
@@ -296,7 +296,10 @@
   .outfit-plan-empty { grid-column: auto; }
   .outfit-plan-empty > .outfit-secondary { min-height: 44px; }
   .outfit-plan-actions > .outfit-primary, .outfit-plan-actions > .outfit-secondary, .outfit-plan-links .outfit-text-button { min-height: 44px; }
-  .outfit-plan-links { flex-basis: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-left: 0; }
+  /* Every action shares one grid; when the count is odd, the unpaired control spans both columns. */
+  .outfit-plan-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+  .outfit-plan-links { display: contents; }
   .outfit-plan-links .outfit-text-button { width: auto; justify-content: center; }
+  .outfit-plan-actions > .outfit-secondary:first-child:has(+ .outfit-plan-links > :last-child:nth-child(even)), .outfit-plan-links:first-child > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .outfit-plan-form { padding: 18px; }
 }

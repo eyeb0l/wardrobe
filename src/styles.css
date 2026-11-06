@@ -766,8 +766,12 @@ button.gallery-item:hover { border-color: var(--line-strong); box-shadow: var(--
   .wardrobe-availability { order: 4; flex: 0 1 auto; margin-left: auto; }
   .app-shell.is-arranging .wardrobe-availability { flex: 1 1 0; margin-left: 0; }
   .app-shell.is-arranging .wardrobe-availability > .field { width: 100%; }
-  .category-nav { order: 5; flex-wrap: wrap; overflow: visible; }
+  /* Two fixed rows, so the chip that starts each one is known. At rest it moves its left padding to the right, keeping its width, so its text starts on the page gutter where a selected chip's pill does. */
+  .category-nav { order: 5; flex-wrap: wrap; overflow: visible; row-gap: 2px; }
+  .category-nav::after { content: ""; order: 1; flex-basis: 100%; }
   .category-nav button { min-height: 44px; padding: 8px 15px; }
+  .category-nav button:nth-child(n + 5) { order: 2; }
+  .category-nav button:is(:first-child, :nth-child(5)):not(.active, :hover, :focus-visible) { padding-inline: 0 30px; }
   .gallery-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
