@@ -672,3 +672,16 @@ rg --files /tmp/wardrobe-try-on-browser
 ```
 
 Choose an unused port and unique artifact directory. The desktop/mobile suite adds a synthetic product, requests a preview with intercepted API calls, checks the request and caption, and checks that changing the reference or photo removes the preview. It also covers a failed request and retry. Inspect `shopping-try-on.png` and `browser-health.json` in each viewport's directory. Node tests cover the request format, validation, refusal advice, timeouts and invalid output. These mocked tests do not establish real AI image quality.
+
+## Shopping: add a purchase to the wardrobe
+
+Use the same Node 22 installation, pinned Playwright and cached Chromium above:
+
+```bash
+WARDROBE_BROWSER_PORT=5611 \
+  WARDROBE_BROWSER_ARTIFACTS=/dev/shm/wardrobe-purchase-browser \
+  npm run test:browser -- tests/browser/shopping-website.spec.mjs -g "Add to wardrobe"
+rg --files /dev/shm/wardrobe-purchase-browser
+```
+
+Choose an unused port and unique artifact directory. On desktop and mobile, the two tests choose **Add to wardrobe** for an imported product link and for an uploaded photo. They check that the Wardrobe opens with the import ready for review, that the link is read again (and the original upload bytes are sent), that going back to Wardrobe doesn't import it a second time, and that the import dialog's own link form still works. Import API calls are intercepted, so no paid requests are made. Inspect `shopping-add-to-wardrobe.png`, `shopping-added-review.png` and `browser-health.json` in each viewport's directory.

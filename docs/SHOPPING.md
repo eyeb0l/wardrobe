@@ -2,7 +2,7 @@
 
 Open **Shopping** or `/shopping` to find gaps in your wardrobe or assess a particular piece before buying it.
 
-Analysis uses `OPENAI_VISION_MODEL`, the prepared photo, selected reference, notes and labelled wardrobe image sheets. It includes current wardrobe edits and deletions from the selected store. An API key, reference and readable wardrobe images are required. Requests are never automatically retried. Shopping does not import purchases or persist its drafts/results; they survive tab switches within the app but not page reloads.
+Analysis uses `OPENAI_VISION_MODEL`, the prepared photo, selected reference, notes and labelled wardrobe image sheets. It includes current wardrobe edits and deletions from the selected store. An API key, reference and readable wardrobe images are required. Requests are never automatically retried. Shopping does not persist its drafts/results; they survive tab switches within the app but not page reloads. To keep a piece you bought, see [Add a purchase to your wardrobe](#add-a-purchase-to-your-wardrobe).
 
 ## What's missing?
 
@@ -25,6 +25,10 @@ Paste an individual retailer product link into **Product URL** and choose **Impo
 Importing a link does not run an AI assessment, spend model credits or add anything to your wardrobe. The preview remains a Shopping draft; replacing or removing its photo also removes the associated retailer details. Product details help identify the candidate during the assessment and are treated as retailer claims, not verified facts.
 
 This uses the same public-page reader as [wardrobe website imports](IMPORTING.md#import-from-a-website): JSON-LD product data with Open Graph/Twitter fallbacks, one product per page, and public HTTP(S) requests with time, size and redirect limits. It does not log in or execute page JavaScript. If a retailer blocks access or its product/photo is ambiguous or unavailable, try another product link or upload a screenshot. A failed link import keeps any photo already selected.
+
+### Add a purchase to your wardrobe
+
+Once a piece is added, **Bought it? → Add to wardrobe** opens the Wardrobe and starts an ordinary [wardrobe import](IMPORTING.md) of it, so you review the crop, cutout, details and modelled photo before anything is saved. It doesn't need a check first. An imported product link is read again so the saved item keeps its source link and retailer details; an uploaded photo is sent as the original file rather than Shopping's smaller copy. The import uses the usual paid detection and generation requests. The Shopping draft is kept, so you can go back to it.
 
 ### Visual overlap
 
