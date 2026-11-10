@@ -546,6 +546,7 @@ export function App() {
   const planningDays = usePlanningDays();
   const itemsById = useMemo(() => new Map(items.map(item => [item.id, item])), [items]);
   const [regenerationRequest, setRegenerationRequest] = useState(null);
+  const [purchaseRequest, setPurchaseRequest] = useState(null);
   const [activeType, setActiveType] = useState("all");
   const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [laundrySelection, setLaundrySelection] = useState([]);
@@ -590,6 +591,16 @@ export function App() {
     setRoute(path);
     window.scrollTo(0, 0);
   };
+
+  // Shopping hands a bought piece to the Wardrobe import, which mounts on "/".
+  const importPurchase = useCallback((request) => {
+    setPurchaseRequest({ ...request, id: crypto.randomUUID() });
+    if (window.location.pathname !== "/") window.history.pushState({}, "", "/");
+    setSelectedId(null);
+    setRoute("/");
+    window.scrollTo(0, 0);
+  }, []);
+  const purchaseHandled = useCallback(() => setPurchaseRequest(null), []);
 
   const refreshWardrobe = useCallback(async ({ force = false } = {}) => {
     // A mutation invalidates an older read. Wait for it, then start a new read
@@ -806,7 +817,7 @@ export function App() {
       {(shoppingOpened || route === "/shopping") ? (
         <div hidden={route !== "/shopping"}>
           <Suspense fallback={<p className="status" role="status">Loading Shopping</p>}>
-            <ShoppingView items={items} loading={loading} wardrobeError={error} active={route === "/shopping"} />
+            <ShoppingView items={items} loading={loading} wardrobeError={error} active={route === "/shopping"} onAddToWardrobe={importPurchase} />
           </Suspense>
         </div>
       ) : null}
@@ -908,7 +919,7 @@ export function App() {
         setRoute("/outfits");
         window.scrollTo(0, 0);
       }} />}
-      <WardrobeImportFlow traySlot={importSlot} regenerationRequest={regenerationRequest} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} onOpenSetup={() => setSetupRequested(value => value + 1)} />
+      <WardrobeImportFlow traySlot={importSlot} regenerationRequest={regenerationRequest} purchaseRequest={purchaseRequest} onPurchaseHandled={purchaseHandled} onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} onOpenSetup={() => setSetupRequested(value => value + 1)} />
       </>}
     </div>
   );

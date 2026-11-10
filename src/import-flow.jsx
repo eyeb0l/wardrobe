@@ -262,7 +262,7 @@ function CleanupEditor({ job, tolerance, setTolerance, busy, active, onPreview, 
   );
 }
 
-export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regenerationRequest, onOpenSetup, traySlot }) {
+export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regenerationRequest, purchaseRequest, onPurchaseHandled, onOpenSetup, traySlot }) {
   const inputRef = useRef(null);
   const dialogRef = useRef(null);
   const panelRef = useRef(null);
@@ -305,6 +305,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(null);
   const [setup, setSetup] = useState(null);
+  const [jobsLoaded, setJobsLoaded] = useState(false);
+  const handledPurchase = useRef(null);
   const [openingModeled, setOpeningModeled] = useState(false);
   const hasStartedDetection = jobs.some((job) => isDetectionRetryRunning(job));
   useEffect(() => {
@@ -363,7 +365,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
         setJobs(visibleJobs);
         setDrafts(Object.fromEntries(visibleJobs.map((job) => [job.id, defaultDraft(job)])));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setJobsLoaded(true));
   }, []);
 
   // Returns a fingerprint of the polled jobs, or null when nothing was applied.
@@ -472,13 +475,12 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
   };
   const endMutation = () => { mutationRef.current = false; setBusyId(null); };
 
-  const submitWebsite = async (event) => {
-    event.preventDefault();
-    if (!setup?.ready || !websiteUrl.trim() || !beginMutation("website")) return;
+  const importWebsite = async (url, { clearInput = false } = {}) => {
+    if (!setup?.ready || !url || !beginMutation("website")) return;
     setNotice(null);
     const lifecycle = uploadLifecycle.current;
     try {
-      const result = await api(API, { method: "POST", body: JSON.stringify({ websiteUrl: websiteUrl.trim() }) });
+      const result = await api(API, { method: "POST", body: JSON.stringify({ websiteUrl: url }) });
       if (lifecycle !== uploadLifecycle.current) return;
       const createdJobs = result.jobs || [];
       if (!createdJobs.length) {
@@ -488,10 +490,27 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, regen
       setJobs((current) => [...current, ...createdJobs]);
       setDrafts((current) => ({ ...current, ...Object.fromEntries(createdJobs.map((job) => [job.id, defaultDraft(job)])) }));
       setSelectedReviewId(createdJobs[0].id);
-      setWebsiteUrl("");
+      if (clearInput) setWebsiteUrl("");
     } catch (requestError) { if (lifecycle === uploadLifecycle.current) setError(requestError.message); }
     finally { if (lifecycle === uploadLifecycle.current) endMutation(); }
   };
+  const submitWebsite = (event) => {
+    event.preventDefault();
+    void importWebsite(websiteUrl.trim(), { clearInput: true });
+  };
+
+  // A piece bought from Shopping starts once setup and the existing queue have
+  // loaded, so the new job joins the queue instead of hiding stored jobs.
+  useEffect(() => {
+    if (!purchaseRequest || !setup || !jobsLoaded || handledPurchase.current === purchaseRequest.id) return;
+    handledPurchase.current = purchaseRequest.id;
+    onPurchaseHandled?.();
+    setOpen(true);
+    if (!setup.ready) return;
+    if (purchaseRequest.websiteUrl) void importWebsite(purchaseRequest.websiteUrl);
+    else if (purchaseRequest.file) void submitFiles([purchaseRequest.file]);
+    // importWebsite reads this render's setup, which is already a dependency.
+  }, [purchaseRequest, setup, jobsLoaded, submitFiles, onPurchaseHandled]);
 
   const performDetection = async (job, action, body) => {
     if (!beginMutation(job.id)) return;

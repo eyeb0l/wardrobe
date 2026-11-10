@@ -47,7 +47,7 @@ const test = base.extend({
   shopping: async ({ page }, use, testInfo) => {
     const health = { pageErrors: [], consoleErrors: [], failedRequests: [], httpErrors: [], unexpectedApi: [] };
     const allowedErrors = new Set();
-    const state = { imports: [], analyses: [], tryOns: [], importHandler: null, tryOnHandler: null };
+    const state = { imports: [], analyses: [], tryOns: [], wardrobeImports: [], importHandler: null, tryOnHandler: null };
     page.on('pageerror', error => health.pageErrors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') health.consoleErrors.push(message.text()); });
     page.on('requestfailed', request => {
@@ -63,6 +63,19 @@ const test = base.extend({
       const path = new URL(route.request().url()).pathname;
       if (path === '/api/import/wardrobe') return route.fulfill({ json: wardrobe });
       if (path === '/api/import/jobs' && route.request().method() === 'GET') return route.fulfill({ json: [] });
+      if (path === '/api/import/jobs' && route.request().method() === 'POST') {
+        const body = route.request().postDataJSON();
+        state.wardrobeImports.push(body);
+        const now = new Date().toISOString();
+        const stage = status => ({ status, decision: null, attempts: 0, assetUrl: null, error: null, prompt: null });
+        return route.fulfill({ status: 202, json: { jobs: [{
+          id: `00000000-0000-4000-8000-00000000000${state.wardrobeImports.length}`, status: 'active', canUseOriginal: true,
+          metadata: { name: body.websiteUrl ? source.name : body.metadata.name, part: 'wholebody_up', color: '#547286', tags: [] },
+          ...(body.websiteUrl ? { websiteSource: source } : {}),
+          originalAssetUrl: imageDataUrl, createdAt: now, updatedAt: now,
+          stages: { crop: { ...stage('review'), assetUrl: imageDataUrl }, garment: stage('pending'), modeled: stage('pending') },
+        }] } });
+      }
       if (path === '/api/shopping/config' || path === '/api/import/config') return route.fulfill({ json: {
         ready: true, hasApiKey: true, hasModelReference: true, modelReferences: [state.reference || reference],
       } });
@@ -336,4 +349,47 @@ test('replacing the selected reference photo removes its preview', async ({ page
   await page.getByRole('button', { name: 'Refresh photos', exact: true }).click();
   await expect(preview).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Try it on', exact: true })).toBeEnabled();
+});
+
+test('Add to wardrobe hands an imported product link to the wardrobe import once', async ({ page, shopping }, testInfo) => {
+  await importProduct(page);
+  const add = page.getByRole('button', { name: 'Add to wardrobe', exact: true });
+  await expect(add).toBeEnabled();
+  await add.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('shopping-add-to-wardrobe.png') });
+  await add.click();
+  await expect(page).toHaveURL(/\/$/);
+  const dialog = page.getByRole('dialog', { name: /ready for review/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('link', { name: source.name })).toHaveAttribute('href', productUrl);
+  await expect(dialog.getByRole('button', { name: 'Use original image', exact: true })).toBeEnabled();
+  expect(shopping.wardrobeImports).toEqual([{ websiteUrl: productUrl }]);
+  expect(shopping.analyses).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('shopping-added-review.png') });
+
+  // Revisiting Wardrobe must not import the same purchase again.
+  await dialog.getByRole('button', { name: 'Close import progress', exact: true }).click();
+  const nav = page.getByRole('navigation', { name: 'Main navigation' });
+  await nav.getByRole('link', { name: 'Shopping', exact: true }).click();
+  await expect(page.getByRole('heading', { name: source.name, exact: true })).toBeVisible();
+  await nav.getByRole('link', { name: 'Wardrobe', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Add clothes', exact: true })).toBeVisible();
+  expect(shopping.wardrobeImports).toHaveLength(1);
+});
+
+test('Add to wardrobe imports the original uploaded photo, not the Shopping copy', async ({ page, shopping }) => {
+  await expect(page.getByRole('button', { name: 'Add to wardrobe', exact: true })).toHaveCount(0);
+  await page.getByLabel('Choose a shopping image', { exact: true }).setInputFiles({ name: 'bought-jacket.png', mimeType: 'image/png', buffer: png });
+  await expect(page.getByText('bought-jacket.png', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Add to wardrobe', exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('dialog', { name: /ready for review/ })).toBeVisible();
+  expect(shopping.wardrobeImports).toEqual([{ imageDataUrl: `data:image/png;base64,${png.toString('base64')}`, metadata: { name: 'bought-jacket' } }]);
+  expect(shopping.analyses).toEqual([]);
+  // The import dialog's own link form still sends what was typed into it.
+  const field = page.getByRole('textbox', { name: 'Import from a website', exact: true });
+  await field.fill(` ${productUrl} `);
+  await page.getByRole('button', { name: 'Import link', exact: true }).click();
+  await expect(field).toHaveValue('');
+  expect(shopping.wardrobeImports[1]).toEqual({ websiteUrl: productUrl });
 });

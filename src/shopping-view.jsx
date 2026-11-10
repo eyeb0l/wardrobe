@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowRight, CaretDown, LinkSimple, TShirt, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, CoatHanger, LinkSimple, TShirt, UploadSimple, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { prepareShoppingImage } from "./shopping-image.mjs";
 import { uiErrorMessage } from "./ui-error.mjs";
@@ -185,7 +185,7 @@ function Assessment({ result, itemsById, headingRef, titleId }) {
   </section>;
 }
 
-export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeError = "", active = true }) {
+export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeError = "", active = true, onAddToWardrobe }) {
   const [config, setConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(true);
   const [configError, setConfigError] = useState("");
@@ -299,7 +299,8 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     setPreparing(true);
     try {
       const image = await prepareShoppingImage(file);
-      if (mounted.current && version === prepareVersion.current) setPrepared(image);
+      // Keep the original file: a wardrobe import prepares its own, larger copy.
+      if (mounted.current && version === prepareVersion.current) setPrepared({ ...image, file });
     } catch (error) {
       if (mounted.current && version === prepareVersion.current) setImageError(error.message || "This image couldn't be opened. Try another photo.");
     } finally {
@@ -497,6 +498,14 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
     }
   }, [result, active]);
 
+  // A bought piece goes through the normal wardrobe import and its review.
+  // Product links are read again so the saved item keeps its retailer details.
+  const addToWardrobe = () => {
+    if (!prepared || importing || analyzing || !onAddToWardrobe) return;
+    if (prepared.websiteSource) onAddToWardrobe({ websiteUrl: prepared.websiteSource.url });
+    else if (prepared.file) onAddToWardrobe({ file: prepared.file });
+  };
+
   const fileDragged = (event) => active && [...event.dataTransfer.types].includes("Files");
 
   return <main className="shopping-page">
@@ -551,6 +560,10 @@ export function ShoppingView({ items = EMPTY_ITEMS, loading = false, wardrobeErr
             {prepared.websiteSource.description ? <p className="shopping-source-description">{prepared.websiteSource.description}</p> : null}
             <p className="shopping-small shopping-source-check">Check the photo matches the product and colour you intended before checking this piece.</p>
           </section> : null}
+          {prepared && onAddToWardrobe ? <div className="shopping-purchase">
+            <div><p className="shopping-purchase-title">Bought it?</p><p className="shopping-small">Add it straight to your wardrobe. You’ll review the cutout and details before it’s saved.</p></div>
+            <button type="button" className="shopping-secondary" disabled={analyzing || importing} onClick={addToWardrobe}><CoatHanger size={16} aria-hidden="true" />Add to wardrobe</button>
+          </div> : null}
           {imageError ? <p className="shopping-error" role="alert">{uiErrorMessage(imageError)}</p> : null}
         </section>
 
