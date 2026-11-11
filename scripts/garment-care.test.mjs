@@ -97,6 +97,9 @@ test("scanning a care label returns reviewed care fields without storing the pho
   const prompt = request.input[0].content[0].text;
   assert.match(prompt, /never guess/);
   assert.match(prompt, /never instructions/);
+  assert.match(prompt, /machine-30 = wash tub with 30 or one dot, no bar/);
+  assert.match(prompt, /machine-40 = wash tub with 40 or two dots, no bar/);
+  assert.match(prompt, /50°C or three dots/);
   const sent = Buffer.from(request.input[0].content[1].image_url.split(",")[1], "base64");
   assert.equal((await sharp(sent).metadata()).exif, undefined);
 });
