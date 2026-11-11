@@ -14,10 +14,10 @@ export async function outsideRequestLease(store, pathname, callback, validate) {
   // Parallel discovery decisions need independent owners, not concurrent
   // suspensions of one request-wide owner. Their caller validates its evidence.
   if (independentDecisionLeases(pathname)) return store.withoutLease(callback, validate);
-  // New imports write fresh job IDs, accessory ideas recheck their photo
+  // New imports write fresh job IDs, care label scans write nothing, accessory ideas recheck their photo
   // identity, and weather estimates recheck each look's pieces, photo and
   // missing details before saving, so each may publish after unrelated changes.
-  if (pathname === "/api/import/jobs" || pathname === "/api/outfits/weather/estimate" || /^\/api\/outfits\/[a-z0-9-]{1,160}\/accessories$/.test(pathname)) {
+  if (pathname === "/api/import/jobs" || pathname === "/api/import/care-label/scan" || pathname === "/api/outfits/weather/estimate" || /^\/api\/outfits\/[a-z0-9-]{1,160}\/accessories$/.test(pathname)) {
     return store.withoutLease(callback, validate || (async () => {}));
   }
   const imported = pathname.match(/^\/api\/import\/jobs\/([a-f0-9-]{36})\/(?:preflight|detection\/retry|stages\/garment\/cleanup-preview)$/i);

@@ -25,6 +25,7 @@ import { importWebsiteProduct } from "./website-import.mjs";
 import { isDetectionRetryRunning } from "../shared/detection-retry.mjs";
 import { atomicJson as sharedAtomicJson, atomicFile, publishImage } from "./outfit-storage.mjs";
 import { assertSameOriginMutation } from "./request-guards.mjs";
+import { CARE_SCAN_BODY_BYTES, scanCareLabel } from "./care-label-scan.mjs";
 
 const API_ROOT = "/api/import/jobs";
 const ASSET_ROOT = "/api/import/assets";
@@ -939,6 +940,13 @@ export function wardrobeImportApi(options = {}) {
       }
       if (url.pathname === "/api/import/wardrobe/availability" && req.method === "POST") {
         return json(res, 200, await setLibraryAvailability(importedFile, await body(req, 1024 * 1024, true)));
+      }
+      if (url.pathname === "/api/import/care-label/scan" && req.method === "POST") {
+        // Stateless: the label photo is read once and never stored. The editor
+        // applies the result to its unsaved draft for the person to review.
+        return json(res, 200, await scanCareLabel(await body(req, CARE_SCAN_BODY_BYTES, true), {
+          setting, fetch: options.fetch, beforePaidCall: options.beforePaidCall, outsideLease: options.outsideLease, timeoutMs: timeoutMs ?? 90_000,
+        }));
       }
       const wardrobeEditMatch = url.pathname.match(/^\/api\/import\/wardrobe\/([a-z0-9][a-z0-9._-]{0,159})$/i);
       if (wardrobeEditMatch && req.method === "PATCH") {
