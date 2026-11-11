@@ -312,6 +312,10 @@ other console/network errors, Vite overlays and horizontal overflow fail tests.
 Inspect `care-label-scanned.png`, `care-label-manual.png` and each
 `browser-health.json`. No paid requests are made.
 
+Reviewed synthetic screenshots for this feature:
+[desktop scanned label](screenshots/care-labels/scanned-desktop.png) and
+[mobile manual entry](screenshots/care-labels/manual-mobile.png).
+
 ## Wear-aware outfit shortlist
 
 Use the pinned Node 22 and Chromium setup below. The pure ranking tests cover
