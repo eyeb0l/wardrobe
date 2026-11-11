@@ -1,0 +1,15 @@
+.care-label { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.care-label summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-height: 44px; padding: 12px 0; cursor: pointer; }
+.care-label-title { color: var(--ink); font-size: 13px; font-weight: 550; }
+.care-label-summary { min-width: 0; flex: 1 1 12rem; color: var(--muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.care-label-body { display: grid; gap: 14px; padding: 2px 0 18px; }
+.care-label-scan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.care-label-scan button { display: inline-flex; align-items: center; gap: 8px; }
+.care-label-scan p, .care-label-status { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.care-label-status:empty { display: none; }
+.care-label-error { margin: 0; color: var(--accent); font-size: 13px; line-height: 1.5; }
+.care-label-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.care-label-notes { grid-column: 1 / -1; }
+.care-label-notes textarea { display: block; width: 100%; min-height: 64px; resize: vertical; }
+.care-label-clear { justify-self: start; }
+@media (max-width: 860px) { .care-label-fields { grid-template-columns: 1fr; } }

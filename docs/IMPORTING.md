@@ -4,6 +4,12 @@ The importer detects up to eight visible clothing items per photo with the Respo
 
 The gallery filters Tops, Dresses, Jackets, Bottoms, Accessories and Shoes. Reclassify existing dresses in the item editor. Open a saved item and choose **Update modelled photo** or **Create modelled photo** to select a reference and optional direction. A replacement remains a review candidate until **Approve**; **Reject** keeps the existing photo. A regenerated cutout or modelled photo opens in review with a slider to compare it with the image it replaces.
 
+## Care labels
+
+Open a saved item and expand **Care label** to record its washing, bleaching, tumble drying, natural drying, ironing and professional cleaning instructions, plus free-text care notes. The options follow the standard ISO 3758 care symbols; anything without an option (for example 50°C) belongs in the notes. Collapsed, the section shows a one-line summary.
+
+**Scan care label** takes or chooses a photo of the label and reads its symbols and printed care wording with the vision model (`OPENAI_VISION_MODEL`, one paid text request). The result only fills the form: groups the label doesn't show keep their current choice, and nothing is saved until you check the details and choose **Save**. The photo is compressed in the browser, has its metadata stripped on the server and is never stored. Scanning needs `OPENAI_API_KEY`; manual entry doesn't. **Clear care label** removes every instruction once you save.
+
 ## Import from a website
 
 Choose **Add clothes → Import from a website** and paste an individual product URL to import a retailer photo and its details. Product structured data (JSON-LD) is preferred, with Open Graph/Twitter image and title tags as a fallback. The importer uses the page's name, description, brand, material and colour alongside the photo to identify the target garment, suggest its category, colours and tags, and enter the usual crop → cutout → modelled-photo review flow. The source link and available product details are saved with the item. Check the selected product and colour before approving, especially on pages with variants.

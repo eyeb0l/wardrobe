@@ -19,7 +19,7 @@ A personal catalogue of the clothes you already own. Wardrobe turns your photos 
 
 ## Features
 
-- **Wardrobe:** import clothes from photos or product pages, review the generated cutouts and modelled photos, and browse everything by category. Choose **Rearrange** to drag pieces or use the arrow controls to change their order within a category; changes save automatically across devices.
+- **Wardrobe:** import clothes from photos or product pages, review the generated cutouts and modelled photos, and browse everything by category. Choose **Rearrange** to drag pieces or use the arrow controls to change their order within a category; changes save automatically across devices. Record each piece's care label by hand or scan it from a photo.
 - **Outfits:** generate modelled looks from your own pieces, favourite saved looks, filter by garment and occasion, and log what you wore. Plan today and tomorrow alongside an optional local forecast, and let **What to wear** favour looks that suit the weather. Optional AI search and piece-swap suggestions help refine a look.
 - **Shopping:** find gaps in your wardrobe, or check a product link, listing screenshot or photo against what you own before you buy.
 

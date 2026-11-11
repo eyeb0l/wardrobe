@@ -16,6 +16,8 @@ import { wardrobeRequest, migrateBrowserEdits } from "./wardrobe-sync.mjs";
 import { compareWardrobeItems, moveWithinCategory } from "../shared/wardrobe-order.mjs";
 import { garmentAvailability, inLaundry } from "../shared/garment-availability.mjs";
 import { ReorderableItem } from "./reorderable-item.jsx";
+import { CareLabelEditor } from "./care-label.jsx";
+import { sameCare } from "../shared/garment-care.mjs";
 
 const OutfitView = lazy(() => import("./outfit-view.jsx").then((module) => ({ default: module.OutfitView })));
 const ShoppingView = lazy(() => import("./shopping-view.jsx").then((module) => ({ default: module.ShoppingView })));
@@ -254,6 +256,8 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
   );
 }
 
+const itemDraft = item => ({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])], availability: garmentAvailability(item), care: item.care || null });
+
 function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleStatus }) {
   const suggestedSecondary = palette.find((color) => color.toLowerCase() !== draft.color?.toLowerCase()) || "#9a9286";
 
@@ -309,6 +313,8 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
         <span>Details</span>
         <TagEditor tags={draft.tags} onChange={(tags) => setDraft((current) => ({ ...current, tags }))} />
       </div>
+
+      <CareLabelEditor care={draft.care} onChange={(care) => setDraft((current) => ({ ...current, care }))} />
     </div>
   );
 }
@@ -324,7 +330,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [palette, setPalette] = useState(item.palette || []);
-  const [draft, setDraft] = useState({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])], availability: garmentAvailability(item) });
+  const [draft, setDraft] = useState(itemDraft(item));
   const [shaking, setShaking] = useState(false);
   const [closeBlocked, setCloseBlocked] = useState(false);
   const type = TYPE_MAP[item.part]?.singular || "Wardrobe item";
@@ -350,7 +356,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
       secondaryColor: item.secondaryColor?.toLowerCase() || null,
       tags: normalizedTags(item.tags || []),
       availability: garmentAvailability(item),
-    });
+    }) || !sameCare(draft.care, item.care);
   }, [draft, item]);
 
   const nudgeUnsaved = useCallback(() => {
@@ -387,7 +393,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
   }, [isDirty]);
 
   const cancelEditing = () => {
-    setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])], availability: garmentAvailability(item) });
+    setDraft(itemDraft(item));
     setSampling(null);
     setSampleStatus("");
     onClose();
@@ -398,7 +404,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onRegenerate, onStyle, on
     try {
       const saved = await onSave({ ...item, ...draft, revision, name: draft.name.trim(), tags: draft.tags.map(tag => tag.trim()).filter(Boolean) });
       setRevision(saved.revision);
-      setDraft({ name: saved.name || "", part: saved.part, color: saved.color || "#9a9286", secondaryColor: saved.secondaryColor || null, tags: [...(saved.tags || [])], availability: garmentAvailability(saved) });
+      setDraft(itemDraft(saved));
       setSampling(null);
       setSampleStatus("Changes saved.");
     } catch (error) { setSaveError(error.message); }
@@ -773,7 +779,7 @@ export function App() {
     if (mutating.current) throw new Error("A wardrobe change is still saving. Please try again.");
     mutating.current = true; ++requestVersion.current;
     try {
-      const changes = Object.fromEntries(["name", "part", "color", "secondaryColor", "tags", "availability"].map(key => [key, updatedItem[key]]));
+      const changes = Object.fromEntries(["name", "part", "color", "secondaryColor", "tags", "availability", "care"].map(key => [key, key === "care" ? updatedItem.care || null : updatedItem[key]]));
       const saved = await wardrobeRequest(`/api/import/wardrobe/${encodeURIComponent(updatedItem.id)}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: updatedItem.revision, changes }),
       });

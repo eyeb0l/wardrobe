@@ -287,6 +287,31 @@ Reviewed synthetic screenshots for this feature:
 [desktop shortlist exclusions](screenshots/garment-availability/shortlist-desktop.png), and
 [mobile shortlist exclusions](screenshots/garment-availability/shortlist-mobile.png).
 
+## Care labels
+
+Use the same Node 22 installation, pinned Playwright and cached Chromium above.
+Choose an unused port and unique artifact directory:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/garment-care.test.mjs
+WARDROBE_BROWSER_PORT=5417 \
+  WARDROBE_BROWSER_ARTIFACTS=/dev/shm/wardrobe-care-browser \
+  npm run test:browser -- tests/browser/garment-care.spec.mjs
+rg --files /dev/shm/wardrobe-care-browser
+```
+
+Node tests cover care validation, saving and clearing through the real library
+writer, unchanged revisions for items without care, and the scan endpoint with a
+mocked provider (strict schema, metadata-free JPEG, missing key, unreadable
+label, invalid result, rate limit and bad uploads). On desktop and mobile, the
+browser tests scan a synthetic label into the unsaved draft, check that closing
+is blocked until saving, save and reload, then edit by hand, recover from an
+unreadable scan and clear. The fixture returns 422 for the unreadable scan;
+other console/network errors, Vite overlays and horizontal overflow fail tests.
+Inspect `care-label-scanned.png`, `care-label-manual.png` and each
+`browser-health.json`. No paid requests are made.
+
 ## Wear-aware outfit shortlist
 
 Use the pinned Node 22 and Chromium setup below. The pure ranking tests cover

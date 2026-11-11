@@ -3,11 +3,12 @@ import { readFile } from './storage-fs.mjs';
 import { atomicJson } from './outfit-storage.mjs';
 import { compareWardrobeItems, resetOrderOnCategoryChange } from '../shared/wardrobe-order.mjs';
 import { garmentAvailability } from '../shared/garment-availability.mjs';
+import { normalizeCare } from '../shared/garment-care.mjs';
 
 const locks = new Map();
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const parts = new Set(['upperbody', 'dresses', 'wholebody_up', 'lowerbody', 'accessories_up', 'shoes']);
-export const editableFields = ['name', 'part', 'color', 'secondaryColor', 'tags', 'availability'];
+export const editableFields = ['name', 'part', 'color', 'secondaryColor', 'tags', 'availability', 'care'];
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 
 export async function readLibrary(file) {
@@ -31,7 +32,9 @@ export async function withLibraryLock(file, callback) {
 export function publicLibraryItem(item) {
   const { _editVersion, hidden, ...record } = item;
   record.availability = garmentAvailability(item);
-  const state = editableFields.map(field => item[field] ?? null);
+  // Care joins the revision only once recorded, so adding the field leaves
+  // every existing item's revision (and any open editor) unchanged.
+  const state = editableFields.filter(field => field !== 'care' || item.care).map(field => item[field] ?? null);
   record.revision = createHash('sha256').update(JSON.stringify([_editVersion ?? null, hidden === true, ...state])).digest('hex');
   return record;
 }
@@ -46,6 +49,7 @@ export function validateEdit(input) {
       if (!['ready', 'laundry'].includes(value)) throw fail('Availability must be Ready or In laundry.');
       edit.availability = value;
     }
+    else if (key === 'care') edit.care = normalizeCare(value);
     else if (key === 'tags') {
       if (!Array.isArray(value) || value.length > 40 || value.some(tag => typeof tag !== 'string' || tag.length > 100)) throw fail('Invalid detail tags.');
       edit.tags = [...new Set(value.map(tag => tag.trim()).filter(Boolean))];
@@ -71,7 +75,9 @@ export function saveLibraryEdit(file, id, payload) {
   return withLibraryLock(file, async () => {
     const records = await readLibrary(file);
     const item = checkedItem(records, id, revision);
-    const updated = resetOrderOnCategoryChange(item, { ...item, ...edit, _editVersion: randomUUID() });
+    const next = { ...item, ...edit, _editVersion: randomUUID() };
+    if (next.care === null) delete next.care;
+    const updated = resetOrderOnCategoryChange(item, next);
     await atomicJson(file, records.map(value => value === item ? updated : value));
     return publicLibraryItem(updated);
   });
