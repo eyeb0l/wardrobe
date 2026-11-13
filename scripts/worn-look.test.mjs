@@ -9,7 +9,8 @@ import { publicLibraryItem } from './wardrobe-library.mjs';
 import { garmentWearHistory } from '../shared/outfit-shortlist.mjs';
 import { validateManifest } from './outfit-storage.mjs';
 
-const collection = h => h.request('GET', API);
+// Lists also name each image's current version; records returned by a write do not.
+const collection = async h => { const value = await h.request('GET', API); return { ...value, outfits: value.outfits.map(({ imageVersions, ...outfit }) => outfit) }; };
 const log = async (h, ids = ['top-1','bottom-1']) => (await h.request('POST', `${API}/garment-wears`, { requestId: randomUUID(), date: '2026-01-04', garmentIds: ids, timezoneOffset: 0 })).event;
 const save = (h, entry, body, status = 200, headers) => h.request('POST', `${API}/garment-wears/${entry.id}/look`, body, status, headers);
 async function input(h, entry, extra = {}) {

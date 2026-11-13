@@ -530,7 +530,9 @@ test('plans, outfit confirmation, direct wear and worn-look saves persist across
   await call(h.store, 'POST', '/api/outfits/garment-wears', direct, 409);
   const undone = await call(other, 'GET', '/api/outfits');
   assert.deepEqual(undone.garmentWears, []);
-  assert.deepEqual(undone.outfits.find(outfit => outfit.id === savedLook.outfit.id), savedLook.outfit);
+  const { imageVersions, ...listed } = undone.outfits.find(outfit => outfit.id === savedLook.outfit.id);
+  assert.deepEqual(listed, savedLook.outfit);
+  assert.match(imageVersions.image, /^[a-f0-9]{20}$/, 'the list names the saved look\'s current image version');
   assert.deepEqual(await call(h.store, 'POST', `/api/outfits/garment-wears/${direct.requestId}/look`, save), savedLook);
   assert.deepEqual(undone.plans, result.plans);
   assert.deepEqual(undone.outfits[0].wearHistory, result.outfits[0].wearHistory);

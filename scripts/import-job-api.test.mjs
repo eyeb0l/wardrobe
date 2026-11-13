@@ -727,7 +727,11 @@ test("saved modeled shots reopen, regenerate and replace only after approval", a
   await h.waitForStage(job.id, "modeled");
   await h.request("POST", `${jobUrl}/stages/modeled/approve`);
   await h.request("GET", jobUrl, undefined, 404);
-  const [original] = await h.request("GET", "/api/import/wardrobe");
+  // Republishing an identical file gives it a new local image version, so the
+  // saved record is compared without the versions the list adds.
+  const record = ({ imageVersions, ...item }) => item;
+  const wardrobe = async () => (await h.request("GET", "/api/import/wardrobe")).map(record);
+  const [original] = await wardrobe();
   const garment = await h.request("GET", original.image);
   const previousShot = await h.request("GET", original.modeledImage);
   const callCount = h.requests.length;
@@ -749,9 +753,9 @@ test("saved modeled shots reopen, regenerate and replace only after approval", a
   assert.deepEqual(lastRequest.images[0].data, h.source);
   assert.deepEqual(lastRequest.images[1].data, garment);
   assert.match(lastRequest.form.get("prompt"), /Show the full garment in daylight/);
-  assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), [original], "pending replacement keeps saved item untouched");
+  assert.deepEqual(await wardrobe(), [original], "pending replacement keeps saved item untouched");
   await h.request("POST", `${jobUrl}/stages/modeled/reject`);
-  assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), [original], "rejecting keeps the original shot");
+  assert.deepEqual(await wardrobe(), [original], "rejecting keeps the original shot");
   await h.request("POST", itemUrl);
   const workingFetch = globalThis.fetch;
   t.mock.method(globalThis, "fetch", async () => { throw new Error("Image service unavailable"); });
@@ -764,12 +768,12 @@ test("saved modeled shots reopen, regenerate and replace only after approval", a
   }
   assert.equal(failed.stages.modeled.status, "failed");
   assert.match(failed.stages.modeled.error, /Image service unavailable/);
-  assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), [original], "generation failure preserves the original shot");
+  assert.deepEqual(await wardrobe(), [original], "generation failure preserves the original shot");
   t.mock.method(globalThis, "fetch", workingFetch);
   await h.request("POST", `${jobUrl}/stages/modeled/regenerate`, { modelReferenceId: "model-reference-2" });
   await h.waitForStage(job.id, "modeled");
   const approved = await h.request("POST", `${jobUrl}/stages/modeled/approve`);
-  const [updated] = await h.request("GET", "/api/import/wardrobe");
+  const [updated] = await wardrobe();
   assert.notEqual(updated.modeledImage, original.modeledImage, "new URL prevents stale image caches");
   assert.equal(approved.libraryItem.modeledImage, updated.modeledImage);
   assert.match(updated.modeledSetting, /^An invented location/);
@@ -777,7 +781,7 @@ test("saved modeled shots reopen, regenerate and replace only after approval", a
   assert.deepEqual(await h.request("GET", updated.image), garment);
   assert.deepEqual(await h.request("GET", original.modeledImage), previousShot, "original file is preserved");
   await h.restart();
-  assert.deepEqual(await h.request("GET", "/api/import/wardrobe"), [updated]);
+  assert.deepEqual(await wardrobe(), [updated]);
   assert.deepEqual(await h.request("GET", "/api/import/jobs"), []);
   await h.request("POST", "/api/import/wardrobe/import-00000000-0000-0000-0000-000000000000/modeled", undefined, 404);
   await h.request("DELETE", `/api/import/wardrobe/${updated.id}`, { revision: updated.revision });

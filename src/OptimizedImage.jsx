@@ -1,6 +1,7 @@
 import { forwardRef } from "react";
 import { Image } from "@unpic/react";
 import { DISPLAY_WIDTHS, displayImageSource } from "../shared/image-variants.mjs";
+import { imageVersion } from "./image-versions.mjs";
 
 const IPX_OPTIONS = { ipx: { baseURL: "/_ipx" } };
 const DEFAULT_BREAKPOINTS = [160, 240, 320, 480, 640, 800, 960, 1280];
@@ -23,9 +24,10 @@ export const OptimizedImage = forwardRef(function OptimizedImage({
   ...props
 }, ref) {
   const normalizedSource = sourcePath(src);
-  const displaySource = !unoptimized && displayImageSource(src);
+  const version = imageVersion(src);
+  const displaySource = !unoptimized && displayImageSource(src, undefined, version);
   if (displaySource) {
-    return <img ref={ref} src={displaySource} srcSet={DISPLAY_WIDTHS.map(width => `${displayImageSource(src, width)} ${width}w`).join(", ")}
+    return <img ref={ref} src={displaySource} srcSet={DISPLAY_WIDTHS.map(width => `${displayImageSource(src, width, version)} ${width}w`).join(", ")}
       alt={alt} sizes={sizes} loading={loading || (priority ? "eager" : "lazy")} decoding={decoding || "async"} {...props} />;
   }
 

@@ -10,6 +10,17 @@ export async function wardrobeRequest(url, options) {
   return value;
 }
 
+// Polled lists send back the validator from the copy on screen. An unchanged
+// list answers 304 with no body, and the caller keeps what it already shows.
+export async function wardrobeRead(url, etag, options) {
+  const response = await fetch(url, { cache: 'no-store', ...options, headers: etag ? { 'If-None-Match': etag } : undefined });
+  if (etag && response.status === 304) return { notModified: true };
+  let value;
+  try { value = await response.json(); } catch { throw new Error('Could not reach the wardrobe. Check your connection and sign-in.'); }
+  if (!response.ok) throw Object.assign(new Error(value.error || 'Could not update the wardrobe.'), { status: response.status });
+  return { value, etag: response.headers.get('ETag') };
+}
+
 export async function migrateBrowserEdits(storage, request = wardrobeRequest) {
   let editsRaw, deletedRaw;
   try { editsRaw = storage.getItem(EDITS_KEY); deletedRaw = storage.getItem(DELETED_KEY); }

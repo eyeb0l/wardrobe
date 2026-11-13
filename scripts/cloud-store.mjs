@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID, createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { DISPLAY_WIDTHS, DISPLAY_RECIPE } from "../shared/image-variants.mjs";
-import { displayKey, displayETag, encodeDisplayImage, matchesETag } from "./display-image.mjs";
+import { displayKey, displayETag, encodeDisplayImage, hostedDisplayVersion, matchesETag } from "./display-image.mjs";
 import { GC_SCHEMA_SQL, collectBlobs } from "./blob-gc.mjs";
 import { immutableByteCache } from "./immutable-byte-cache.mjs";
 import { mapLimit } from "./map-limit.mjs";
@@ -374,9 +374,22 @@ export function createCloudStore({ database, databaseUrl = process.env.DATABASE_
     async displayImage(file, width, condition) {
       const source = await imageRow(file, width);
       const etag = displayETag(displayKey(source.blob_url, width));
-      if (matchesETag(condition, etag)) return { etag, notModified: true };
+      // The version names this captured immutable URL, like the bytes below.
+      const version = hostedDisplayVersion(source.blob_url);
+      if (matchesETag(condition, etag)) return { etag, version, notModified: true };
       const variant = await variantFor(source, width);
-      return { etag, bytes: variant.bytes ? Buffer.from(variant.bytes) : await readBlob(variant.blob_url, file) };
+      return { etag, version, bytes: variant.bytes ? Buffer.from(variant.bytes) : await readBlob(variant.blob_url, file) };
+    },
+    // One fresh metadata query names the current image at every path, so a
+    // list can hand out addresses the browser may keep without asking again.
+    async imageVersions(files) {
+      const targets = new Map();
+      for (const file of new Set(files)) { try { targets.set(canonical(file), file); } catch { /* Outside the store: no version. */ } }
+      const versions = new Map();
+      if (!targets.size) return versions;
+      const rows = await db.query("SELECT path, blob_url FROM wardrobe_files WHERE path = ANY($1::text[]) AND kind = 'file' AND blob_url IS NOT NULL", [[...targets.keys()]]);
+      for (const row of rows) versions.set(targets.get(row.path), hostedDisplayVersion(row.blob_url));
+      return versions;
     },
     async listDisplayImageSources() {
       return db.query("SELECT path, size FROM wardrobe_files WHERE kind = 'file' AND blob_url IS NOT NULL AND path ~* $1 ORDER BY path", ["\\.(png|jpe?g|webp)$"]);
