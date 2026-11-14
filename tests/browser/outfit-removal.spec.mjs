@@ -110,7 +110,10 @@ test('a saved look can be removed, browsed and restored, then renamed and its de
     await form.getByLabel('Description').fill('Easy layers for a slow morning.');
     await form.scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath('edit-details.png') });
+    // Accessory suggestions depend on the name and description, so they are read again.
+    const accessories = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/outfits/morning/accessories', { timeout: 5000 });
     await form.getByRole('button', { name: 'Save changes' }).click();
+    await accessories;
     await expect(dialog.getByRole('heading', { name: 'Sunday market' })).toBeVisible();
     await expect(dialog.getByRole('status').filter({ hasText: 'Name and description saved.' })).toBeVisible();
     await expect(dialog.locator('.outfit-reason')).toHaveText('Easy layers for a slow morning.');

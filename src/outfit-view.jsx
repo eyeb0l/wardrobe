@@ -182,7 +182,7 @@ function OutfitDetails({ outfit, itemsById, visible = true, activity, children, 
       {activity}
       {outfit.status !== "accepted" && outfit.weather ? <p className="outfit-weather-meta">Weather: {weatherRangeText(outfit.weather)}{outfit.weather.note ? `. ${outfit.weather.note}` : ""}</p> : null}
       <GarmentReferences outfit={outfit} itemsById={itemsById} />
-      {outfit.status === "accepted" && outfit.imageKind !== "cutouts" && showAccessories ? <AccessorySuggestions key={`${outfit.id}:${outfit.image}`} outfit={outfit} visible={visible} /> : null}
+      {outfit.status === "accepted" && outfit.imageKind !== "cutouts" && showAccessories ? <AccessorySuggestions key={JSON.stringify([outfit.id, outfit.image, outfit.name, outfit.reason])} outfit={outfit} visible={visible} /> : null}
       {children}
     </div>
   </div>;
