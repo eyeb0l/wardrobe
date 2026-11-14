@@ -303,3 +303,11 @@
   .outfit-plan-actions > .outfit-secondary:first-child:has(+ .outfit-plan-links > :last-child:nth-child(even)), .outfit-plan-links:first-child > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .outfit-plan-form { padding: 18px; }
 }
+
+/* Removing a look: a quiet link that opens a short confirmation. */
+.outfit-remove { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
+.outfit-remove > p { margin: 0 0 6px; }
+.outfit-remove > p:first-child { font-size: 15px; }
+.outfit-remove .outfit-action-row { margin-top: 12px; }
+.outfit-secondary.outfit-danger { border-color: var(--accent); color: var(--accent); }
+.outfit-secondary.outfit-danger:not(:disabled):hover { border-color: var(--accent); background: var(--accent-soft); }

@@ -272,6 +272,21 @@ From a wardrobe piece, choose **View saved outfits with this piece** to open
 Outfits with that garment selected. Save or discard any garment edits first.
 This also works for categories that are not supported by new outfit generation.
 
+## Remove a saved look
+
+Open a look and choose **Remove look** at the end of its details, then confirm.
+The confirmation says what else changes: any plan for that look is cleared, and
+its logged wears move to Wardrobe entries so every piece keeps its wear
+history. Wardrobe pieces are not changed, and other looks, including variations
+made from it, stay in the collection. A removed look's top-and-bottom pair can be
+generated again. Removal makes no AI calls.
+
+The look is kept in `outfits.json` with the status `removed` and a `removedAt`
+time, and its photo file stays in storage and backups, so it can be restored by
+hand. A delayed retry of the save or approval that created it cannot bring it
+back. Releases older than this one reject a collection containing a removed look
+rather than showing it.
+
 ## Log what you wore
 
 Open an outfit and choose **Wore this today**. The date uses your device's local
