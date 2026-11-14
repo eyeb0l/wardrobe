@@ -9,7 +9,8 @@ import { API, harness } from './test-helpers/outfit-harness.mjs';
 const body = (source, extra = {}) => ({ requestId: randomUUID(), name: 'A lighter variation', expectedGarmentIds: source.garmentIds, expectedImage: source.image, replacedGarmentId: 'top-1', replacementGarmentId: 'top-2', ...extra });
 const save = (h, extra = {}) => h.request('POST', `${API}/original-1/variations`, body(h.originals[0], extra));
 const photo = (h, saved, extra = {}, status = 202) => h.request('POST', `${API}/${saved.id}/photo`, { requestId: randomUUID(), modelReferenceId: 'default', ...extra }, status);
-const collection = async h => (await h.request('GET', API)).outfits;
+// Lists also name each image's current version; records returned by a write do not.
+const collection = async h => (await h.request('GET', API)).outfits.map(({ imageVersions, ...outfit }) => outfit);
 
 test('variations save real cutouts without AI, allow existing combinations, deduplicate retries and persist independently', async t => {
   const h = await harness(t, { env: { OPENAI_API_KEY: '' } });

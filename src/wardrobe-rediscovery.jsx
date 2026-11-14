@@ -50,7 +50,7 @@ function ReadyLook({ outfit, itemsById, days, disabled, onOpen, onPlan, onImageE
     <OptimizedImage src={outfit.image} alt={`${outfit.name}, saved look`} sizes="120px" loading="eager" onLoad={() => mark(outfit.image)} onError={() => onImageError(outfit.image)} />
     <div><h4>{outfit.name}</h4><p>{outfit.occasion.map(value => value.replaceAll('-', ' ')).join(' · ')}</p><p>{ready ? 'All pieces are Ready.' : 'Checking images…'}</p></div>
     <div className="rediscovery-actions"><button className="secondary-button" type="button" disabled={disabled || !ready} onClick={() => onOpen(outfit.id)}>View look</button>{days.map((date, index) => <button key={date} className="secondary-button" type="button" disabled={disabled || !ready} onClick={() => onPlan(outfit.id, date)}>Plan for {index ? 'tomorrow' : 'today'}</button>)}</div>
-    <span hidden aria-hidden="true">{sources.filter(source => source !== outfit.image).map(source => <img key={source} src={source} alt="" onLoad={() => mark(source)} onError={() => onImageError(source)} />)}</span>
+    <span hidden aria-hidden="true">{sources.filter(source => source !== outfit.image).map(source => <OptimizedImage key={source} src={source} alt="" sizes="100px" loading="eager" onLoad={() => mark(source)} onError={() => onImageError(source)} />)}</span>
   </article>;
 }
 

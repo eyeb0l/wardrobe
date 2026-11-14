@@ -12,7 +12,8 @@ import { SetupFlow } from "./setup-flow.jsx";
 
 import { uiErrorMessage } from "./ui-error.mjs";
 
-import { wardrobeRequest, migrateBrowserEdits } from "./wardrobe-sync.mjs";
+import { wardrobeRequest, wardrobeRead, migrateBrowserEdits } from "./wardrobe-sync.mjs";
+import { rememberImageVersions } from "./image-versions.mjs";
 import { compareWardrobeItems, moveWithinCategory } from "../shared/wardrobe-order.mjs";
 import { garmentAvailability, inLaundry } from "../shared/garment-availability.mjs";
 import { ReorderableItem } from "./reorderable-item.jsx";
@@ -547,7 +548,11 @@ export function App() {
   const [route, setRoute] = useState(() => window.location.pathname.replace(/\/$/, "") || "/");
   const [shoppingOpened, setShoppingOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/shopping");
   const [outfitsOpened, setOutfitsOpened] = useState(() => window.location.pathname.replace(/\/$/, "") === "/outfits");
-  const [items, setItems] = useState([]);
+  const [items, setShownItems] = useState([]);
+  // The validator of the list on screen. Any local change to that list drops
+  // it, so "not modified" can only ever confirm exactly what is shown.
+  const wardrobeEtag = useRef(null);
+  const setItems = useCallback((update) => { wardrobeEtag.current = null; setShownItems(update); }, []);
   const collection = useOutfitCollection(route === "/outfits" || (route !== "/shopping" && items.length) ? route : "");
   const planningDays = usePlanningDays();
   const itemsById = useMemo(() => new Map(items.map(item => [item.id, item])), [items]);
@@ -619,9 +624,13 @@ export function App() {
         let migrationError = "";
         try { setSyncNotice(await migrateBrowserEdits(window.localStorage)); }
         catch (error) { migrationError = error.message; }
-        const loaded = await wardrobeRequest("/api/import/wardrobe");
+        const read = await wardrobeRead("/api/import/wardrobe", wardrobeEtag.current);
         if (version !== requestVersion.current) return;
-        setItems(loaded);
+        if (!read.notModified) {
+          rememberImageVersions(read.value);
+          setItems(read.value);
+          wardrobeEtag.current = read.etag;
+        }
         setOrderNeedsRefresh(false);
         setError(migrationError);
         setWardrobeReadError("");
@@ -631,7 +640,7 @@ export function App() {
     refreshing.current = refresh;
     try { await refresh; }
     finally { if (refreshing.current === refresh) refreshing.current = null; }
-  }, []);
+  }, [setItems]);
 
   useEffect(() => {
     refreshWardrobe();
@@ -803,12 +812,12 @@ export function App() {
 
   const addImportedItem = useCallback((newItem) => {
     setItems((current) => current.some((item) => item.id === newItem.id) ? current : [...current, newItem]);
-  }, []);
+  }, [setItems]);
 
   const attachImportedModeledImage = useCallback((jobId, modeledImage) => {
     const id = `import-${jobId}`;
     setItems((current) => current.map((item) => item.id === id ? { ...item, modeledImage } : item));
-  }, []);
+  }, [setItems]);
 
   return (
     <div className={`app-shell${selectedItem ? " has-selection" : ""}${rearranging || wearSelecting ? " is-arranging" : ""}`}>

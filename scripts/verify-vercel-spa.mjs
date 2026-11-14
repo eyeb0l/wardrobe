@@ -14,6 +14,24 @@ for (const [, asset] of html.matchAll(/(?:src|href)="(\/assets\/[^"?#]+)"/g)) {
   assert((await stat(path.join(outputDir, "static", asset))).isFile(), `Missing deployed asset: ${asset}`);
 }
 
+// The CDN must answer the app's own pages and its content-named assets itself.
+// Vercel anchors each `src`, and only routes before the filesystem check apply.
+const { routes } = JSON.parse(await readFile(path.join(outputDir, "config.json"), "utf8"));
+const early = routes.slice(0, routes.findIndex((route) => route.handle === "filesystem"));
+const matching = (pathname) => early.filter((route) => route.src && new RegExp(`^(?:${route.src})$`).test(pathname));
+for (const page of ["/outfits", "/shopping", "/outfits/", "/shopping/"]) {
+  assert(matching(page).some((route) => route.dest === "/index.html"), `${page} must be served as the static app shell`);
+}
+for (const other of ["/", "/outfits/look", "/api/outfits", "/assets/index.js"]) {
+  assert(!matching(other).some((route) => route.dest), `${other} must not be rewritten`);
+}
+const asset = html.match(/src="(\/assets\/index-[^"]+\.js)"/)[1];
+assert(matching(asset).some((route) => /^public, max-age=31536000, immutable$/.test(route.headers?.["cache-control"] ?? route.headers?.["Cache-Control"] ?? "")),
+  "Content-named assets must be cacheable for good");
+for (const mutable of ["/", "/index.html", "/sw.js", "/manifest.webmanifest", "/icon.svg"]) {
+  assert(!matching(mutable).some((route) => /immutable/.test(JSON.stringify(route.headers ?? {}))), `${mutable} must keep revalidating`);
+}
+
 // Test the actual deployed server with no source files or ancestor dependencies.
 const isolatedDir = await mkdtemp(path.join(tmpdir(), "wardrobe-spa-package-"));
 try {
@@ -42,7 +60,7 @@ try {
         assert(response.type?.startsWith("text/html"), route);
         assert.equal(response.body, expected, route + " must return Vite's built HTML");
       }
-      console.log("Vercel SPA verified: direct /shopping and /outfits requests return built HTML with deployed assets");
+      console.log("Vercel SPA verified: /shopping and /outfits are static shells with a server fallback, and hashed assets are immutable");
     } finally {
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }

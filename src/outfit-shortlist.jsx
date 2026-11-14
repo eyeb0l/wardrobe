@@ -8,6 +8,7 @@ import { WEATHER_DAY_LABELS, WeatherFitLine } from './outfit-weather.jsx';
 
 // Check only the current candidates, not the entire wardrobe. Failed sources
 // remove every affected look; ranking then fills the slot with the next choice.
+// A small display copy proves a cutout loads without fetching its full original.
 function ShortlistEntry({ outfit, pieces, lastWorn, unknownCount, weatherFit, itemsById, onOpen, onImageError }) {
   const [loaded, setLoaded] = useState(() => new Set());
   const sources = [...new Set([outfit.image, ...pieces.map(piece => itemsById.get(piece.id).image)])];
@@ -24,7 +25,7 @@ function ShortlistEntry({ outfit, pieces, lastWorn, unknownCount, weatherFit, it
             {!ready ? <span className="outfit-shortlist-meta">Checking images…</span> : null}
           </span>
         </button>
-        <span hidden aria-hidden="true">{sources.filter(source => source !== outfit.image).map(source => <img key={source} src={source} alt="" loading="eager" onLoad={() => markLoaded(source)} onError={() => onImageError(source)} />)}</span>
+        <span hidden aria-hidden="true">{sources.filter(source => source !== outfit.image).map(source => <OptimizedImage key={source} src={source} alt="" sizes="100px" loading="eager" onLoad={() => markLoaded(source)} onError={() => onImageError(source)} />)}</span>
         <details className="outfit-shortlist-history"><summary>Piece history</summary><ul>{pieces.map(piece => <li key={piece.id}><strong>{piece.name}</strong><span>{piece.count ? `${piece.count} ${piece.count === 1 ? 'day' : 'days'} logged · Last worn ${formatWearDate(piece.lastWorn)}` : 'No wears logged'}</span></li>)}</ul></details>
       </article>;
 }

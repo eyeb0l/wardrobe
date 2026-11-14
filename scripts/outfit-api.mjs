@@ -3,7 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, realpath, stat, writeFile, imageIdentity, containedFiles, currentStorage } from "./storage-fs.mjs";
 import path from "node:path";
 import sharp from "sharp";
-import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
+import { sendDisplayImage, sendOriginalImage, withImageVersions } from "./display-image.mjs";
+import { sendListJson } from "./list-response.mjs";
 import { normalizeModeledUpload } from "./modeled-upload.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
 import { DEFAULT_MODELED_MODEL, IMAGE_MODERATION, imageComplexity, providerAdvice } from "./image-request.mjs";
@@ -1202,7 +1203,11 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       if ((options.readOnly || options.serverless) && url.pathname === `${API}/jobs` && req.method === "GET") await loadJobs(undefined, { all: true });
       if (url.pathname === API && req.method === "GET") {
         const current = await manifest();
-        return sendJson(res, 200, { version: 1, outfits: await acceptedOutfits(current), plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] });
+        const outfits = await withImageVersions(await acceptedOutfits(current), ["image"], (address) => {
+          const name = acceptedFilename(address);
+          return name ? path.join(imageDir, name) : null;
+        });
+        return sendListJson(req, res, { version: 1, outfits, plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] });
       }
       const wornLook = url.pathname.match(/^\/api\/outfits\/garment-wears\/([a-fA-F0-9-]{36})\/look$/);
       if (wornLook && req.method === "POST") {

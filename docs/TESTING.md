@@ -34,6 +34,41 @@ shape, invalid output, missing key, one-at-a-time, edits made during the provide
 call win), manual edits/clears/conflicts and restart persistence, plus the hosted
 lease release for `/api/outfits/weather/estimate`. No paid model services are used.
 
+## Kept images, conditional lists and readiness checks
+
+Use the Node 22 installation, pinned Playwright and cached Chromium described under
+[Headless browser tests](#headless-browser-tests):
+
+```bash
+TMPDIR=/dev/shm node --test scripts/display-image.test.mjs scripts/list-response.test.mjs scripts/cloud-store.test.mjs
+WARDROBE_BROWSER_PORT=5733 \
+  WARDROBE_BROWSER_ARTIFACTS=/dev/shm/wardrobe-image-caching-browser \
+  npm run test:browser -- tests/browser/image-caching.spec.mjs
+rg --files /dev/shm/wardrobe-image-caching-browser
+npm run build:vercel   # also checks the static shell and asset caching rules
+```
+
+Choose an unused port and unique artifact directory. Unlike the other browser
+suites, `image-caching.spec.mjs` does not intercept the API: it writes a small
+synthetic wardrobe into the isolated `fixture-data` directory the test server
+was started with, uses the real list and image routes, and removes its files
+when it finishes. On desktop and mobile it checks that gallery images carry a
+version and are answered as immutable, that a reload shows them without an
+image request reaching the server, that returning to the window re-reads both
+lists as 304 and leaves the page untouched, that a change made on disk arrives
+in full, that replacing a picture under the same address is shown at a new
+address, and that opening Outfits and a piece with ready looks requests no
+original PNG. Inspect `image-caching-wardrobe.png`, `image-caching-outfits.png`
+and `browser-health.json` in each viewport's directory.
+
+The Node tests cover the version of an image on both stores (one metadata query
+when hosted), the cache policy for current, outdated and missing versions
+(including after a replacement and a deletion), 304 delivery, list validators
+across edits and replaced files, the browser reader, and the remembered
+versions. They use PGlite and an in-memory Blob stand-in; they do not contact
+Vercel. To check a deployed copy, read response headers on the protected
+Preview with `vercel curl <path> --deployment <preview-url> -- -sI`.
+
 ## Visual polish passes
 
 Layout and styling changes that span several views should run the full suite

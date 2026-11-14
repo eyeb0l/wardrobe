@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { PGlite } from '@electric-sql/pglite';
 import { createCloudStore, CLOUD_ROOT } from './cloud-store.mjs';
-import { encodeDisplayImage, sendDisplayImage } from './display-image.mjs';
+import { displayVersions, encodeDisplayImage, sendDisplayImage, withImageVersions } from './display-image.mjs';
 import { withStorage } from './storage-fs.mjs';
 import { DISPLAY_WIDTHS, displayImageSource } from '../shared/image-variants.mjs';
 
@@ -55,7 +55,7 @@ test('stored derivatives survive fresh instances and original replacement invali
   assert.equal(h.gets.filter(url=>url===originalUrl).length,before,'warm requests must not fetch the full PNG');
   assert.deepEqual(await h.store.readFile(h.file),h.original);
   const readCount=h.gets.length;
-  assert.deepEqual(await h.other().displayImage(h.file,320,`W/${first.etag}`),{etag:first.etag,notModified:true});
+  assert.deepEqual(await h.other().displayImage(h.file,320,`W/${first.etag}`),{etag:first.etag,version:first.version,notModified:true});
   assert.equal(h.gets.length,readCount,'304 must not fetch either image');
   const replacement=await sharp({create:{width:800,height:960,channels:4,background:'blue'}}).png().toBuffer();
   await h.store.withLease(()=>h.store.writeFile(h.file,replacement));
@@ -168,6 +168,8 @@ test('local variants reuse the content hash until the file is replaced in place 
 test('responsive URLs preserve version queries and never optimize uploads, SVGs, or external URLs',()=>{
   const src='/api/import/library/photo.png?v=attempt-2';
   assert.equal(displayImageSource(src,320),src+'&format=webp&w=320');
+  assert.equal(displayImageSource('/api/import/library/photo.png',320,'abc123'),'/api/import/library/photo.png?format=webp&w=320&v=abc123');
+  assert.equal(displayImageSource('/api/import/library/photo.png',320,''),'/api/import/library/photo.png?format=webp&w=320');
   for(const src of ['data:image/png;base64,abc','blob:abc','https://external.test/a.png','/api/import/assets/a/placeholder.svg','/api/secret.json'])assert.equal(displayImageSource(src),null);
 });
 
@@ -187,4 +189,84 @@ test('private original responses revalidate without Blob reads and never return 
   await h.store.withLease(()=>h.store.writeFile(h.file,replacement));
   const next=await request(first.headers.ETag);assert.equal(next.status,200);assert.deepEqual(next.bytes,replacement);assert.notEqual(next.headers.ETag,first.headers.ETag);
   await h.store.withLease(()=>h.store.rm(h.file));await assert.rejects(request(next.headers.ETag),{code:'ENOENT'});
+});
+
+const deliver = async (store, file, query, condition) => {
+  const headers = {}; let bytes;
+  const res = { statusCode: 200, setHeader(k, v) { headers[k] = v; }, end(value) { bytes = value; } };
+  const send = () => sendDisplayImage({ headers: { 'if-none-match': condition } }, res, file, new URL(`http://local/api/file?format=webp&w=320${query}`));
+  await (store ? withStorage(store, send) : send());
+  return { cache: headers['Cache-Control'], etag: headers.ETag, bytes, status: res.statusCode };
+};
+const KEEP = 'private, max-age=31536000, immutable', REVALIDATE = 'private, no-cache';
+
+test('a hosted address carrying the current version is kept; any other version still revalidates', async t => {
+  const h = await fixture(t);
+  const queries = []; const query = h.database.query;
+  h.database.query = async (sql, values) => { queries.push(sql); return query(sql, values); };
+  const versions = await withStorage(h.store, () => displayVersions([h.file, `${CLOUD_ROOT}/missing.png`, '/outside/photo.png']));
+  assert.equal(queries.length, 1, 'every path is named by one metadata query');
+  assert.deepEqual([...versions.keys()], [h.file], 'missing and outside paths have no version');
+  const version = versions.get(h.file);
+  assert.match(version, /^[a-f0-9]{20}$/);
+  assert.equal((await h.store.displayImage(h.file, 320)).version, version, 'the list and the delivery name the same image');
+
+  assert.equal((await deliver(h.store, h.file, '')).cache, REVALIDATE, 'an unversioned address behaves as before');
+  assert.equal((await deliver(h.store, h.file, '&v=0000')).cache, REVALIDATE);
+  const kept = await deliver(h.store, h.file, `&v=${version}`);
+  assert.equal(kept.cache, KEEP);
+  const reads = h.gets.length, confirmed = await deliver(h.store, h.file, `&v=${version}`, kept.etag);
+  assert.equal(confirmed.status, 304); assert.equal(confirmed.cache, KEEP); assert.equal(h.gets.length, reads);
+
+  // The same path now holds another image. The old address must never be kept
+  // with the new bytes, and the list hands out a new version.
+  const replacement = await sharp({ create: { width: 800, height: 960, channels: 4, background: 'blue' } }).png().toBuffer();
+  await h.store.withLease(() => h.store.writeFile(h.file, replacement));
+  const stale = await deliver(h.other(), h.file, `&v=${version}`);
+  assert.equal(stale.cache, REVALIDATE); assert.notEqual(stale.etag, kept.etag); assert.notDeepEqual(stale.bytes, kept.bytes);
+  const next = (await withStorage(h.store, () => displayVersions([h.file]))).get(h.file);
+  assert.notEqual(next, version);
+  assert.equal((await deliver(h.other(), h.file, `&v=${next}`)).cache, KEEP);
+  await h.store.withLease(() => h.store.rm(h.file));
+  assert.equal((await withStorage(h.store, () => displayVersions([h.file]))).size, 0);
+  await assert.rejects(deliver(h.store, h.file, `&v=${next}`), { code: 'ENOENT' }, 'a kept address is still refused once the image is gone');
+});
+
+test('a local address is kept only for the file it was listed with', async t => {
+  const fs = await import('node:fs/promises'), path = await import('node:path'), os = await import('node:os');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wardrobe-display-version-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'photo.png'), image = color => sharp({ create: { width: 400, height: 300, channels: 4, background: color } }).png().toBuffer();
+  await fs.writeFile(file, await image('#336699'));
+  const version = (await displayVersions([file, path.join(root, 'missing.png'), root])).get(file);
+  assert.match(version, /^[a-f0-9]{20}$/);
+  assert.equal((await displayVersions([file, path.join(root, 'missing.png'), root])).size, 1, 'missing files and directories have no version');
+  assert.equal((await deliver(null, file, '')).cache, REVALIDATE);
+  const kept = await deliver(null, file, `&v=${version}`);
+  assert.equal(kept.cache, KEEP);
+  assert.equal((await deliver(null, file, `&v=${version}`, kept.etag)).status, 304);
+  await fs.writeFile(file, await image('#993366'));
+  const stale = await deliver(null, file, `&v=${version}`);
+  assert.equal(stale.cache, REVALIDATE, 'a replaced file is never kept under its old address');
+  assert.notDeepEqual(stale.bytes, kept.bytes);
+  const next = (await displayVersions([file])).get(file);
+  assert.notEqual(next, version);
+  assert.equal((await deliver(null, file, `&v=${next}`)).cache, KEEP);
+});
+
+test('lists name each distinct image once, by the field that holds its address', async t => {
+  const fs = await import('node:fs/promises'), path = await import('node:path'), os = await import('node:os');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wardrobe-list-version-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'a.png'), 'a'); await fs.writeFile(path.join(root, 'b.png'), 'b');
+  const fileFor = address => address.startsWith('/img/') ? path.join(root, address.slice(5)) : null;
+  const records = [
+    { id: 'both', image: '/img/a.png', thumbnail: '/img/a.png', modeledImage: '/img/b.png' },
+    { id: 'gone', image: '/img/missing.png', thumbnail: null, modeledImage: null },
+    { id: 'elsewhere', image: 'https://external.test/a.png' },
+  ];
+  const [both, gone, elsewhere] = await withImageVersions(records, ['image', 'thumbnail', 'modeledImage'], fileFor);
+  assert.deepEqual(Object.keys(both.imageVersions), ['image', 'modeledImage']);
+  assert.notEqual(both.imageVersions.image, both.imageVersions.modeledImage);
+  assert.deepEqual(gone, { ...records[1], imageVersions: {} }, 'a listed record without images says so');
+  assert.deepEqual(elsewhere, { ...records[2], imageVersions: {} });
+  assert.equal(records[0].imageVersions, undefined, 'stored records are not changed');
 });

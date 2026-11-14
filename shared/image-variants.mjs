@@ -1,12 +1,15 @@
 export const DISPLAY_WIDTHS = [320, 640, 1280];
 export const DISPLAY_RECIPE = 'webp-q85-alpha100-v1';
 
-export function displayImageSource(src, width = 640) {
+// `version` is the server's name for the image currently at this address. An
+// address that carries it is answered as immutable, so it is only added here.
+export function displayImageSource(src, width = 640, version) {
   if (typeof src !== 'string' || !src.startsWith('/api/')) return null;
   const url = new URL(src, 'http://wardrobe.local');
   if (!/^\/api\/(?:import\/(?:library\/[\w.-]+\.(?:png|jpe?g|webp)|assets\/[a-f0-9-]{36}\/[\w.-]+\.(?:png|jpe?g|webp)|model-references\/(?:default|model-reference-[1-9]\d*))|outfits\/(?:images\/[\w.-]+\.png|jobs\/[a-f0-9-]{36}\/assets\/[\w.-]+\.png))$/i.test(url.pathname)) return null;
   url.searchParams.set('format', 'webp');
   url.searchParams.set('w', String(width));
+  if (version) url.searchParams.set('v', version);
   return url.pathname + url.search;
 }
 

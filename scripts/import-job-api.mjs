@@ -16,7 +16,8 @@ import { DEFAULT_GARMENT_MODEL, DEFAULT_MODELED_MODEL, IMAGE_MODERATION, imageCo
 import { prepareMarkup } from "./photo-markup.mjs";
 import path from "node:path";
 import sharp from "sharp";
-import { sendDisplayImage, sendOriginalImage } from "./display-image.mjs";
+import { sendDisplayImage, sendOriginalImage, withImageVersions } from "./display-image.mjs";
+import { sendListJson } from "./list-response.mjs";
 import { normalizeModeledUpload, normalizeReferenceUpload } from "./modeled-upload.mjs";
 import { modelReferenceImageUrl, publicModelReferences } from "./model-reference-url.mjs";
 import { MODELED_UPLOAD_BODY_BYTES } from "../shared/modeled-upload.mjs";
@@ -868,7 +869,11 @@ export function wardrobeImportApi(options = {}) {
       // guard applies there as on the authenticated deployment.
       assertSameOriginMutation(req);
       if (url.pathname === "/api/import/wardrobe" && req.method === "GET") {
-        return json(res, 200, (await loadImported()).filter(item => !item.hidden).map(publicLibraryItem));
+        const items = (await loadImported()).filter(item => !item.hidden).map(publicLibraryItem);
+        return sendListJson(req, res, await withImageVersions(items, ["image", "thumbnail", "modeledImage"], (address) => {
+          const name = address.match(/^\/api\/import\/library\/([\w.-]+\.(?:png|jpe?g|webp))$/i)?.[1];
+          return name ? path.join(libraryAssetDir, name) : null;
+        }));
       }
       if (url.pathname === "/api/import/config" && req.method === "GET") {
         return json(res, 200, await setupStatus());
