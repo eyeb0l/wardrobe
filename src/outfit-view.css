@@ -311,3 +311,16 @@
 .outfit-remove .outfit-action-row { margin-top: 12px; }
 .outfit-secondary.outfit-danger { border-color: var(--accent); color: var(--accent); }
 .outfit-secondary.outfit-danger:not(:disabled):hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* Editing a look's name and description, and browsing removed looks. */
+.outfit-edit-toggle { margin: -4px 0 10px; }
+.outfit-edit-details { display: grid; gap: 14px; margin: 16px 0 20px; border-top: 1px solid var(--line); padding-top: 16px; }
+.outfit-edit-details .outfit-action-row { margin: 0; }
+.outfit-history + .outfit-history { margin-top: 0; }
+.outfit-history > .outfit-removed-row { justify-content: flex-start; margin-bottom: 10px; padding-block: 10px; }
+.outfit-removed-row > span:nth-child(2) { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.outfit-removed-thumb { flex: 0 0 auto; width: 48px; height: 64px; overflow: hidden; border-radius: var(--radius-s); background: var(--well); }
+.outfit-removed-thumb img, .outfit-removed-thumb .outfit-photo-fallback { width: 100%; height: 100%; object-fit: cover; padding: 0; font-size: 0; }
+.outfit-restore { margin: 4px 0 22px; border-radius: var(--radius-m); padding: 16px 18px; background: var(--paper); }
+.outfit-restore > p { margin: 0 0 6px; }
+.outfit-restore > button { margin-top: 10px; }

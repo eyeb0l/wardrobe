@@ -61,14 +61,16 @@ test('removing a look takes it out of the collection, clears its plans and keeps
   await h.request('POST', `${API}/original-1/favourite`, { favourite: false }, 404);
   await h.request('POST', `${API}/original-1/wears`, { date: '2026-01-05' }, 404);
   await h.request('POST', `${API}/plans`, planBody(today, after.plansRevision, 'original-1'), 404);
-  await h.request('GET', `${API}/images/${path.basename(original.outfits[0].image)}`, undefined, 404);
+  // It stays browsable among removed looks, photo included.
+  assert.deepEqual(after.removedOutfits.map(item => [item.id, item.status]), [['original-1', 'removed']]);
+  assert.ok(Buffer.isBuffer(await h.request('GET', after.removedOutfits[0].image)));
   await h.request('POST', `${API}/missing/remove`, {}, 404);
   await h.request('POST', `${API}/original-2/remove`, {}, 403, { origin: 'https://other.invalid' });
   assert.equal(await readFile(file, 'utf8'), unchanged);
   assert.equal(h.requests.length, 0, 'removal never calls a model');
 });
 
-test('a removed generated look keeps its job reconciled and cannot be restored by a delayed retry', async t => {
+test('a removed generated look keeps its job reconciled and cannot be brought back by a delayed retry', async t => {
   const h = await harness(t);
   const job = await h.settled((await h.create(1)).id);
   await h.action(job, job.outfits[0], 'approve');
@@ -101,4 +103,84 @@ test('only the saved collection may hold removed looks', () => {
   assert.doesNotThrow(() => validateManifest({ version: 1, outfits: [look] }));
   assert.throws(() => validateManifest({ version: 1, outfits: [{ ...look, removedAt: 'yesterday' }] }), /removedAt/);
   assert.throws(() => validateManifest({ version: 1, outfits: [{ ...look, image: undefined }] }), /image/);
+});
+
+test('restoring a removed look returns it with the wears it still has and without its old plans', async t => {
+  const h = await harness(t, { env: { OPENAI_API_KEY: '' } });
+  const file = path.join(h.dataDir, 'outfits.json');
+  const [today] = planningDays();
+  await h.request('POST', `${API}/original-1/wears`, { date: '2026-01-04' });
+  const worn = await h.request('POST', `${API}/original-1/wears`, { date: '2026-01-06', garmentIds: ['top-1'] });
+  await h.request('POST', `${API}/plans`, planBody(today, 'initial', 'original-1'));
+  const removed = await h.request('POST', `${API}/original-1/remove`, {});
+  assert.deepEqual(removed.outfit.movedWearIds, worn.wearHistory.map(event => event.id));
+  // While removed, one of its wears is undone in Wardrobe; that one stays gone.
+  const undone = worn.wearHistory.find(event => event.date === '2026-01-06');
+  await h.request('POST', `${API}/garment-wears/${undone.id}/remove`, {});
+  const unrelated = await h.request('POST', `${API}/garment-wears`, { requestId: randomUUID(), date: '2026-01-05', garmentIds: ['top-2'], timezoneOffset: 0 });
+
+  const restored = await h.request('POST', `${API}/original-1/restore`, {});
+  assert.equal(restored.outfit.status, 'accepted');
+  assert.deepEqual(restored.outfit.wearHistory, worn.wearHistory.filter(event => event.id !== undone.id));
+  assert.deepEqual(restored.garmentWears, [unrelated.event]);
+  assert.ok(Buffer.isBuffer(await h.request('GET', restored.outfit.image)));
+
+  await h.restart();
+  const listed = await h.request('GET', API);
+  assert.deepEqual(listed.outfits.map(item => item.id).sort(), h.originals.map(item => item.id).sort());
+  assert.deepEqual(listed.removedOutfits, []);
+  assert.deepEqual(listed.plans, [], 'plans cleared by removal are not restored');
+  const saved = JSON.parse(await readFile(file, 'utf8')).outfits[0];
+  assert.equal(saved.status, 'accepted');
+  for (const key of ['removedAt', 'movedWearIds']) assert.equal(saved[key], undefined);
+  const manifestText = await readFile(file, 'utf8');
+  assert.doesNotThrow(() => validateManifest(JSON.parse(manifestText)));
+
+  // It is usable again, and a repeated restore changes nothing.
+  await h.request('POST', `${API}/original-1/favourite`, { favourite: true });
+  const unchanged = await readFile(file, 'utf8');
+  assert.equal((await h.request('POST', `${API}/original-1/restore`, {})).outfit.favourite, true);
+  assert.equal(await readFile(file, 'utf8'), unchanged);
+  await h.request('POST', `${API}/missing/restore`, {}, 404);
+  await h.request('POST', `${API}/original-2/restore`, {}, 403, { origin: 'https://other.invalid' });
+
+  // A look removed before wears were tracked comes back without any.
+  const legacy = JSON.parse(unchanged);
+  Object.assign(legacy.outfits[1], { status: 'removed', removedAt: new Date().toISOString() });
+  await writeFile(file, JSON.stringify(legacy));
+  assert.equal((await h.request('POST', `${API}/original-2/restore`, {})).outfit.wearHistory, undefined);
+  assert.equal(h.requests.length, 0);
+});
+
+test('a saved look can be renamed and its description edited, but not from a stale copy', async t => {
+  const h = await harness(t, { env: { OPENAI_API_KEY: '' } });
+  const file = path.join(h.dataDir, 'outfits.json');
+  const original = h.originals[0];
+  const expected = { name: original.name, reason: original.reason };
+  const edited = await h.request('POST', `${API}/original-1/details`, { name: '  Sunday market  ', reason: 'Easy layers for a slow morning.', expected });
+  assert.equal(edited.name, 'Sunday market');
+  assert.equal(edited.reason, 'Easy layers for a slow morning.');
+  assert.ok(Number.isFinite(Date.parse(edited.updatedAt)));
+  assert.equal(edited.garmentIds.join(), original.garmentIds.join());
+  const before = await readFile(file, 'utf8');
+  // A second device still showing the old text is refused rather than overwriting.
+  await h.request('POST', `${API}/original-1/details`, { name: 'Other name', reason: 'Other', expected }, 409);
+  const current = { name: edited.name, reason: edited.reason };
+  for (const body of [{ name: '', reason: 'x' }, { name: '   ', reason: 'x' }, { name: 'x'.repeat(121), reason: 'x' }, { name: 'x', reason: 'x'.repeat(601) }, { name: 'x', reason: null }]) {
+    await h.request('POST', `${API}/original-1/details`, { ...body, expected: current }, 400);
+  }
+  await h.request('POST', `${API}/original-1/details`, { name: 'x', reason: 'x' }, 409);
+  // Saving identical text writes nothing.
+  await h.request('POST', `${API}/original-1/details`, { name: edited.name, reason: edited.reason, expected: { name: edited.name, reason: edited.reason } });
+  assert.equal(await readFile(file, 'utf8'), before);
+  // An empty description is allowed.
+  await h.request('POST', `${API}/original-1/details`, { name: edited.name, reason: '', expected: { name: edited.name, reason: edited.reason } });
+  await h.restart();
+  const saved = (await h.request('GET', API)).outfits.find(item => item.id === 'original-1');
+  assert.deepEqual([saved.name, saved.reason], ['Sunday market', '']);
+  // Removed looks are not edited.
+  await h.request('POST', `${API}/original-2/remove`, {});
+  await h.request('POST', `${API}/original-2/details`, { name: 'x', reason: '', expected: { name: 'Original 2', reason: 'Original styling' } }, 404);
+  await h.request('POST', `${API}/original-3/details`, { name: 'x', reason: '', expected: { name: 'Original 3', reason: 'Original styling' } }, 403, { origin: 'https://other.invalid' });
+  assert.equal(h.requests.length, 0);
 });

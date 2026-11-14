@@ -285,7 +285,7 @@ Reviewed synthetic screenshots: [desktop plans](screenshots/plan-tomorrow/daily-
 [desktop variation selection](screenshots/plan-tomorrow/plan-variation-desktop.png),
 and [mobile variation selection](screenshots/plan-tomorrow/plan-variation-mobile.png).
 
-## Remove a saved look
+## Remove, restore and edit a saved look
 
 Use Node 22 and the pinned headless Chromium installation. Pick an unused port
 and a fresh artifact directory:
@@ -304,14 +304,23 @@ synthetic files in the server's isolated `fixture-data` directory, and removes
 them when it finishes. On desktop and mobile it checks the confirmation text,
 that **Keep it** changes nothing, that removal closes the look, clears its plan
 and survives a reload, the tombstone and moved wear written to `outfits.json`,
-and that the piece still shows its logged day in Wardrobe. Inspect
-`remove-confirm.png`, `after-remove.png` and every `browser-health.json`.
+and that the piece still shows its logged day in Wardrobe. It then opens the look
+from **Removed looks**, restores it (wear back on the look, plan not restored),
+renames it and edits its description, and checks the change after a reload and on
+disk. Finally it edits the look on disk while a draft is open and a focus refresh
+shows that edit: saving the stale draft gets a 409 and offers the current text,
+and the retry saves. Inspect `remove-confirm.png`, `after-remove.png`, `removed-list.png`,
+`removed-look.png`, `edit-details.png` and every `browser-health.json`.
 
 The Node tests cover idempotent repeats, 404 for missing or removed looks,
 cross-origin rejection, plan revision changes, garment history before and after,
 the freed generation pair, restart persistence, reconciling an approved job whose
 look was removed, refused approval and variation retries, and that jobs never
-accept the `removed` status. No model calls are made.
+accept the `removed` status. Restore tests cover returning moved wears except one
+undone in Wardrobe, plans staying cleared, idempotent repeats and looks removed
+before wears were tracked. Edit tests cover trimming, length limits, an empty
+description, stale-copy conflicts, no-op saves and refusing removed looks. No
+model calls are made.
 
 ## Garment availability
 

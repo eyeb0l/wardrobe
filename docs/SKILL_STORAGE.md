@@ -22,7 +22,7 @@ To reuse downloads, add `--reuse /path/to/previous/snapshot` and keep `--out` ne
 | --- | --- |
 | `library.json` | Current visible owned items and stable IDs |
 | `imported/FILENAME` | Original for a library record's `/api/import/library/FILENAME` |
-| `outfits.json` | Saved outfits, reserved IDs and previous garment combinations |
+| `outfits.json` | Saved outfits, reserved IDs and previous garment combinations; removed looks (`status: "removed"`) keep their IDs but free their combinations |
 | `model-reference.png` | Original reference with ID `default`, if present |
 | `model-reference-N.png` | Additional original reference with ID `model-reference-N`, N ≥ 2 |
 | `snapshot.json` | Successful capture marker, target and available reference mapping |

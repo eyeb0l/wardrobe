@@ -21,13 +21,14 @@ const collection = () => ({
   outfitPlansRevision: '0b6f4c1e-8d2a-4e3b-9c5d-7a1f2e3d4c5b',
 });
 
-test('a saved look can be removed after confirmation, clearing its plan and keeping its wear history', async ({ page, context }, info) => {
+test('a saved look can be removed, browsed and restored, then renamed and its description edited', async ({ page, context }, info) => {
   const data = path.resolve(info.project.outputDir, 'fixture-data');
   const health = { errors: [], failedRequests: [], httpErrors: [] };
   page.on('pageerror', (error) => health.errors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') health.errors.push(message.text()); });
+  // The only expected error response is the deliberate edit conflict below.
+  page.on('console', (message) => { if (message.type() === 'error' && !message.text().includes('409 (Conflict)')) health.errors.push(message.text()); });
   page.on('requestfailed', (request) => { if (!request.failure()?.errorText.includes('ERR_ABORTED')) health.failedRequests.push(request.url()); });
-  page.on('response', (response) => { if (response.status() >= 400) health.httpErrors.push(response.url()); });
+  page.on('response', (response) => { if (response.status() >= 400 && !(response.status() === 409 && response.url().endsWith('/morning/details'))) health.httpErrors.push(response.url()); });
   try {
     await mkdir(path.join(data, 'imported'), { recursive: true });
     await mkdir(path.join(data, 'outfit-images'), { recursive: true });
@@ -80,6 +81,72 @@ test('a saved look can be removed after confirmation, clearing its plan and keep
     await page.goto('/');
     await page.getByRole('button', { name: 'View Navy blouse' }).click();
     await expect(page.getByRole('region', { name: 'Wear history and ready looks' })).toContainText('1 day logged');
+
+    // Removed looks can be opened from the end of Outfits and restored.
+    await page.goto('/outfits');
+    await expect(page.locator('.outfit-card')).toHaveCount(1);
+    await page.locator('.outfit-removed-looks > summary').click();
+    await page.locator('.outfit-removed-row img').evaluate((image) => image.decode());
+    await page.locator('.outfit-removed-looks').screenshot({ path: info.outputPath('removed-list.png') });
+    await page.getByRole('button', { name: 'View removed look An easy morning' }).click();
+    await expect(dialog.getByRole('heading', { name: 'An easy morning' })).toBeVisible();
+    await expect(dialog.getByRole('region', { name: 'Restore this look' })).toContainText(/^Removed on .+\./);
+    await expect(dialog.getByRole('region', { name: 'Pieces in this outfit' })).toContainText('Navy blouse');
+    await dialog.locator('.outfit-detail-photo img').evaluate((image) => image.decode());
+    await page.screenshot({ path: info.outputPath('removed-look.png') });
+    const restoring = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/outfits/morning/restore');
+    await dialog.getByRole('button', { name: 'Restore look' }).click();
+    expect((await restoring).status()).toBe(200);
+    await expect(dialog.getByRole('status').filter({ hasText: 'Restored to your collection.' })).toBeVisible();
+    await expect(dialog).toContainText('1 wear logged');
+    await expect(page.locator('.outfit-card')).toHaveCount(2);
+    await expect(page.locator('.outfit-removed-looks')).toHaveCount(0);
+    await expect(page.locator('.outfit-plans')).not.toContainText('An easy morning');
+
+    // A saved look can be renamed and its description edited.
+    await dialog.getByRole('button', { name: 'Edit name and description' }).click();
+    const form = dialog.getByRole('form', { name: 'Edit An easy morning' });
+    await form.getByLabel('Name').fill('Sunday market');
+    await form.getByLabel('Description').fill('Easy layers for a slow morning.');
+    await form.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: info.outputPath('edit-details.png') });
+    await form.getByRole('button', { name: 'Save changes' }).click();
+    await expect(dialog.getByRole('heading', { name: 'Sunday market' })).toBeVisible();
+    await expect(dialog.getByRole('status').filter({ hasText: 'Name and description saved.' })).toBeVisible();
+    await expect(dialog.locator('.outfit-reason')).toHaveText('Easy layers for a slow morning.');
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByRole('button', { name: 'View Sunday market' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'View Sunday market' })).toBeVisible();
+    const final = JSON.parse(await readFile(path.join(data, 'outfits.json'), 'utf8'));
+    expect(final.outfits[0]).toMatchObject({ id: 'morning', status: 'accepted', name: 'Sunday market', reason: 'Easy layers for a slow morning.', wearHistory: [wear] });
+    expect(final.garmentWears).toEqual([]);
+
+    // A draft opened before another device's edit is refused, even after a
+    // focus refresh has shown that edit, and the current text is offered instead.
+    await page.getByRole('button', { name: 'View Sunday market' }).click();
+    await dialog.getByRole('button', { name: 'Edit name and description' }).click();
+    const draft = dialog.locator('form.outfit-edit-details');
+    await draft.getByLabel('Name').fill('Stale draft');
+    const elsewhere = JSON.parse(await readFile(path.join(data, 'outfits.json'), 'utf8'));
+    Object.assign(elsewhere.outfits[0], { name: 'Edited elsewhere', reason: 'From another device.' });
+    await writeFile(path.join(data, 'outfits.json'), JSON.stringify(elsewhere));
+    const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/outfits' && response.request().method() === 'GET');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    expect((await refreshed).status()).toBe(200);
+    await expect(dialog.getByRole('heading', { name: 'Edited elsewhere' })).toBeVisible();
+    await expect(draft.getByLabel('Name')).toHaveValue('Stale draft');
+    const conflict = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/outfits/morning/details');
+    await draft.getByRole('button', { name: 'Save changes' }).click();
+    expect((await conflict).status()).toBe(409);
+    await expect(draft.getByRole('alert')).toContainText('changed elsewhere');
+    await expect(draft.getByLabel('Name')).toHaveValue('Edited elsewhere');
+    await expect(draft.getByLabel('Description')).toHaveValue('From another device.');
+    expect(JSON.parse(await readFile(path.join(data, 'outfits.json'), 'utf8')).outfits[0]).toMatchObject({ name: 'Edited elsewhere', reason: 'From another device.' });
+    await draft.getByLabel('Name').fill('Reconciled');
+    await draft.getByRole('button', { name: 'Save changes' }).click();
+    await expect(dialog.getByRole('heading', { name: 'Reconciled' })).toBeVisible();
+    expect(JSON.parse(await readFile(path.join(data, 'outfits.json'), 'utf8')).outfits[0]).toMatchObject({ name: 'Reconciled', reason: 'From another device.' });
     await writeFile(info.outputPath('browser-health.json'), JSON.stringify(health, null, 2));
     expect(health).toEqual({ errors: [], failedRequests: [], httpErrors: [] });
   } finally {

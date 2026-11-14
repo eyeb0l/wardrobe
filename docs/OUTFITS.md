@@ -281,11 +281,32 @@ history. Wardrobe pieces are not changed, and other looks, including variations
 made from it, stay in the collection. A removed look's top-and-bottom pair can be
 generated again. Removal makes no AI calls.
 
-The look is kept in `outfits.json` with the status `removed` and a `removedAt`
-time, and its photo file stays in storage and backups, so it can be restored by
-hand. A delayed retry of the save or approval that created it cannot bring it
-back. Releases older than this one reject a collection containing a removed look
-rather than showing it.
+The look is kept in `outfits.json` with the status `removed`, a `removedAt` time
+and the IDs of the Wardrobe entries that now hold its wears; its photo stays in
+storage and backups. A delayed retry of the save or approval that created it
+cannot bring it back. Releases older than removal reject a collection containing
+a removed look rather than showing it.
+
+### Restore a removed look
+
+Removed looks are listed under **Removed looks** at the end of Outfits, newest
+first. Open one to see its photo, pieces and description, then choose **Restore
+look** to put it back in the collection. Its logged wears move back from Wardrobe
+entries, except any entry you removed in the meantime; garment history counts
+each day once either way. Plans cleared by the removal are not restored. Looks
+removed before this release come back without their wears, which stay as Wardrobe
+entries. A restored look can share its top-and-bottom pair with a look generated
+while it was removed.
+
+## Rename a look or edit its description
+
+In a saved look's details, choose **Edit name and description**. Names are up to
+120 characters and descriptions up to 600; a description may be empty. If the look
+was renamed or edited on another device since you opened it, saving is refused and
+the current text is reloaded so you can try again. Editing changes no photo, wear
+history or plan, and makes no AI calls. Accessory suggestions use the name and
+description, so fresh suggestions become available after an edit. Removed looks
+cannot be edited; restore them first.
 
 ## Log what you wore
 

@@ -8,6 +8,7 @@ import { uiErrorMessage } from './ui-error.mjs';
 // response must not replace a wear or plan just saved in the other view.
 export function useOutfitCollection(activeRoute) {
   const [outfits, setOutfits] = useState([]);
+  const [removedOutfits, setRemovedOutfits] = useState([]);
   const [garmentWears, setGarmentWears] = useState([]);
   const [plans, setPlans] = useState([]);
   const [plansRevision, setPlansRevision] = useState('initial');
@@ -30,7 +31,8 @@ export function useOutfitCollection(activeRoute) {
       failed.current = false; setLoadError('');
       if (notModified) return;
       rememberImageVersions(value.outfits);
-      setOutfits(value.outfits || []); setGarmentWears(value.garmentWears || []); setPlans(value.plans || []); setPlansRevision(value.plansRevision || 'initial');
+      rememberImageVersions(value.removedOutfits);
+      setOutfits(value.outfits || []); setRemovedOutfits(value.removedOutfits || []); setGarmentWears(value.garmentWears || []); setPlans(value.plans || []); setPlansRevision(value.plansRevision || 'initial');
       etag.current = validator; confirmed.current = value;
     },
     onError: error => { failed.current = true; setLoadError(uiErrorMessage(error)); },
@@ -41,7 +43,7 @@ export function useOutfitCollection(activeRoute) {
   const changed = useRef(null);
   if (!changed.current) {
     const local = setter => update => { etag.current = null; setter(update); };
-    changed.current = { setOutfits: local(setOutfits), setGarmentWears: local(setGarmentWears), setPlans: local(setPlans), setPlansRevision: local(setPlansRevision) };
+    changed.current = { setOutfits: local(setOutfits), setRemovedOutfits: local(setRemovedOutfits), setGarmentWears: local(setGarmentWears), setPlans: local(setPlans), setPlansRevision: local(setPlansRevision) };
   }
   const refresh = useCallback(() => resource.current.refresh({ force: true }).then(read => read?.value), []);
   useEffect(() => {
@@ -55,5 +57,5 @@ export function useOutfitCollection(activeRoute) {
     document.addEventListener('visibilitychange', focus);
     return () => { resource.current.cancel(); window.removeEventListener('focus', focus); document.removeEventListener('visibilitychange', focus); };
   }, [activeRoute]);
-  return { outfits, garmentWears, plans, plansRevision, ...changed.current, loading, loadError, setLoadError, refresh, resource: resource.current };
+  return { outfits, removedOutfits, garmentWears, plans, plansRevision, ...changed.current, loading, loadError, setLoadError, refresh, resource: resource.current };
 }

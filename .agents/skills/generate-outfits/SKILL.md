@@ -27,7 +27,7 @@ Assign each worker a disjoint set of outfit IDs plus the exact identity and garm
 
 ## 1. Inspect the wardrobe
 
-Read `$WORK/snapshot/library.json` and `$WORK/snapshot/outfits.json`. Use the shared metadata in that fresh snapshot; hidden and deleted items are excluded automatically. Reserve existing outfit IDs and top-and-bottom pairs so the new batch adds distinct looks without replacing saved outfits. Preserve all existing records and unknown fields. Resolve `/api/import/library/FILENAME` assets to `$WORK/snapshot/imported/FILENAME`, preserving the saved garment IDs. Use originals, not WebP display copies. Group items by:
+Read `$WORK/snapshot/library.json` and `$WORK/snapshot/outfits.json`. Use the shared metadata in that fresh snapshot; hidden and deleted items are excluded automatically. Reserve every existing outfit ID, including records with `status: "removed"`: those are looks the user removed from the collection, kept so they can be restored, and reusing their IDs makes the save fail. Reserve the top-and-bottom pairs of `accepted` outfits only, so the new batch adds distinct looks without replacing saved outfits; a removed look's pair may be used again. Leave removed looks out of garment-usage balancing and styling inspiration. Preserve all existing records and unknown fields. Resolve `/api/import/library/FILENAME` assets to `$WORK/snapshot/imported/FILENAME`, preserving the saved garment IDs. Use originals, not WebP display copies. Group items by:
 
 - `upperbody` — tops
 - `wholebody_up` — jackets and outer layers
@@ -82,7 +82,7 @@ Use the temporary `$WORK` directory established by the snapshot workflow. Build 
 }
 ```
 
-Set `modelReferenceId` to the selected reference and use unused lowercase hyphenated outfit IDs. Each top-and-bottom pair must be unique across the new batch and saved outfits; changing outerwear, shoes, accessories, tights, names or settings does not create a new pair. The manifest contains only the new batch, whose count is separate from the saved collection total.
+Set `modelReferenceId` to the selected reference and use unused lowercase hyphenated outfit IDs. Each top-and-bottom pair must be unique across the new batch and accepted saved outfits; changing outerwear, shoes, accessories, tights, names or settings does not create a new pair. The manifest contains only the new batch, whose count is separate from the saved collection total.
 
 ## 3. Prepare references and prompts
 
@@ -129,7 +129,7 @@ node --env-file=.env.cloud scripts/save-outfit-collection.mjs \
 
 The helper preserves previous records and unknown fields, validates current garment IDs, and uses the cloud writer lease. Images get immutable content-hash filenames. An identical rerun is safe; a conflicting outfit ID is rejected. Do not stop the hosted app, write a local manifest as a substitute, or rerun the initial migration.
 
-Read the returned `outfits` and `manifestPath`, verify the new batch has the requested count of unique accepted records, and inspect the original results and the authenticated production `/outfits` gallery. Check that prior records remain present. The gallery total can exceed the requested batch count. If saving or verification fails, keep the staged batch, reconcile the current store, and complete only the missing work; do not regenerate already accepted photographs merely because a save was uncertain.
+Read the returned `outfits` and `manifestPath`, verify the new batch has the requested count of unique accepted records, and inspect the original results and the authenticated production `/outfits` gallery. Check that prior records remain present; removed looks stay out of the gallery and appear under **Removed looks**. The gallery total can exceed the requested batch count. If saving or verification fails, keep the staged batch, reconcile the current store, and complete only the missing work; do not regenerate already accepted photographs merely because a save was uncertain.
 
 For an explicit local request, omit `--env-file=.env.cloud`, pass `--target local`, and follow the shared workflow's local writer-lock instructions. Local saving does not update production.
 
