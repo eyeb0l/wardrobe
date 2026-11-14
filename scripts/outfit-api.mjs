@@ -1086,6 +1086,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           .map(({ id, date, garmentIds, createdAt }) => ({ id, date, garmentIds: [...garmentIds], createdAt }));
         if (moved.length) current.garmentWears = [...wears, ...moved];
         delete outfit.wearHistory;
+        if (moved.length) outfit.movedWearIds = moved.map(event => event.id);
         const plans = current.outfitPlans || [];
         if (plans.some(plan => plan.outfitId === id)) {
           current.outfitPlans = plans.filter(plan => plan.outfitId !== id);
@@ -1094,7 +1095,48 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         Object.assign(outfit, { status: "removed", removedAt: now() });
         await atomicJson(path.join(dataDir, "outfits.json"), current);
       }
-      return { id, plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] };
+      return { id, outfit: savedOutfit(outfit), plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] };
+    });
+  }
+
+  // Restoring returns the wears that removal moved to Wardrobe entries, unless
+  // an entry was since undone. Plans cleared by removal are not restored.
+  async function restoreOutfit(id) {
+    return exclusive(async () => {
+      const current = await manifest();
+      const outfit = current.outfits.find(item => item.id === id && ["accepted", "removed"].includes(item.status));
+      if (!outfit) throw fail("Removed look not found", 404);
+      if (outfit.status === "removed") {
+        const moved = new Set(outfit.movedWearIds || []);
+        const returning = (current.garmentWears || []).filter(event => moved.has(event.id));
+        if (returning.length) {
+          current.garmentWears = current.garmentWears.filter(event => !moved.has(event.id));
+          outfit.wearHistory = returning.map(({ id, date, garmentIds, createdAt }) => ({ id, date, garmentIds: [...garmentIds], createdAt }));
+        }
+        delete outfit.movedWearIds;
+        delete outfit.removedAt;
+        outfit.status = "accepted";
+        await atomicJson(path.join(dataDir, "outfits.json"), current);
+      }
+      return { outfit: savedOutfit(outfit), garmentWears: current.garmentWears || [] };
+    });
+  }
+
+  // A rename or description edit applies only to the text the editor last saw.
+  function editDetails(id, input) {
+    const name = shortText(input.name, "outfit name (maximum 120 characters)", 120);
+    const reason = shortText(input.reason, "description (maximum 600 characters)", 600, false);
+    if (typeof input.expected?.name !== "string" || typeof input.expected?.reason !== "string") throw fail("Refresh this look before editing it.", 409);
+    return exclusive(async () => {
+      const current = await manifest();
+      const outfit = current.outfits.find(item => item.id === id && item.status === "accepted");
+      if (!outfit) throw fail("Saved outfit not found", 404);
+      if (outfit.name !== input.expected.name || (outfit.reason ?? "") !== input.expected.reason) throw fail("This look was changed elsewhere. Review its current name and description and try again.", 409);
+      if (outfit.name !== name || (outfit.reason ?? "") !== reason) {
+        Object.assign(outfit, { name, reason, updatedAt: now() });
+        await atomicJson(path.join(dataDir, "outfits.json"), current);
+      }
+      return savedOutfit(outfit);
     });
   }
 
@@ -1237,7 +1279,12 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           const name = acceptedFilename(address);
           return name ? path.join(imageDir, name) : null;
         });
-        return sendListJson(req, res, { version: 1, outfits, plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] });
+        const removed = current.outfits.filter(item => item.status === "removed").map(savedOutfit).sort((a, b) => (b.removedAt || "").localeCompare(a.removedAt || ""));
+        const removedOutfits = await withImageVersions(removed, ["image"], (address) => {
+          const name = acceptedFilename(address);
+          return name ? path.join(imageDir, name) : null;
+        });
+        return sendListJson(req, res, { version: 1, outfits, removedOutfits, plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] });
       }
       const wornLook = url.pathname.match(/^\/api\/outfits\/garment-wears\/([a-fA-F0-9-]{36})\/look$/);
       if (wornLook && req.method === "POST") {
@@ -1319,10 +1366,11 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
           ? sendJson(res, 200, await saveVariation(variation[1], input))
           : sendJson(res, 202, publicJob(await createVariationPhoto(variation[1], input)));
       }
-      const removal = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/remove$/);
-      if (removal && req.method === "POST") {
-        await readBody(req, 4096);
-        return sendJson(res, 200, await removeOutfit(removal[1]));
+      const lifecycle = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/(remove|restore|details)$/);
+      if (lifecycle && req.method === "POST") {
+        const input = await readBody(req, 8192);
+        if (lifecycle[2] === "details") return sendJson(res, 200, await editDetails(lifecycle[1], input));
+        return sendJson(res, 200, await (lifecycle[2] === "remove" ? removeOutfit : restoreOutfit)(lifecycle[1]));
       }
       const activity = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/(favourite|wears|wears\/([a-f0-9-]{36})\/remove)$/);
       if (activity && req.method === "POST") {
@@ -1397,7 +1445,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       const asset = url.pathname.match(/^\/api\/outfits\/images\/([^/]+)$/);
       if (asset && req.method === "GET") {
         const filename = asset[1];
-        if (!FILE.test(filename) || !(await manifest()).outfits.some((item) => item.status === "accepted" && acceptedFilename(item.image) === filename)) throw fail("Image not found", 404);
+        if (!FILE.test(filename) || !(await manifest()).outfits.some((item) => ["accepted", "removed"].includes(item.status) && acceptedFilename(item.image) === filename)) throw fail("Image not found", 404);
         const file = await containedFile(imageDir, filename);
         if (await sendDisplayImage(req, res, file, url)) return;
         if (await sendOriginalImage(req, res, file)) return;

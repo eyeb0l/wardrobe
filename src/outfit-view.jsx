@@ -1,6 +1,6 @@
 import { CopyPrompt, ModeledPhotoUpload } from "./modeled-photo-controls.jsx";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowCounterClockwise, ArrowRight, Check, Plus, Trash, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowRight, Check, PencilSimple, Plus, Trash, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { ImageCompare } from "./image-compare.jsx";
 import { createViewResource } from "./view-resource.mjs";
@@ -182,7 +182,7 @@ function OutfitDetails({ outfit, itemsById, visible = true, activity, children, 
       {activity}
       {outfit.status !== "accepted" && outfit.weather ? <p className="outfit-weather-meta">Weather: {weatherRangeText(outfit.weather)}{outfit.weather.note ? `. ${outfit.weather.note}` : ""}</p> : null}
       <GarmentReferences outfit={outfit} itemsById={itemsById} />
-      {outfit.status === "accepted" && outfit.imageKind !== "cutouts" && showAccessories ? <AccessorySuggestions key={`${outfit.id}:${outfit.image}`} outfit={outfit} visible={visible} /> : null}
+      {outfit.status === "accepted" && outfit.imageKind !== "cutouts" && showAccessories ? <AccessorySuggestions key={JSON.stringify([outfit.id, outfit.image, outfit.name, outfit.reason])} outfit={outfit} visible={visible} /> : null}
       {children}
     </div>
   </div>;
@@ -201,6 +201,54 @@ function RemoveOutfit({ outfit, plannedDates, busy, removing, onRemove }) {
     ].filter(Boolean).join(" ")}</p>
     <div className="outfit-action-row"><button type="button" className="outfit-secondary outfit-danger" disabled={busy} onClick={() => onRemove(outfit)}><Trash size={16} aria-hidden="true" />{removing ? "Removing…" : "Remove look"}</button><button type="button" className="outfit-secondary" disabled={busy} onClick={() => setConfirming(false)}>Keep it</button></div>
   </div>;
+}
+
+function EditOutfitDetails({ outfit, busy, onSave }) {
+  const id = useId();
+  const [draft, setDraft] = useState(null);
+  // The text the draft started from. A refresh while editing must not move it,
+  // or a stale draft would overwrite an edit made on another device.
+  const [base, setBase] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const open = (source) => { const text = { name: source.name, reason: source.reason ?? "" }; setBase(text); setDraft(text); };
+  if (!draft) return <button type="button" className="outfit-text-button outfit-edit-toggle" disabled={busy} onClick={() => { setError(""); open(outfit); }}><PencilSimple size={15} aria-hidden="true" />Edit name and description</button>;
+  const submit = async (event) => {
+    event.preventDefault();
+    setSaving(true); setError("");
+    const result = await onSave(outfit, { name: draft.name, reason: draft.reason }, base);
+    setSaving(false);
+    if (!result.error) { setDraft(null); return; }
+    setError(result.error);
+    // On a conflict, show the current text so a retry is made against it.
+    if (result.current) open(result.current);
+    else if (result.current === null) setDraft(null);
+  };
+  return <form className="outfit-edit-details" onSubmit={submit} aria-label={`Edit ${outfit.name}`}>
+    <label className="outfit-field" htmlFor={`${id}-name`}><span>Name</span><input id={`${id}-name`} value={draft.name} maxLength={120} required disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label>
+    <label className="outfit-field" htmlFor={`${id}-reason`}><span>Description</span><textarea id={`${id}-reason`} value={draft.reason} maxLength={600} rows={4} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))} /></label>
+    {error ? <p className="outfit-error" role="alert">{error}</p> : null}
+    <div className="outfit-action-row"><button type="submit" className="outfit-primary" disabled={busy || saving || !draft.name.trim()}>{saving ? "Saving…" : "Save changes"}</button><button type="button" className="outfit-secondary" disabled={saving} onClick={() => setDraft(null)}>Cancel</button></div>
+  </form>;
+}
+
+const removedDate = (value) => value ? new Date(value).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+
+function RemovedLookRow({ outfit, onOpen }) {
+  return <button className="outfit-job-row outfit-removed-row" type="button" onClick={() => onOpen(outfit.id)} aria-label={`View removed look ${outfit.name}`}>
+    <span className="outfit-removed-thumb"><Photo src={outfit.image} alt="" sizes="56px" /></span>
+    <span><strong>{outfit.name}</strong><span className="outfit-job-summary">{outfit.removedAt ? `Removed ${removedDate(outfit.removedAt)}` : "Removed"}</span></span>
+    <span className="outfit-job-link">View<ArrowRight size={17} aria-hidden="true" /></span>
+  </button>;
+}
+
+function RestoreOutfit({ outfit, busy, restoring, error, onRestore }) {
+  return <section className="outfit-restore" aria-label="Restore this look">
+    <p><strong>{outfit.removedAt ? `Removed on ${removedDate(outfit.removedAt)}.` : "This look was removed."}</strong></p>
+    <p className="outfit-small">Restoring puts it back in your collection with its logged wears. Plans it had are not restored.</p>
+    {error ? <p className="outfit-error" role="alert">{error}</p> : null}
+    <button type="button" className="outfit-primary" disabled={busy} onClick={() => onRestore(outfit)}><ArrowCounterClockwise size={16} aria-hidden="true" />{restoring ? "Restoring…" : "Restore look"}</button>
+  </section>;
 }
 
 function setupMessage(config) {
@@ -323,7 +371,7 @@ export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = 
   const [removedNotice, setRemovedNotice] = useState("");
   const [discoveryConfig, setDiscoveryConfig] = useState(null);
   const [discoveryResult, setDiscoveryResult] = useState(null);
-  const { outfits, setOutfits, plans, setPlans, plansRevision, setPlansRevision, loading, loadError, setLoadError, refresh: refreshCollection } = collection;
+  const { outfits, setOutfits, removedOutfits, setRemovedOutfits, plans, setPlans, plansRevision, setPlansRevision, loading, loadError, setLoadError, refresh: refreshCollection } = collection;
   const planningDays = usePlanningDays();
   const weather = useWeather(planningDays);
   const [jobs, setJobs] = useState([]);
@@ -507,6 +555,7 @@ export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = 
       if (!mounted.current) return;
       collection.resource.invalidate(); resources.current.config.invalidate();
       setOutfits(current => current.filter(item => item.id !== saved.id));
+      setRemovedOutfits(current => [saved.outfit, ...current.filter(item => item.id !== saved.id)]);
       setPlans(saved.plans); setPlansRevision(saved.plansRevision); collection.setGarmentWears(saved.garmentWears);
       setRemovedNotice(`${outfit.name} was removed from your collection.`);
       if (isActive.current) { setModal(null); refreshConfig(); }
@@ -516,6 +565,52 @@ export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = 
         collection.resource.invalidate();
         await refreshCollection().catch(() => {});
       }
+    } finally { busy.current = false; if (mounted.current) setBusyKey(""); }
+  };
+  const restoreOutfit = async (outfit) => {
+    if (busy.current) return;
+    busy.current = true;
+    setBusyKey(`restore-${outfit.id}`); setActionError(""); setActivityNotice(null); setRemovedNotice("");
+    collection.resource.invalidate();
+    try {
+      const saved = await request(`${API}/${encodeURIComponent(outfit.id)}/restore`, { method: "POST", body: "{}" });
+      if (!mounted.current) return;
+      collection.resource.invalidate(); resources.current.config.invalidate();
+      setRemovedOutfits(current => current.filter(item => item.id !== saved.outfit.id));
+      setOutfits(current => [...current.filter(item => item.id !== saved.outfit.id), saved.outfit]);
+      collection.setGarmentWears(saved.garmentWears);
+      setActivityNotice({ outfitId: saved.outfit.id, text: "Restored to your collection." });
+      if (isActive.current) { setModal({ type: "outfit", id: saved.outfit.id }); refreshConfig(); }
+    } catch (error) {
+      if (mounted.current) {
+        setActionError(uiErrorMessage(error));
+        collection.resource.invalidate();
+        await refreshCollection().catch(() => {});
+      }
+    } finally { busy.current = false; if (mounted.current) setBusyKey(""); }
+  };
+  // Returns { error } for the form; a conflict also returns the refreshed look
+  // (null once it is no longer in the collection).
+  const saveDetails = async (outfit, body, expected) => {
+    if (busy.current) return { error: "Wait for the current change to finish." };
+    busy.current = true;
+    setBusyKey(`details-${outfit.id}`); setActionError(""); setActivityNotice(null);
+    collection.resource.invalidate();
+    try {
+      const saved = await request(`${API}/${encodeURIComponent(outfit.id)}/details`, { method: "POST", body: JSON.stringify({ ...body, expected }) });
+      if (!mounted.current) return {};
+      collection.resource.invalidate();
+      setOutfits(current => current.map(item => item.id === saved.id ? saved : item));
+      setActivityNotice({ outfitId: saved.id, text: "Name and description saved." });
+      return {};
+    } catch (error) {
+      let current;
+      if (mounted.current) {
+        collection.resource.invalidate();
+        const refreshed = await refreshCollection().catch(() => undefined);
+        if (error.status === 409 && refreshed) current = refreshed.outfits?.find(item => item.id === outfit.id) ?? null;
+      }
+      return { error: uiErrorMessage(error), current };
     } finally { busy.current = false; if (mounted.current) setBusyKey(""); }
   };
   const openJob = (id) => { setActionError(""); setModal({ type: "job", id }); };
@@ -582,6 +677,7 @@ export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = 
   const currentJobs = jobs.filter(needsAttention);
   const previousJobs = jobs.filter((job) => !needsAttention(job));
   const selectedOutfit = modal?.type === "outfit" ? outfits.find((outfit) => outfit.id === modal.id) : null;
+  const selectedRemoved = modal?.type === "removed" ? removedOutfits.find((outfit) => outfit.id === modal.id) : null;
   const selectedJob = modal?.type === "job" ? jobs.find((job) => job.id === modal.id) : null;
 
   return <main className="outfit-page">
@@ -612,11 +708,13 @@ export function OutfitView({ collection, items = EMPTY_ITEMS, wardrobeLoading = 
     {!loading && outfits.length > 0 && !displayedOutfits.length ? <div className="outfit-empty"><h2>No outfits match.</h2><p>{hasFilters ? "Try another occasion or piece, or clear your filters." : "Try another search or browse all saved outfits."}</p></div> : null}
     {displayedOutfits.length ? <section className="outfit-grid" aria-label={currentDiscovery ? "Matching saved outfits" : "Your outfit collection"}>{displayedOutfits.map((outfit, index) => <article className="outfit-card-entry" key={outfit.id}><button className="outfit-card" type="button" onClick={() => { setActionError(""); setModal({ type: "outfit", id: outfit.id }); }} aria-label={`View ${outfit.name}`}><div className="outfit-card-photo"><Photo src={outfit.image} alt={`${outfit.name}, ${outfit.imageKind === "cutouts" ? "cutout preview" : "modelled outfit"}`} priority={index < 3} /></div><div className="outfit-card-caption"><h2>{outfit.name}</h2><ArrowRight size={19} aria-hidden="true" /><p>{outfit.imageKind === "cutouts" ? "Cutout preview · " : ""}{occasionText(outfit)}</p><p><WearSummary outfit={outfit} /></p>{outfit.garmentIds.some(id => inLaundry(itemsById.get(id))) ? <p>Pieces in laundry</p> : null}</div></button><FavouriteButton outfit={outfit} busy={!!busyKey} onChange={changeActivity} compact /></article>)}</section> : null}
     {previousJobs.length ? <details className="outfit-history"><summary>Previous generations <span>({previousJobs.length})</span></summary>{previousJobs.map((job) => <JobRow key={job.id} job={job} onOpen={openJob} />)}</details> : null}
+    {removedOutfits.length ? <details className="outfit-history outfit-removed-looks"><summary>Removed looks <span>({removedOutfits.length})</span></summary>{removedOutfits.map((outfit) => <RemovedLookRow key={outfit.id} outfit={outfit} onOpen={id => { setActionError(""); setModal({ type: "removed", id }); }} />)}</details> : null}
     {active && modal?.type === "generate" ? <OutfitModal title="Generate outfits" className="outfit-generate-modal" onClose={closeModal}>{!config && refreshingConfig ? <p className="outfit-form-intro" role="status">Loading generation settings…</p> : <GenerateForm config={config} configError={configError} refreshing={refreshingConfig} onRefresh={refreshConfig} busy={!!busyKey} error={actionError} onSubmit={startGeneration} requiredGarmentId={modal.requiredGarmentId} itemsById={itemsById} onRemoveGarment={() => setModal({ type: "generate" })} />}</OutfitModal> : null}
     {active && modal?.type === "plan" ? <OutfitModal className="outfit-plan-modal" title={modal.date === planningDays[0] ? "Plan for today" : "Plan for tomorrow"} onClose={closeModal}><PlanChooser key={`${modal.date}-${modal.id || ''}-${modal.fromDate || ''}`} date={modal.date} fromDate={modal.fromDate} initialId={modal.id} plans={plans} outfits={outfits} itemsById={itemsById} days={planningDays} busy={!!busyKey || availabilityBusy} unavailable={planUnavailable} error={actionError} onRefresh={refreshPlans} onSave={savePlan} weather={weather} /></OutfitModal> : null}
     {active && modal?.type === "weather-location" ? <OutfitModal className="outfit-plan-modal" title={weather.location ? "Weather location" : "Add weather"} onClose={closeModal}><WeatherLocationForm weather={weather} onDone={closeModal} /></OutfitModal> : null}
     {active && modal?.type === "weather-backfill" ? <OutfitModal className="outfit-plan-modal" title="Add weather details" onClose={() => { closeModal(); void recoverWeather(); }}><WeatherBackfill outfits={outfits} hasApiKey={!!config?.hasApiKey} onSaved={saveWeather} /></OutfitModal> : null}
-    {active && selectedOutfit ? <OutfitModal title={selectedOutfit.name} onClose={closeModal}><OutfitDetails outfit={selectedOutfit} itemsById={itemsById} visible={visible} activity={<><OutfitActivity key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} busy={!!busyKey || availabilityBusy} error={actionError} notice={activityNotice} onChange={changeActivity} onAvailabilityChange={onAvailabilityChange} wardrobeError={wardrobeError} onRefreshWardrobe={onRefreshWardrobe}><div className="outfit-variation-actions">{planningDays.map((date, index) => <button key={date} type="button" className="outfit-secondary" disabled={!!busyKey || availabilityBusy || !!planUnavailable} onClick={() => openPlan(date, selectedOutfit.id)}>Plan for {index ? "tomorrow" : "today"}</button>)}<button type="button" className="outfit-secondary" disabled={!!busyKey} onClick={() => openVariation(selectedOutfit)}>Change one piece</button>{selectedOutfit.imageKind === "cutouts" && selectedOutfit.variationOf ? <button type="button" className="outfit-secondary" disabled={!!busyKey} onClick={() => openPhoto(selectedOutfit)}>{jobs.some(job => job.targetOutfitId === selectedOutfit.id && needsAttention(job)) ? "View photo progress" : "Create modelled photo"}</button> : null}</div></OutfitActivity><OutfitWeather key={`weather-${selectedOutfit.id}`} outfit={selectedOutfit} weather={weather} hasApiKey={!!config?.hasApiKey} disabled={!!busyKey || !!loadError} onSaved={saveWeather} onConflict={recoverWeather} /><RemoveOutfit key={`remove-${selectedOutfit.id}`} outfit={selectedOutfit} plannedDates={plans.filter(plan => plan.outfitId === selectedOutfit.id).map(plan => plan.date)} busy={!!busyKey || availabilityBusy} removing={busyKey === `remove-${selectedOutfit.id}`} onRemove={removeOutfit} /></>}>{discoveryConfig?.ready && selectedOutfit.imageKind !== "cutouts" ? <OwnedItemSwaps key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} fingerprint={fingerprint} active={visible} onSelect={swap => openVariation(selectedOutfit, swap)} /> : null}</OutfitDetails></OutfitModal> : null}
+    {active && selectedOutfit ? <OutfitModal title={selectedOutfit.name} onClose={closeModal}><OutfitDetails outfit={selectedOutfit} itemsById={itemsById} visible={visible} activity={<><EditOutfitDetails key={`edit-${selectedOutfit.id}`} outfit={selectedOutfit} busy={!!busyKey || availabilityBusy} onSave={saveDetails} /><OutfitActivity key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} busy={!!busyKey || availabilityBusy} error={actionError} notice={activityNotice} onChange={changeActivity} onAvailabilityChange={onAvailabilityChange} wardrobeError={wardrobeError} onRefreshWardrobe={onRefreshWardrobe}><div className="outfit-variation-actions">{planningDays.map((date, index) => <button key={date} type="button" className="outfit-secondary" disabled={!!busyKey || availabilityBusy || !!planUnavailable} onClick={() => openPlan(date, selectedOutfit.id)}>Plan for {index ? "tomorrow" : "today"}</button>)}<button type="button" className="outfit-secondary" disabled={!!busyKey} onClick={() => openVariation(selectedOutfit)}>Change one piece</button>{selectedOutfit.imageKind === "cutouts" && selectedOutfit.variationOf ? <button type="button" className="outfit-secondary" disabled={!!busyKey} onClick={() => openPhoto(selectedOutfit)}>{jobs.some(job => job.targetOutfitId === selectedOutfit.id && needsAttention(job)) ? "View photo progress" : "Create modelled photo"}</button> : null}</div></OutfitActivity><OutfitWeather key={`weather-${selectedOutfit.id}`} outfit={selectedOutfit} weather={weather} hasApiKey={!!config?.hasApiKey} disabled={!!busyKey || !!loadError} onSaved={saveWeather} onConflict={recoverWeather} /><RemoveOutfit key={`remove-${selectedOutfit.id}`} outfit={selectedOutfit} plannedDates={plans.filter(plan => plan.outfitId === selectedOutfit.id).map(plan => plan.date)} busy={!!busyKey || availabilityBusy} removing={busyKey === `remove-${selectedOutfit.id}`} onRemove={removeOutfit} /></>}>{discoveryConfig?.ready && selectedOutfit.imageKind !== "cutouts" ? <OwnedItemSwaps key={selectedOutfit.id} outfit={selectedOutfit} itemsById={itemsById} fingerprint={fingerprint} active={visible} onSelect={swap => openVariation(selectedOutfit, swap)} /> : null}</OutfitDetails></OutfitModal> : null}
+    {active && selectedRemoved ? <OutfitModal title={selectedRemoved.name} onClose={closeModal}><OutfitDetails outfit={selectedRemoved} itemsById={itemsById} visible={visible} showAccessories={false} activity={<RestoreOutfit outfit={selectedRemoved} busy={!!busyKey} restoring={busyKey === `restore-${selectedRemoved.id}`} error={actionError} onRestore={restoreOutfit} />} /></OutfitModal> : null}
     {active && modal?.type === "variation" ? <OutfitModal title="Change one piece" onClose={closeModal}><OutfitVariation outfit={modal.source} itemsById={itemsById} initialSwap={modal.initialSwap} busy={!!busyKey} error={actionError} onSave={saveVariation} onCancel={() => { setActionError(""); setModal({ type: "outfit", id: modal.source.id }); }} /></OutfitModal> : null}
     {active && photoOutfit ? <OutfitModal title="Create modelled photo" className="outfit-generate-modal" onClose={closeModal}>{!config && refreshingConfig ? <p role="status">Loading generation settings…</p> : <GenerateForm key={photoOutfit.id} config={config} configError={configError} refreshing={refreshingConfig} onRefresh={refreshConfig} busy={!!busyKey} error={actionError} itemsById={itemsById} photoOutfit={photoOutfit} onSubmit={body => mutate("photo", `${API}/${encodeURIComponent(photoOutfit.id)}/photo`, body, job => { if (isActive.current) setModal({ type: "job", id: job.id }); })} />}</OutfitModal> : null}
     {active && selectedJob ? <OutfitModal title={selectedJob.targetOutfitId ? "Modelled photo" : `${selectedJob.count} outfit ${selectedJob.count === 1 ? "idea" : "ideas"}`} className="outfit-review-modal" onClose={closeModal}><ReviewJob key={selectedJob.id} job={selectedJob} itemsById={itemsById} busy={!!busyKey} error={actionError} onAction={outfitAction} onRetryJob={retryJob} visible={visible} imageChecksReady={config?.imageChecks?.ready} /></OutfitModal> : null}
