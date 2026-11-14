@@ -7,7 +7,7 @@ import { validStoredWeather } from "../shared/outfit-weather.mjs";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const ID = /^[a-z0-9][a-z0-9-]{0,159}$/;
 const FILE = /^[a-z0-9][a-z0-9._-]*\.png$/i;
-const OUTFIT_STATUSES = ["planned", "generating", "generated", "review", "accepted", "rejected", "failed"];
+const OUTFIT_STATUSES = ["planned", "generating", "generated", "review", "accepted", "rejected", "failed", "removed"];
 const JOB_STATUSES = ["planning", "generating", "review", "complete", "failed"];
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const text = (value) => typeof value === "string";
@@ -93,10 +93,11 @@ function validateOutfit(record, file, prefix, job = false) {
   requireValue(text(record.name) && Boolean(record.name.trim()), file, `${prefix}.name`);
   requireValue(strings(record.occasion), file, `${prefix}.occasion`);
   requireValue(strings(record.garmentIds) && record.garmentIds.length > 0 && record.garmentIds.every((id) => ID.test(id)) && new Set(record.garmentIds).size === record.garmentIds.length, file, `${prefix}.garmentIds`);
-  requireValue(OUTFIT_STATUSES.includes(record.status) && (!job || record.status !== "generated"), file, `${prefix}.status`);
+  // "removed" marks a saved look taken out of the collection; jobs never use it.
+  requireValue(OUTFIT_STATUSES.includes(record.status) && (!job || !["generated", "removed"].includes(record.status)), file, `${prefix}.status`);
   for (const key of ["reason", "setting", "modelReferenceId"]) optional(record, key, text, file, prefix);
   for (const key of ["prompt", "error"]) optional(record, key, nullableText, file, prefix);
-  for (const key of ["createdAt", "updatedAt"]) optional(record, key, timestamp, file, prefix);
+  for (const key of ["createdAt", "updatedAt", "removedAt"]) optional(record, key, timestamp, file, prefix);
   optional(record, "favourite", (value) => typeof value === "boolean", file, prefix);
   optional(record, "variationOf", (value) => text(value) && ID.test(value) && value !== record.id, file, prefix);
   optional(record, "garmentWearId", (value) => text(value) && UUID.test(value), file, prefix);
@@ -109,7 +110,7 @@ function validateOutfit(record, file, prefix, job = false) {
     && event.garmentIds.every((id) => ID.test(id)) && new Set(event.garmentIds).size === event.garmentIds.length)
     && new Set(events.map((event) => event.id)).size === events.length
     && new Set(events.map((event) => event.date)).size === events.length, file, prefix);
-  if (record.status === "accepted") requireValue(Boolean(acceptedFilename(record.image)), file, `${prefix}.image`);
+  if (["accepted", "removed"].includes(record.status)) requireValue(Boolean(acceptedFilename(record.image)), file, `${prefix}.image`);
   else if (record.image !== undefined && record.image !== null) {
     const candidate = job && text(record.image) && record.image.match(/^\/api\/outfits\/jobs\/([a-f0-9-]+)\/assets\/([^/]+)$/i);
     requireValue(Boolean(acceptedFilename(record.image) || (candidate && UUID.test(candidate[1]) && FILE.test(candidate[2]))), file, `${prefix}.image`);

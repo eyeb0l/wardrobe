@@ -232,7 +232,8 @@ export function wardrobeOutfitApi(options = {}) {
   function reconcileAccepted(job, saved) {
     let changed = false;
     for (const outfit of job.outfits) {
-      const accepted = saved.outfits.find((item) => item.id === (job.targetOutfitId || outfit.id) && item.status === "accepted" && (!job.targetOutfitId || item.variationPhotoId === outfit.id));
+      // A look removed after approval still records that the approval committed.
+      const accepted = saved.outfits.find((item) => item.id === (job.targetOutfitId || outfit.id) && ["accepted", "removed"].includes(item.status) && (!job.targetOutfitId || item.variationPhotoId === outfit.id));
       if (!accepted) {
         if (outfit.status === "accepted") throw fail(`Accepted outfit ${outfit.id} is missing from outfits.json. Restore matching collection and job files from the same backup.`, 503);
         continue;
@@ -1007,6 +1008,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       const current = await manifest();
       const existing = current.outfits.find(outfit => outfit.id === id);
       if (existing) {
+        if (existing.status === "removed") throw fail("This look was removed. Reopen the wear entry to save it again.", 409);
         if (existing.garmentWearId !== entryId || existing.name !== name || JSON.stringify(existing.occasion) !== JSON.stringify([occasion])
           || [...existing.garmentIds].sort().join('|') !== [...ids].sort().join('|')) throw fail("This save request was already used for another look. Reopen the wear entry.", 409);
         return receipt(existing, true);
@@ -1044,6 +1046,7 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
       const ids = input.expectedGarmentIds.map(id => id === input.replacedGarmentId ? input.replacementGarmentId : id);
       const existing = saved.outfits.find(outfit => outfit.id === id);
       if (existing) {
+        if (existing.status === "removed") throw fail("This variation was removed. Reopen the original outfit.", 409);
         if (existing.variationOf !== sourceId || existing.name !== name || JSON.stringify(existing.garmentIds) !== JSON.stringify(ids)) throw fail("This save request was already used for another variation. Reopen the original outfit.", 409);
         return { ...existing, image: `${API}/images/${acceptedFilename(existing.image)}` };
       }
@@ -1065,6 +1068,33 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         imageKind: "cutouts", image: `${API}/images/${filename}`, status: "accepted", createdAt: now() };
       await atomicJson(path.join(dataDir, "outfits.json"), { ...saved, outfits: [...saved.outfits, record] });
       return record;
+    });
+  }
+
+  // Removal keeps a tombstone: approved jobs still reconcile against it, and a
+  // delayed save or approval retry cannot bring the look back.
+  async function removeOutfit(id) {
+    return exclusive(async () => {
+      const current = await manifest();
+      const outfit = current.outfits.find(item => item.id === id && ["accepted", "removed"].includes(item.status));
+      if (!outfit) throw fail("Saved outfit not found", 404);
+      if (outfit.status === "accepted") {
+        // The days this look was worn stay in garment history as wardrobe entries.
+        const wears = current.garmentWears || [];
+        const known = new Set([...wears.map(event => event.id), ...(current.removedGarmentWearIds || [])]);
+        const moved = (outfit.wearHistory || []).filter(event => !known.has(event.id))
+          .map(({ id, date, garmentIds, createdAt }) => ({ id, date, garmentIds: [...garmentIds], createdAt }));
+        if (moved.length) current.garmentWears = [...wears, ...moved];
+        delete outfit.wearHistory;
+        const plans = current.outfitPlans || [];
+        if (plans.some(plan => plan.outfitId === id)) {
+          current.outfitPlans = plans.filter(plan => plan.outfitId !== id);
+          current.outfitPlansRevision = randomUUID();
+        }
+        Object.assign(outfit, { status: "removed", removedAt: now() });
+        await atomicJson(path.join(dataDir, "outfits.json"), current);
+      }
+      return { id, plans: current.outfitPlans || [], plansRevision: current.outfitPlansRevision || "initial", garmentWears: current.garmentWears || [] };
     });
   }
 
@@ -1288,6 +1318,11 @@ Inventory: ${JSON.stringify(values.map(({ file, ...item }, index) => ({ ...item,
         return variation[2] === "variations"
           ? sendJson(res, 200, await saveVariation(variation[1], input))
           : sendJson(res, 202, publicJob(await createVariationPhoto(variation[1], input)));
+      }
+      const removal = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/remove$/);
+      if (removal && req.method === "POST") {
+        await readBody(req, 4096);
+        return sendJson(res, 200, await removeOutfit(removal[1]));
       }
       const activity = url.pathname.match(/^\/api\/outfits\/([a-z0-9-]{1,160})\/(favourite|wears|wears\/([a-f0-9-]{36})\/remove)$/);
       if (activity && req.method === "POST") {

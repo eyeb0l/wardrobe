@@ -285,6 +285,34 @@ Reviewed synthetic screenshots: [desktop plans](screenshots/plan-tomorrow/daily-
 [desktop variation selection](screenshots/plan-tomorrow/plan-variation-desktop.png),
 and [mobile variation selection](screenshots/plan-tomorrow/plan-variation-mobile.png).
 
+## Remove a saved look
+
+Use Node 22 and the pinned headless Chromium installation. Pick an unused port
+and a fresh artifact directory:
+
+```bash
+export PATH=$HOME/.local/opt/dev-tools/node22/node-v22.23.3-linux-x64/bin:$PATH
+TMPDIR=/dev/shm node --test scripts/outfit-removal.test.mjs scripts/outfit-activity.test.mjs scripts/outfit-plans.test.mjs
+WARDROBE_BROWSER_PORT=5847 \
+  WARDROBE_BROWSER_ARTIFACTS=/dev/shm/wardrobe-outfit-removal-browser \
+  npm run test:browser -- tests/browser/outfit-removal.spec.mjs
+rg --files /dev/shm/wardrobe-outfit-removal-browser
+```
+
+Like `image-caching.spec.mjs`, the browser test uses the real local API with
+synthetic files in the server's isolated `fixture-data` directory, and removes
+them when it finishes. On desktop and mobile it checks the confirmation text,
+that **Keep it** changes nothing, that removal closes the look, clears its plan
+and survives a reload, the tombstone and moved wear written to `outfits.json`,
+and that the piece still shows its logged day in Wardrobe. Inspect
+`remove-confirm.png`, `after-remove.png` and every `browser-health.json`.
+
+The Node tests cover idempotent repeats, 404 for missing or removed looks,
+cross-origin rejection, plan revision changes, garment history before and after,
+the freed generation pair, restart persistence, reconciling an approved job whose
+look was removed, refused approval and variation retries, and that jobs never
+accept the `removed` status. No model calls are made.
+
 ## Garment availability
 
 The availability tests use the existing Node 22 and pinned headless Chromium
